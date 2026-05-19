@@ -15,3 +15,7 @@ export function verifyAccessToken(token: string): { userId: string; email: strin
 export function verifyRefreshToken(token: string): { userId: string } {
   return jwt.verify(token, process.env.JWT_REFRESH_SECRET as string) as { userId: string };
 }
+
+export function verifyToken(token: string): { userId: string; email?: string } {
+  return jwt.verify(token, process.env.JWT_SECRET as string) as { userId: string; email?: string };
+}
