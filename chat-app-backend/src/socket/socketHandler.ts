@@ -107,6 +107,68 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    socket.on('message:edit', async (data: { messageId: string; conversationId: string; content: string }) => {
+      try {
+        const { messageId, conversationId, content } = data;
+        const trimmed = content.trim();
+        if (!trimmed) return;
+
+        const message = await Message.findOne({ _id: messageId, conversationId, senderId: userId });
+        if (!message) return; // solo el autor puede editar
+
+        const updated = await Message.findByIdAndUpdate(
+          messageId,
+          { content: trimmed, editedAt: new Date() },
+          { new: true }
+        );
+
+        io.to(conversationId).emit('message:edited', {
+          messageId,
+          conversationId,
+          content: trimmed,
+          editedAt: updated?.editedAt,
+        });
+      } catch {
+        socket.emit('error', { message: 'Error editando mensaje' });
+      }
+    });
+
+    socket.on('message:delete', async (data: { messageId: string; conversationId: string; deleteFor: 'me' | 'everyone' }) => {
+      try {
+        const { messageId, conversationId, deleteFor } = data;
+
+        const message = await Message.findOne({ _id: messageId, conversationId });
+        if (!message) return;
+
+        if (deleteFor === 'everyone') {
+          if (message.senderId.toString() !== userId) return; // solo el autor
+          await Message.findByIdAndUpdate(messageId, { isDeletedForEveryone: true });
+          io.to(conversationId).emit('message:deleted', {
+            messageId,
+            conversationId,
+            deletedForEveryone: true,
+          });
+        } else {
+          await Message.findByIdAndUpdate(messageId, { $addToSet: { deletedFor: userId } });
+          // Solo emitir al socket propio
+          socket.emit('message:deleted', {
+            messageId,
+            conversationId,
+            deletedForEveryone: false,
+            userId,
+          });
+        }
+      } catch {
+        socket.emit('error', { message: 'Error eliminando mensaje' });
+      }
+    });
+
+    socket.on('conversation:join', async (data: { conversationId: string }) => {
+      const { conversationId } = data;
+      const valid = await Conversation.findOne({ _id: conversationId, participants: userId }).select('_id');
+      if (valid) socket.join(conversationId);
+    });
+
     socket.on('typing:start', (data: { conversationId: string }) => {
       socket.to(data.conversationId).emit('typing:start', { userId, conversationId: data.conversationId });
     });

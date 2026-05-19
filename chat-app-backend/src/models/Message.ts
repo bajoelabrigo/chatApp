@@ -10,6 +10,9 @@ export interface IMessage extends Document {
   type: MessageType;
   status: MessageStatus;
   readBy: Types.ObjectId[];
+  deletedFor: Types.ObjectId[];
+  isDeletedForEveryone: boolean;
+  editedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,6 +25,9 @@ const MessageSchema = new Schema<IMessage>(
     type: { type: String, enum: ['text', 'image', 'audio', 'document'], default: 'text' },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
     readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    deletedFor: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    isDeletedForEveryone: { type: Boolean, default: false },
+    editedAt: { type: Date },
   },
   { timestamps: true }
 );
