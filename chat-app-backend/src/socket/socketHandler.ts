@@ -48,9 +48,9 @@ export function setupSocketHandlers(io: Server) {
     // Avisar a contactos que está online
     io.emit('user:online', { userId });
 
-    socket.on('message:send', async (data: { conversationId: string; content: string; type?: string }) => {
+    socket.on('message:send', async (data: { conversationId: string; content: string; type?: string; fileName?: string; fileSize?: number }) => {
       try {
-        const { conversationId, content, type = 'text' } = data;
+        const { conversationId, content, type = 'text', fileName, fileSize } = data;
 
         const conversation = await Conversation.findOne({
           _id: conversationId,
@@ -63,6 +63,8 @@ export function setupSocketHandlers(io: Server) {
           senderId: userId,
           content,
           type,
+          fileName,
+          fileSize,
           status: 'sent',
           readBy: [userId],
         });

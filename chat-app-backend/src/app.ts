@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth.routes';
 import conversationRoutes from './routes/conversation.routes';
+import uploadRoutes from './routes/upload.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 
 const app = express();
@@ -21,6 +22,7 @@ app.use(express.json());
 
 app.use('/auth', authRoutes);
 app.use('/conversations', conversationRoutes);
+app.use('/upload', uploadRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

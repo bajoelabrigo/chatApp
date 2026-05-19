@@ -8,6 +8,8 @@ export interface IMessage extends Document {
   senderId: Types.ObjectId;
   content: string;
   type: MessageType;
+  fileName?: string;
+  fileSize?: number;
   status: MessageStatus;
   readBy: Types.ObjectId[];
   deletedFor: Types.ObjectId[];
@@ -23,6 +25,8 @@ const MessageSchema = new Schema<IMessage>(
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true },
     type: { type: String, enum: ['text', 'image', 'audio', 'document'], default: 'text' },
+    fileName: { type: String },
+    fileSize: { type: Number },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
     readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     deletedFor: [{ type: Schema.Types.ObjectId, ref: 'User' }],
