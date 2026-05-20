@@ -3,6 +3,7 @@ import { verifyToken } from '../services/jwtService';
 import { Message } from '../models/Message';
 import { Conversation } from '../models/Conversation';
 import { User } from '../models/User';
+import { deleteCloudinaryAsset } from '../services/cloudinaryService';
 
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
@@ -41,6 +42,9 @@ export function setupSocketHandlers(io: Server) {
     const userId = (socket as any).userId as string;
     addOnlineUser(userId, socket.id);
 
+    // Personal room so REST controllers can target this user
+    socket.join(`user:${userId}`);
+
     // Unir al socket a todas sus conversaciones activas
     const conversations = await Conversation.find({ participants: userId }).select('_id');
     conversations.forEach((c) => socket.join(c._id.toString()));
@@ -48,15 +52,32 @@ export function setupSocketHandlers(io: Server) {
     // Avisar a contactos que está online
     io.emit('user:online', { userId });
 
-    socket.on('message:send', async (data: { conversationId: string; content: string; type?: string; fileName?: string; fileSize?: number }) => {
+    socket.on('message:send', async (data: {
+      conversationId: string;
+      content: string;
+      type?: string;
+      fileName?: string;
+      fileSize?: number;
+      cloudinaryPublicId?: string;
+    }) => {
       try {
-        const { conversationId, content, type = 'text', fileName, fileSize } = data;
+        const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId } = data;
 
         const conversation = await Conversation.findOne({
           _id: conversationId,
           participants: userId,
         });
         if (!conversation) return;
+
+        const otherParticipants = conversation.participants
+          .map((p) => p.toString())
+          .filter((p) => p !== userId);
+
+        // Block check only applies to 1-on-1 chats
+        const blockedBySomeone = !conversation.isGroup && await User.exists({
+          _id: { $in: otherParticipants },
+          blockedUsers: userId,
+        });
 
         const message = await Message.create({
           conversationId,
@@ -65,6 +86,7 @@ export function setupSocketHandlers(io: Server) {
           type,
           fileName,
           fileSize,
+          cloudinaryPublicId: cloudinaryPublicId ?? undefined,
           status: 'sent',
           readBy: [userId],
         });
@@ -76,14 +98,16 @@ export function setupSocketHandlers(io: Server) {
 
         const populated = await message.populate('senderId', 'name avatar');
 
+        if (blockedBySomeone) {
+          // Only echo back to sender — recipient never sees it
+          socket.emit('message:new', populated);
+          return;
+        }
+
         // Emitir a todos en la room (incluyendo el emisor para confirmar)
         io.to(conversationId).emit('message:new', populated);
 
         // Marcar como entregado para los participantes online
-        const otherParticipants = conversation.participants
-          .map((p) => p.toString())
-          .filter((p) => p !== userId);
-
         const anyOnline = otherParticipants.some(isUserOnline);
         if (anyOnline) {
           await Message.findByIdAndUpdate(message._id, { status: 'delivered' });
@@ -145,6 +169,10 @@ export function setupSocketHandlers(io: Server) {
         if (deleteFor === 'everyone') {
           if (message.senderId.toString() !== userId) return; // solo el autor
           await Message.findByIdAndUpdate(messageId, { isDeletedForEveryone: true });
+          // Clean up Cloudinary asset if this was a media message
+          if (message.cloudinaryPublicId && message.type !== 'text') {
+            deleteCloudinaryAsset(message.cloudinaryPublicId, message.type as any);
+          }
           io.to(conversationId).emit('message:deleted', {
             messageId,
             conversationId,

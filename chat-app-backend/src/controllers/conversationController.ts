@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Types } from 'mongoose';
 import { Conversation } from '../models/Conversation';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
@@ -6,16 +7,82 @@ import { User } from '../models/User';
 export async function getConversations(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
+    const archived = req.query.archived === 'true';
+    const favorite = req.query.favorite === 'true';
 
-    const conversations = await Conversation.find({ participants: userId })
+    const query: any = { participants: userId };
+    if (favorite) {
+      query.favoritedBy = userId; // all favorites regardless of archive state
+    } else if (archived) {
+      query.archivedBy = userId;
+    } else {
+      query.archivedBy = { $ne: userId };
+    }
+
+    const conversations = await Conversation.find(query)
       .populate('participants', 'name avatar email')
-      .populate('lastMessage')
-      .sort({ lastMessageAt: -1 });
+      .populate({ path: 'lastMessage', populate: { path: 'senderId', select: 'name avatar' } })
+      .sort({ lastMessageAt: -1 })
+      .lean();
 
-    res.json(conversations);
+    const currentUser = await User.findById(userId).select('blockedUsers').lean();
+    const blockedSet = new Set(
+      (currentUser?.blockedUsers ?? []).map((id: any) => id.toString())
+    );
+
+    const result = conversations.map((conv) => {
+      const otherUser = (conv.participants as any[]).find(
+        (p: any) => p._id.toString() !== userId
+      );
+      return {
+        ...conv,
+        isPinned: (conv.pinnedBy ?? []).some((id: any) => id.toString() === userId),
+        isArchived: archived,
+        isFavorite: (conv.favoritedBy ?? []).some((id: any) => id.toString() === userId),
+        isBlocked: otherUser ? blockedSet.has(otherUser._id.toString()) : false,
+      };
+    });
+
+    res.json(result);
   } catch {
     res.status(500).json({ error: 'Error obteniendo conversaciones' });
   }
+}
+
+async function toggleConvField(
+  conversationId: string,
+  userId: string,
+  field: 'pinnedBy' | 'archivedBy' | 'favoritedBy',
+  res: Response
+): Promise<void> {
+  const conv = await Conversation.findOne({ _id: conversationId, participants: userId });
+  if (!conv) { res.status(404).json({ error: 'Conversación no encontrada' }); return; }
+
+  const arr = conv[field] as Types.ObjectId[];
+  const isSet = arr.some((id) => id.toString() === userId);
+
+  await Conversation.findByIdAndUpdate(
+    conversationId,
+    isSet ? { $pull: { [field]: userId } } : { $addToSet: { [field]: userId } }
+  );
+
+  const key = field === 'pinnedBy' ? 'pinned' : field === 'archivedBy' ? 'archived' : 'favorited';
+  res.json({ [key]: !isSet });
+}
+
+export async function togglePin(req: Request, res: Response) {
+  try { await toggleConvField(req.params.id, (req as any).userId, 'pinnedBy', res); }
+  catch { res.status(500).json({ error: 'Error al fijar conversación' }); }
+}
+
+export async function toggleArchive(req: Request, res: Response) {
+  try { await toggleConvField(req.params.id, (req as any).userId, 'archivedBy', res); }
+  catch { res.status(500).json({ error: 'Error al archivar conversación' }); }
+}
+
+export async function toggleFavorite(req: Request, res: Response) {
+  try { await toggleConvField(req.params.id, (req as any).userId, 'favoritedBy', res); }
+  catch { res.status(500).json({ error: 'Error al marcar como favorito' }); }
 }
 
 export async function createOrGetConversation(req: Request, res: Response) {

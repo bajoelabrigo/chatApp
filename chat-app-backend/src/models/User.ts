@@ -1,10 +1,12 @@
-import { Schema, model, Document } from 'mongoose';
+import { Schema, model, Document, Types } from 'mongoose';
 
 export interface IUser extends Document {
   googleId: string;
   email: string;
   name: string;
   avatar?: string;
+  blockedUsers: Types.ObjectId[];
+  expoPushToken?: string;
   createdAt: Date;
   lastLogin: Date;
 }
@@ -16,6 +18,8 @@ const UserSchema = new Schema<IUser>(
     name: { type: String, required: true },
     avatar: { type: String },
     lastLogin: { type: Date, default: Date.now },
+    blockedUsers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    expoPushToken: { type: String },
   },
   { timestamps: true }
 );

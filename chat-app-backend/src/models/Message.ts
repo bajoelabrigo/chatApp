@@ -10,6 +10,7 @@ export interface IMessage extends Document {
   type: MessageType;
   fileName?: string;
   fileSize?: number;
+  cloudinaryPublicId?: string;
   status: MessageStatus;
   readBy: Types.ObjectId[];
   deletedFor: Types.ObjectId[];
@@ -27,6 +28,7 @@ const MessageSchema = new Schema<IMessage>(
     type: { type: String, enum: ['text', 'image', 'audio', 'document'], default: 'text' },
     fileName: { type: String },
     fileSize: { type: Number },
+    cloudinaryPublicId: { type: String },
     status: { type: String, enum: ['sent', 'delivered', 'read'], default: 'sent' },
     readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     deletedFor: [{ type: Schema.Types.ObjectId, ref: 'User' }],
