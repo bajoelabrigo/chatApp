@@ -21,6 +21,7 @@ export async function getPrayerRequests(req: Request, res: Response) {
 
     const requests = await PrayerRequest.find({ groupId, isAnswered: answered })
       .populate('authorId', 'name avatar')
+      .populate('prayingUsers.userId', 'name avatar')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -28,8 +29,9 @@ export async function getPrayerRequests(req: Request, res: Response) {
       ...r,
       authorId: r.isAnonymous ? null : r.authorId,
       isMyRequest: (r.authorId as any)?._id?.toString() === userId || r.authorId?.toString() === userId,
-      isPraying: r.prayingUsers.some((p: any) => p.userId.toString() === userId),
+      isPraying: r.prayingUsers.some((p: any) => p.userId?._id?.toString() === userId || p.userId?.toString() === userId),
       prayingCount: r.prayingUsers.length,
+      prayingUsers: r.prayingUsers,
     }));
 
     res.json(result);
@@ -112,6 +114,7 @@ export async function togglePray(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId, requestId } = req.params;
+    const { message } = req.body;
 
     if (!await assertMember(groupId, userId)) return res.status(404).json({ error: 'Grupo no encontrado' });
 
@@ -124,15 +127,21 @@ export async function togglePray(req: Request, res: Response) {
     if (isPraying) {
       request.prayingUsers = request.prayingUsers.filter((p) => p.userId.toString() !== userId);
     } else {
-      request.prayingUsers.push({ userId: userObjId, prayedAt: new Date() });
+      request.prayingUsers.push({ userId: userObjId, prayedAt: new Date(), message: message?.trim() || undefined });
     }
     await request.save();
 
-    const prayingCount = request.prayingUsers.length;
-    const io = getIO();
-    if (io) io.to(groupId).emit('prayer:pray', { requestId, userId, prayingCount });
+    const populated = await PrayerRequest.findById(request._id)
+      .populate('prayingUsers.userId', 'name avatar')
+      .lean();
 
-    res.json({ prayingCount, isPraying: !isPraying });
+    const prayingCount = request.prayingUsers.length;
+    const prayingUsers = populated?.prayingUsers ?? [];
+
+    const io = getIO();
+    if (io) io.to(groupId).emit('prayer:pray', { requestId, userId, prayingCount, prayingUsers });
+
+    res.json({ prayingCount, isPraying: !isPraying, prayingUsers });
   } catch {
     res.status(500).json({ error: 'Error actualizando oración' });
   }

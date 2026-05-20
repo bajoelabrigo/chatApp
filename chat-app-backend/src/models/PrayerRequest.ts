@@ -3,6 +3,7 @@ import { Schema, model, Document, Types } from 'mongoose';
 interface PrayingEntry {
   userId: Types.ObjectId;
   prayedAt: Date;
+  message?: string;
 }
 
 export interface IPrayerRequest extends Document {
@@ -28,6 +29,7 @@ const PrayerRequestSchema = new Schema<IPrayerRequest>(
       {
         userId: { type: Schema.Types.ObjectId, ref: 'User' },
         prayedAt: { type: Date, default: Date.now },
+        message: { type: String, maxlength: 200 },
         _id: false,
       },
     ],
