@@ -82,7 +82,7 @@ export async function createPrayerRequest(req: Request, res: Response) {
       { groupId, screen: 'prayer' }
     );
 
-    res.status(201).json({ ...populated, prayingCount: 0, isPraying: false, isMyRequest: true });
+    res.status(201).json({ ...populated, prayingCount: 0, isPraying: false, isMyRequest: true, prayingUsers: [] });
   } catch {
     res.status(500).json({ error: 'Error creando petición' });
   }
