@@ -12,7 +12,7 @@ const ReportSchema = new Schema<IReport>(
   {
     reporterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     targetId: { type: Schema.Types.ObjectId, required: true },
-    targetType: { type: String, enum: ['group'], required: true },
+    targetType: { type: String, enum: ['group', 'user'], required: true },
     reason: { type: String, default: '' },
   },
   { timestamps: true }

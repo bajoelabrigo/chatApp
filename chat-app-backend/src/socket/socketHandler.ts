@@ -8,6 +8,9 @@ import { deleteCloudinaryAsset } from '../services/cloudinaryService';
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
 
+// callId -> { callerId, calleeId }
+const activeCalls = new Map<string, { callerId: string; calleeId: string }>();
+
 function addOnlineUser(userId: string, socketId: string) {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
   onlineUsers.get(userId)!.add(socketId);
@@ -46,8 +49,18 @@ export function setupSocketHandlers(io: Server) {
     socket.join(`user:${userId}`);
 
     // Unir al socket a todas sus conversaciones activas
-    const conversations = await Conversation.find({ participants: userId }).select('_id');
+    const conversations = await Conversation.find({ participants: userId }).select('_id participants');
     conversations.forEach((c) => socket.join(c._id.toString()));
+
+    // Tell this socket which contacts are already online
+    const participantIds = conversations.flatMap((c) =>
+      (c.participants as any[]).map((p) => p.toString()).filter((id) => id !== userId)
+    );
+    const uniqueIds = [...new Set<string>(participantIds)];
+    const onlineNow = uniqueIds.filter((id) => isUserOnline(id));
+    if (onlineNow.length > 0) {
+      socket.emit('users:online', { userIds: onlineNow });
+    }
 
     // Avisar a contactos que está online
     io.emit('user:online', { userId });
@@ -207,9 +220,119 @@ export function setupSocketHandlers(io: Server) {
       socket.to(data.conversationId).emit('typing:stop', { userId, conversationId: data.conversationId });
     });
 
+    // ── Group call (LiveKit signaling) ──────────────────────
+
+    socket.on('call:group:start', async (data: {
+      conversationId: string;
+      callType: 'audio' | 'video';
+    }) => {
+      const { conversationId, callType } = data;
+
+      const conversation = await Conversation.findOne({
+        _id: conversationId,
+        participants: userId,
+        isGroup: true,
+      }).populate('participants', 'name');
+      if (!conversation) return;
+
+      const initiator = await User.findById(userId).select('name');
+      const otherParticipants = conversation.participants
+        .map((p: any) => p._id.toString())
+        .filter((id: string) => id !== userId);
+
+      for (const participantId of otherParticipants) {
+        io.to(`user:${participantId}`).emit('call:group:invite', {
+          conversationId,
+          callType,
+          initiatorName: initiator?.name ?? 'Usuario',
+          groupName: (conversation as any).groupName ?? 'Grupo',
+        });
+      }
+    });
+
+    // ── WebRTC signaling ────────────────────────────────────
+
+    socket.on('call:initiate', async (data: {
+      calleeId: string;
+      conversationId: string;
+      callType: 'audio' | 'video';
+      offer: { type: string; sdp: string };
+    }) => {
+      const { calleeId, conversationId, callType, offer } = data;
+
+      // Callee already in a call
+      const calleeIsBusy = [...activeCalls.values()].some(
+        (c) => c.callerId === calleeId || c.calleeId === calleeId
+      );
+      if (calleeIsBusy) {
+        socket.emit('call:busy', {});
+        return;
+      }
+
+      const caller = await User.findById(userId).select('name avatar');
+      const callId = `${userId}_${Date.now()}`;
+      activeCalls.set(callId, { callerId: userId, calleeId });
+
+      io.to(`user:${calleeId}`).emit('call:incoming', {
+        callId,
+        callerId: userId,
+        callerName: caller?.name ?? 'Usuario',
+        callerAvatar: caller?.avatar,
+        conversationId,
+        callType,
+        offer,
+      });
+
+      socket.emit('call:initiated', { callId });
+    });
+
+    socket.on('call:answer', (data: { callId: string; answer: { type: string; sdp: string } }) => {
+      const { callId, answer } = data;
+      const call = activeCalls.get(callId);
+      if (!call) return;
+      io.to(`user:${call.callerId}`).emit('call:answered', { callId, answer });
+    });
+
+    socket.on('call:ice-candidate', (data: {
+      callId: string;
+      peerId: string;
+      candidate: object;
+    }) => {
+      io.to(`user:${data.peerId}`).emit('call:ice-candidate', {
+        callId: data.callId,
+        candidate: data.candidate,
+      });
+    });
+
+    socket.on('call:end', (data: { callId: string }) => {
+      const call = activeCalls.get(data.callId);
+      if (!call) return;
+      activeCalls.delete(data.callId);
+      const peerId = call.callerId === userId ? call.calleeId : call.callerId;
+      io.to(`user:${peerId}`).emit('call:ended', { callId: data.callId });
+    });
+
+    socket.on('call:reject', (data: { callId: string }) => {
+      const call = activeCalls.get(data.callId);
+      if (!call) return;
+      activeCalls.delete(data.callId);
+      io.to(`user:${call.callerId}`).emit('call:rejected', { callId: data.callId });
+    });
+
+    // ── Disconnect ──────────────────────────────────────────
+
     socket.on('disconnect', () => {
       removeOnlineUser(userId, socket.id);
       if (!isUserOnline(userId)) {
+        // End any active call
+        for (const [callId, call] of activeCalls.entries()) {
+          if (call.callerId === userId || call.calleeId === userId) {
+            activeCalls.delete(callId);
+            const peerId = call.callerId === userId ? call.calleeId : call.callerId;
+            io.to(`user:${peerId}`).emit('call:ended', { callId });
+            break;
+          }
+        }
         io.emit('user:offline', { userId, lastSeen: new Date() });
         User.findByIdAndUpdate(userId, { lastLogin: new Date() }).exec();
       }
