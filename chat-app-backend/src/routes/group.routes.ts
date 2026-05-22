@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
 import {
   createGroup, getGroupInfo, updateGroup,
-  addGroupMembers, removeGroupMember,
+  addGroupMembers, removeGroupMember, toggleAdmin,
   deleteGroup, leaveGroup, reportGroup,
 } from '../controllers/groupController';
 
@@ -17,5 +17,6 @@ router.post('/:id/leave', leaveGroup);
 router.post('/:id/report', reportGroup);
 router.post('/:id/members', addGroupMembers);
 router.delete('/:id/members/:memberId', removeGroupMember);
+router.patch('/:id/members/:memberId/admin', toggleAdmin);
 
 export default router;

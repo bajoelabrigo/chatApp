@@ -12,6 +12,7 @@ import groupRoutes from './routes/group.routes';
 import activityRoutes from './routes/activity.routes';
 import prayerRoutes from './routes/prayer.routes';
 import callRoutes from './routes/call.routes';
+import bibleRoutes from './routes/bible.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 import { setIO } from './socket/ioSingleton';
 import { startCronJobs } from './services/cronService';
@@ -35,6 +36,7 @@ app.use('/groups', groupRoutes);
 app.use('/groups/:groupId/activities', activityRoutes);
 app.use('/groups/:groupId/prayer-requests', prayerRoutes);
 app.use('/calls', callRoutes);
+app.use('/bible', bibleRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

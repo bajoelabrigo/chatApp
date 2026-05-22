@@ -8,8 +8,46 @@ import { deleteCloudinaryAsset } from '../services/cloudinaryService';
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
 
-// callId -> { callerId, calleeId }
-const activeCalls = new Map<string, { callerId: string; calleeId: string }>();
+interface ActiveCall {
+  callerId: string;
+  calleeId: string;
+  conversationId: string;
+  callType: 'audio' | 'video';
+  answeredAt?: Date;
+}
+
+const activeCalls = new Map<string, ActiveCall>();
+
+async function saveCallMessage(
+  io: Server,
+  conversationId: string,
+  senderId: string,
+  callType: 'audio' | 'video',
+  callStatus: 'missed' | 'answered',
+  callDuration?: number
+) {
+  try {
+    const message = await Message.create({
+      conversationId,
+      senderId,
+      content: callType,
+      type: 'call',
+      callStatus,
+      callType,
+      callDuration,
+      status: 'sent',
+      readBy: [senderId],
+    });
+    await Conversation.findByIdAndUpdate(conversationId, {
+      lastMessage: message._id,
+      lastMessageAt: message.createdAt,
+    });
+    const populated = await message.populate('senderId', 'name avatar');
+    io.to(conversationId).emit('message:new', populated);
+  } catch (err) {
+    console.error('Error saving call message:', err);
+  }
+}
 
 function addOnlineUser(userId: string, socketId: string) {
   if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Set());
@@ -271,7 +309,7 @@ export function setupSocketHandlers(io: Server) {
 
       const caller = await User.findById(userId).select('name avatar');
       const callId = `${userId}_${Date.now()}`;
-      activeCalls.set(callId, { callerId: userId, calleeId });
+      activeCalls.set(callId, { callerId: userId, calleeId, conversationId, callType });
 
       io.to(`user:${calleeId}`).emit('call:incoming', {
         callId,
@@ -290,6 +328,7 @@ export function setupSocketHandlers(io: Server) {
       const { callId, answer } = data;
       const call = activeCalls.get(callId);
       if (!call) return;
+      call.answeredAt = new Date();
       io.to(`user:${call.callerId}`).emit('call:answered', { callId, answer });
     });
 
@@ -304,19 +343,26 @@ export function setupSocketHandlers(io: Server) {
       });
     });
 
-    socket.on('call:end', (data: { callId: string }) => {
+    socket.on('call:end', async (data: { callId: string }) => {
       const call = activeCalls.get(data.callId);
       if (!call) return;
       activeCalls.delete(data.callId);
       const peerId = call.callerId === userId ? call.calleeId : call.callerId;
       io.to(`user:${peerId}`).emit('call:ended', { callId: data.callId });
+
+      const callStatus = call.answeredAt ? 'answered' : 'missed';
+      const callDuration = call.answeredAt
+        ? Math.round((Date.now() - call.answeredAt.getTime()) / 1000)
+        : undefined;
+      await saveCallMessage(io, call.conversationId, call.callerId, call.callType, callStatus, callDuration);
     });
 
-    socket.on('call:reject', (data: { callId: string }) => {
+    socket.on('call:reject', async (data: { callId: string }) => {
       const call = activeCalls.get(data.callId);
       if (!call) return;
       activeCalls.delete(data.callId);
       io.to(`user:${call.callerId}`).emit('call:rejected', { callId: data.callId });
+      await saveCallMessage(io, call.conversationId, call.callerId, call.callType, 'missed');
     });
 
     // ── Disconnect ──────────────────────────────────────────
@@ -330,6 +376,11 @@ export function setupSocketHandlers(io: Server) {
             activeCalls.delete(callId);
             const peerId = call.callerId === userId ? call.calleeId : call.callerId;
             io.to(`user:${peerId}`).emit('call:ended', { callId });
+            const callStatus = call.answeredAt ? 'answered' : 'missed';
+            const callDuration = call.answeredAt
+              ? Math.round((Date.now() - call.answeredAt.getTime()) / 1000)
+              : undefined;
+            saveCallMessage(io, call.conversationId, call.callerId, call.callType, callStatus, callDuration);
             break;
           }
         }

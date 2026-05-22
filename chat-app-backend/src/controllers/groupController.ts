@@ -131,6 +131,27 @@ export async function addGroupMembers(req: Request, res: Response) {
   }
 }
 
+export async function toggleAdmin(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id, memberId } = req.params;
+
+    const conv = await Conversation.findOne({ _id: id, isGroup: true, admins: userId });
+    if (!conv) { res.status(403).json({ error: 'Solo los admins pueden cambiar roles' }); return; }
+
+    const isCurrentlyAdmin = conv.admins.some((a) => a.toString() === memberId);
+    if (isCurrentlyAdmin) {
+      await Conversation.findByIdAndUpdate(id, { $pull: { admins: memberId } });
+    } else {
+      await Conversation.findByIdAndUpdate(id, { $addToSet: { admins: memberId } });
+    }
+
+    res.json({ isAdmin: !isCurrentlyAdmin });
+  } catch {
+    res.status(500).json({ error: 'Error cambiando rol' });
+  }
+}
+
 export async function removeGroupMember(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
