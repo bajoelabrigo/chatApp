@@ -8,6 +8,7 @@ import {
   togglePin,
   toggleArchive,
   toggleFavorite,
+  toggleMute,
 } from '../controllers/conversationController';
 
 const router = Router();
@@ -20,6 +21,7 @@ router.get('/:conversationId/messages', getMessages);
 router.patch('/:id/pin', togglePin);
 router.patch('/:id/archive', toggleArchive);
 router.patch('/:id/favorite', toggleFavorite);
+router.patch('/:id/mute', toggleMute);
 
 router.get('/users/search', searchUsers);
 

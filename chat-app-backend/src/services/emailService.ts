@@ -1,14 +1,4 @@
 import nodemailer from 'nodemailer';
-import { ScheduleSlot } from '../models/ActivityCommitment';
-
-const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-
-function formatSlot(slot: ScheduleSlot): string {
-  const day = DAY_NAMES[slot.dayOfWeek];
-  const hh = String(slot.hour).padStart(2, '0');
-  const mm = String(slot.minute).padStart(2, '0');
-  return `${day} ${hh}:${mm}`;
-}
 
 let transporter: nodemailer.Transporter | null = null;
 
@@ -95,10 +85,9 @@ export async function sendCommitmentConfirmation(
   activityEmoji: string,
   activityName: string,
   groupName: string,
-  schedule: ScheduleSlot[]
+  _schedule: unknown[]
 ): Promise<void> {
   try {
-    const scheduleHtml = schedule.map((s) => `<li>${formatSlot(s)}</li>`).join('');
     await getTransporter().sendMail({
       from: process.env.SMTP_FROM,
       to,
@@ -108,9 +97,7 @@ export async function sendCommitmentConfirmation(
           <h2>${activityEmoji} Compromiso de ${activityName}</h2>
           <p>Hola <strong>${userName}</strong>,</p>
           <p>Te has comprometido con la actividad <strong>${activityName}</strong> en el grupo <strong>${groupName}</strong>.</p>
-          <p><strong>Tu horario:</strong></p>
-          <ul>${scheduleHtml}</ul>
-          <p>Recibirás recordatorios antes de cada sesión. ¡Que Dios bendiga tu compromiso!</p>
+          <p>¡Que Dios bendiga tu compromiso!</p>
         </div>
       `,
     });
@@ -119,11 +106,21 @@ export async function sendCommitmentConfirmation(
   }
 }
 
+const DAY_NAMES_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function fmtTime(h: number, m: number): string {
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 export interface WeeklyCommitmentSummary {
   activityEmoji: string;
   activityName: string;
   groupName: string;
-  schedule: ScheduleSlot[];
+  daysOfWeek: number[];
+  startHour: number;
+  startMinute: number;
+  endHour: number;
+  endMinute: number;
 }
 
 export async function sendWeeklySummary(
@@ -134,10 +131,10 @@ export async function sendWeeklySummary(
   try {
     if (commitments.length === 0) return;
     const items = commitments
-      .map(
-        (c) =>
-          `<li><strong>${c.activityEmoji} ${c.activityName}</strong> (${c.groupName})<br>${c.schedule.map(formatSlot).join(', ')}</li>`
-      )
+      .map((c) => {
+        const days = [...c.daysOfWeek].sort((a, b) => a - b).map((d) => DAY_NAMES_SHORT[d]).join(', ');
+        return `<li><strong>${c.activityEmoji} ${c.activityName}</strong> (${c.groupName})<br>${days} · ${fmtTime(c.startHour, c.startMinute)} → ${fmtTime(c.endHour, c.endMinute)}</li>`;
+      })
       .join('');
     await getTransporter().sendMail({
       from: process.env.SMTP_FROM,

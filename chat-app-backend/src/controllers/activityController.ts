@@ -26,13 +26,23 @@ export async function getActivities(req: Request, res: Response) {
     ]);
     const countMap = new Map(counts.map((c) => [c._id.toString(), c.count]));
 
-    const myCommitments = await ActivityCommitment.find({ groupId, userId, isActive: true }).select('activityId schedule').lean();
-    const myMap = new Map(myCommitments.map((c) => [c.activityId.toString(), c.schedule]));
+    const myCommitments = await ActivityCommitment.find({ groupId, userId, isActive: true })
+      .select('activityId daysOfWeek startHour startMinute endHour endMinute proposito notificationsEnabled')
+      .lean();
+    const myMap = new Map(myCommitments.map((c) => [c.activityId.toString(), {
+      daysOfWeek: c.daysOfWeek,
+      startHour: c.startHour,
+      startMinute: c.startMinute,
+      endHour: c.endHour,
+      endMinute: c.endMinute,
+      proposito: c.proposito,
+      notificationsEnabled: c.notificationsEnabled,
+    }]));
 
     const result = activities.map((a) => ({
       ...a,
       committedCount: countMap.get(a._id.toString()) ?? 0,
-      mySchedule: myMap.get(a._id.toString()) ?? null,
+      myCommitment: myMap.get(a._id.toString()) ?? null,
     }));
 
     res.json(result);
@@ -135,15 +145,21 @@ export async function commitToActivity(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId, activityId } = req.params;
-    const { schedule, expoPushToken, timezone } = req.body;
+    const { proposito, daysOfWeek, startHour, startMinute, endHour, endMinute, notificationsEnabled, expoPushToken, timezone } = req.body;
 
     if (!await assertMember(groupId, userId)) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const activity = await GroupActivity.findOne({ _id: activityId, groupId, isActive: true });
     if (!activity) return res.status(404).json({ error: 'Actividad no encontrada' });
 
-    if (!Array.isArray(schedule) || schedule.length === 0) {
-      return res.status(400).json({ error: 'Debes seleccionar al menos un horario' });
+    if (!Array.isArray(daysOfWeek) || daysOfWeek.length === 0) {
+      return res.status(400).json({ error: 'Debes seleccionar al menos un día' });
+    }
+
+    const startTotal = (startHour ?? 0) * 60 + (startMinute ?? 0);
+    const endTotal = (endHour ?? 0) * 60 + (endMinute ?? 0);
+    if (endTotal <= startTotal) {
+      return res.status(400).json({ error: 'La hora de término debe ser posterior a la de inicio' });
     }
 
     const commitment = await ActivityCommitment.findOneAndUpdate(
@@ -151,7 +167,13 @@ export async function commitToActivity(req: Request, res: Response) {
       {
         $set: {
           groupId,
-          schedule,
+          proposito: proposito?.trim()?.slice(0, 200) || undefined,
+          daysOfWeek,
+          startHour: startHour ?? 7,
+          startMinute: startMinute ?? 0,
+          endHour: endHour ?? 8,
+          endMinute: endMinute ?? 0,
+          notificationsEnabled: notificationsEnabled !== false,
           timezone: timezone || 'America/Lima',
           isActive: true,
           ...(expoPushToken ? { expoPushToken } : {}),
@@ -160,19 +182,13 @@ export async function commitToActivity(req: Request, res: Response) {
       { upsert: true, new: true }
     );
 
-    // Notify group room
     const user = await User.findById(userId).select('name email').lean();
     const conv = await Conversation.findById(groupId).select('groupName').lean();
     const io = getIO();
     if (io) {
-      io.to(groupId).emit('activity:commitment', {
-        activityId,
-        userId,
-        userName: user?.name,
-      });
+      io.to(groupId).emit('activity:commitment', { activityId, userId, userName: user?.name });
     }
 
-    // Send confirmation email + push
     if (user?.email) {
       sendCommitmentConfirmation(
         user.email,
@@ -180,7 +196,7 @@ export async function commitToActivity(req: Request, res: Response) {
         activity.emoji,
         activity.name,
         (conv as any)?.groupName ?? 'Grupo',
-        schedule
+        []
       );
     }
     if (expoPushToken) {

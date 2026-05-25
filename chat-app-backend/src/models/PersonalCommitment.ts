@@ -1,9 +1,11 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import type { ActivityType } from './GroupActivity';
 
-export interface IActivityCommitment extends Document {
-  activityId: Types.ObjectId;
-  groupId: Types.ObjectId;
+export interface IPersonalCommitment extends Document {
   userId: Types.ObjectId;
+  type: ActivityType;
+  emoji: string;
+  name: string;
   proposito?: string;
   daysOfWeek: number[];
   startHour: number;
@@ -11,18 +13,17 @@ export interface IActivityCommitment extends Document {
   endHour: number;
   endMinute: number;
   notificationsEnabled: boolean;
-  timezone: string;
-  expoPushToken?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-const ActivityCommitmentSchema = new Schema<IActivityCommitment>(
+const PersonalCommitmentSchema = new Schema<IPersonalCommitment>(
   {
-    activityId:           { type: Schema.Types.ObjectId, ref: 'GroupActivity', required: true },
-    groupId:              { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     userId:               { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    type:                 { type: String, enum: ['ayuno', 'vigilia', 'cilicio', 'escala_oracion', 'bible_reading', 'evangelism', 'prayer', 'fasting'], required: true },
+    emoji:                { type: String, required: true },
+    name:                 { type: String, required: true },
     proposito:            { type: String, maxlength: 200 },
     daysOfWeek:           { type: [Number], required: true, validate: [(arr: number[]) => arr.length >= 1, 'Debe seleccionar al menos un día'] },
     startHour:            { type: Number, required: true, min: 0, max: 23 },
@@ -30,14 +31,11 @@ const ActivityCommitmentSchema = new Schema<IActivityCommitment>(
     endHour:              { type: Number, required: true, min: 0, max: 23 },
     endMinute:            { type: Number, required: true, enum: [0, 30] },
     notificationsEnabled: { type: Boolean, default: true },
-    timezone:             { type: String, required: true },
-    expoPushToken:        { type: String },
     isActive:             { type: Boolean, default: true },
   },
   { timestamps: true }
 );
 
-ActivityCommitmentSchema.index({ activityId: 1, userId: 1 }, { unique: true });
-ActivityCommitmentSchema.index({ isActive: 1 });
+PersonalCommitmentSchema.index({ userId: 1, isActive: 1 });
 
-export const ActivityCommitment = model<IActivityCommitment>('ActivityCommitment', ActivityCommitmentSchema);
+export const PersonalCommitment = model<IPersonalCommitment>('PersonalCommitment', PersonalCommitmentSchema);

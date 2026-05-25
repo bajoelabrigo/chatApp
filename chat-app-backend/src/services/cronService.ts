@@ -1,15 +1,23 @@
 import cron from 'node-cron';
 import { toZonedTime } from 'date-fns-tz';
-import { ActivityCommitment, ScheduleSlot } from '../models/ActivityCommitment';
+import { ActivityCommitment } from '../models/ActivityCommitment';
 import { sendPushNotification } from './pushService';
 import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
 import { User } from '../models/User';
 
-function matchesSlot(slot: ScheduleSlot, localDate: Date): boolean {
+function matchesStart(c: { daysOfWeek: number[]; startHour: number; startMinute: number }, localDate: Date): boolean {
   return (
-    slot.dayOfWeek === localDate.getDay() &&
-    slot.hour === localDate.getHours() &&
-    slot.minute === localDate.getMinutes()
+    c.daysOfWeek.includes(localDate.getDay()) &&
+    c.startHour === localDate.getHours() &&
+    c.startMinute === localDate.getMinutes()
+  );
+}
+
+function matchesStartAdvance(c: { daysOfWeek: number[]; startHour: number; startMinute: number }, localAdv: Date): boolean {
+  return (
+    c.daysOfWeek.includes(localAdv.getDay()) &&
+    c.startHour === localAdv.getHours() &&
+    c.startMinute === localAdv.getMinutes()
   );
 }
 
@@ -20,7 +28,7 @@ export function startCronJobs(): void {
       const now = new Date();
       const nowPlus15 = new Date(now.getTime() + 15 * 60 * 1000);
 
-      const commitments = await ActivityCommitment.find({ isActive: true })
+      const commitments = await ActivityCommitment.find({ isActive: true, notificationsEnabled: true })
         .populate('activityId', 'name emoji')
         .populate('userId', 'name');
 
@@ -33,20 +41,18 @@ export function startCronJobs(): void {
         const localNow = toZonedTime(now, c.timezone);
         const localAdv = toZonedTime(nowPlus15, c.timezone);
 
-        for (const slot of c.schedule) {
-          if (matchesSlot(slot, localNow)) {
-            await sendPushNotification(
-              c.expoPushToken,
-              `${activity.emoji} ¡Hora de ${activity.name}!`,
-              `Tu sesión de ${activity.name} comienza ahora. ¡Ánimo, ${user.name}!`
-            );
-          } else if (matchesSlot(slot, localAdv)) {
-            await sendPushNotification(
-              c.expoPushToken,
-              `${activity.emoji} Recordatorio: ${activity.name} en 15 min`,
-              `Tu sesión de ${activity.name} empieza en 15 minutos.`
-            );
-          }
+        if (matchesStart(c, localNow)) {
+          await sendPushNotification(
+            c.expoPushToken,
+            `${activity.emoji} ¡Hora de ${activity.name}!`,
+            `Tu sesión de ${activity.name} comienza ahora. ¡Ánimo, ${user.name}!`
+          );
+        } else if (matchesStartAdvance(c, localAdv)) {
+          await sendPushNotification(
+            c.expoPushToken,
+            `${activity.emoji} Recordatorio: ${activity.name} en 15 min`,
+            `Tu sesión de ${activity.name} empieza en 15 minutos.`
+          );
         }
       }
     } catch (err) {
@@ -59,7 +65,6 @@ export function startCronJobs(): void {
     try {
       const now = new Date();
 
-      // Get all unique userIds from active commitments
       const pipeline = await ActivityCommitment.aggregate([
         { $match: { isActive: true } },
         { $group: { _id: '$userId', timezone: { $first: '$timezone' } } },
@@ -80,7 +85,11 @@ export function startCronJobs(): void {
           activityEmoji: (c.activityId as any)?.emoji ?? '🙏',
           activityName: (c.activityId as any)?.name ?? 'Actividad',
           groupName: (c.groupId as any)?.groupName ?? 'Grupo',
-          schedule: c.schedule,
+          daysOfWeek: c.daysOfWeek,
+          startHour: c.startHour,
+          startMinute: c.startMinute,
+          endHour: c.endHour,
+          endMinute: c.endMinute,
         }));
 
         await sendWeeklySummary(user.email, user.name, summaries);

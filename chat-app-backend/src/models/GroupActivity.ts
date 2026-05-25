@@ -1,12 +1,17 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
-export type ActivityType = 'prayer' | 'fasting' | 'bible_reading' | 'evangelism';
+export type ActivityType = 'ayuno' | 'vigilia' | 'cilicio' | 'escala_oracion' | 'bible_reading' | 'evangelism' | 'prayer' | 'fasting';
 
 export const ACTIVITY_META: Record<ActivityType, { emoji: string; defaultName: string }> = {
-  prayer: { emoji: '🙏', defaultName: 'Oración' },
+  ayuno:          { emoji: '🤲', defaultName: 'Ayuno' },
+  vigilia:        { emoji: '🕯️', defaultName: 'Vigilia' },
+  cilicio:        { emoji: '⛓️', defaultName: 'Cilicio' },
+  escala_oracion: { emoji: '🙏', defaultName: 'Escala de Oración' },
+  bible_reading:  { emoji: '📖', defaultName: 'Lectura Bíblica' },
+  evangelism:     { emoji: '🗣️', defaultName: 'Evangelismo' },
+  // deprecated — kept for backward compatibility with existing data
+  prayer:  { emoji: '🙏', defaultName: 'Oración' },
   fasting: { emoji: '🤲', defaultName: 'Ayuno' },
-  bible_reading: { emoji: '📖', defaultName: 'Lectura Bíblica' },
-  evangelism: { emoji: '🗣️', defaultName: 'Evangelismo' },
 };
 
 export interface IGroupActivity extends Document {
@@ -25,7 +30,7 @@ const GroupActivitySchema = new Schema<IGroupActivity>(
   {
     groupId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['prayer', 'fasting', 'bible_reading', 'evangelism'], required: true },
+    type: { type: String, enum: ['ayuno', 'vigilia', 'cilicio', 'escala_oracion', 'bible_reading', 'evangelism', 'prayer', 'fasting'], required: true },
     emoji: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String },

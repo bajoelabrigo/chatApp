@@ -39,6 +39,7 @@ export async function getConversations(req: Request, res: Response) {
         isPinned: (conv.pinnedBy ?? []).some((id: any) => id.toString() === userId),
         isArchived: archived,
         isFavorite: (conv.favoritedBy ?? []).some((id: any) => id.toString() === userId),
+        isMuted: (conv.mutedBy ?? []).some((id: any) => id.toString() === userId),
         isBlocked: otherUser ? blockedSet.has(otherUser._id.toString()) : false,
       };
     });
@@ -52,7 +53,7 @@ export async function getConversations(req: Request, res: Response) {
 async function toggleConvField(
   conversationId: string,
   userId: string,
-  field: 'pinnedBy' | 'archivedBy' | 'favoritedBy',
+  field: 'pinnedBy' | 'archivedBy' | 'favoritedBy' | 'mutedBy',
   res: Response
 ): Promise<void> {
   const conv = await Conversation.findOne({ _id: conversationId, participants: userId });
@@ -66,7 +67,7 @@ async function toggleConvField(
     isSet ? { $pull: { [field]: userId } } : { $addToSet: { [field]: userId } }
   );
 
-  const key = field === 'pinnedBy' ? 'pinned' : field === 'archivedBy' ? 'archived' : 'favorited';
+  const key = field === 'pinnedBy' ? 'pinned' : field === 'archivedBy' ? 'archived' : field === 'favoritedBy' ? 'favorited' : 'muted';
   res.json({ [key]: !isSet });
 }
 
@@ -83,6 +84,11 @@ export async function toggleArchive(req: Request, res: Response) {
 export async function toggleFavorite(req: Request, res: Response) {
   try { await toggleConvField(req.params.id, (req as any).userId, 'favoritedBy', res); }
   catch { res.status(500).json({ error: 'Error al marcar como favorito' }); }
+}
+
+export async function toggleMute(req: Request, res: Response) {
+  try { await toggleConvField(req.params.id, (req as any).userId, 'mutedBy', res); }
+  catch { res.status(500).json({ error: 'Error al silenciar conversación' }); }
 }
 
 export async function createOrGetConversation(req: Request, res: Response) {

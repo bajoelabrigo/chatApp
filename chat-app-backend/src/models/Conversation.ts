@@ -14,6 +14,7 @@ export interface IConversation extends Document {
   pinnedBy: Types.ObjectId[];
   archivedBy: Types.ObjectId[];
   favoritedBy: Types.ObjectId[];
+  mutedBy: Types.ObjectId[];
   // Group fields
   isGroup: boolean;
   groupName?: string;
@@ -33,6 +34,7 @@ const ConversationSchema = new Schema<IConversation>(
     pinnedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     archivedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     favoritedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    mutedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     isGroup: { type: Boolean, default: false },
     groupName: { type: String },
     groupAvatar: { type: String },

@@ -100,8 +100,12 @@ export function setupSocketHandlers(io: Server) {
       socket.emit('users:online', { userIds: onlineNow });
     }
 
-    // Avisar a contactos que está online
-    io.emit('user:online', { userId });
+    // Avisar a contactos que está online (only if user allows it)
+    const userDoc = await User.findById(userId).select('privacySettings').lean();
+    const showOnline = userDoc?.privacySettings?.showOnlineStatus ?? true;
+    if (showOnline) {
+      io.emit('user:online', { userId });
+    }
 
     socket.on('message:send', async (data: {
       conversationId: string;
@@ -110,9 +114,10 @@ export function setupSocketHandlers(io: Server) {
       fileName?: string;
       fileSize?: number;
       cloudinaryPublicId?: string;
+      replyToMessageId?: string;
     }) => {
       try {
-        const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId } = data;
+        const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId, replyToMessageId } = data;
 
         const conversation = await Conversation.findOne({
           _id: conversationId,
@@ -130,6 +135,23 @@ export function setupSocketHandlers(io: Server) {
           blockedUsers: userId,
         });
 
+        let replyTo: object | undefined;
+        if (replyToMessageId) {
+          const original = await Message.findOne({ _id: replyToMessageId, conversationId })
+            .populate<{ senderId: { name: string; avatar?: string } }>('senderId', 'name avatar');
+          if (original) {
+            const sender = original.senderId as { name: string; avatar?: string };
+            replyTo = {
+              messageId: original._id,
+              senderName: sender.name,
+              senderAvatar: sender.avatar,
+              content: original.content,
+              type: original.type,
+              fileName: original.fileName,
+            };
+          }
+        }
+
         const message = await Message.create({
           conversationId,
           senderId: userId,
@@ -140,6 +162,7 @@ export function setupSocketHandlers(io: Server) {
           cloudinaryPublicId: cloudinaryPublicId ?? undefined,
           status: 'sent',
           readBy: [userId],
+          replyTo,
         });
 
         await Conversation.findByIdAndUpdate(conversationId, {
@@ -178,7 +201,12 @@ export function setupSocketHandlers(io: Server) {
           { $addToSet: { readBy: userId }, status: 'read' }
         );
 
-        io.to(conversationId).emit('message:read', { conversationId, readerId: userId });
+        // Only broadcast read receipts if user allows it
+        const readUser = await User.findById(userId).select('privacySettings').lean();
+        const showReceipts = readUser?.privacySettings?.showReadReceipts ?? true;
+        if (showReceipts) {
+          io.to(conversationId).emit('message:read', { conversationId, readerId: userId });
+        }
       } catch {
         // silencioso
       }
@@ -241,6 +269,49 @@ export function setupSocketHandlers(io: Server) {
         }
       } catch {
         socket.emit('error', { message: 'Error eliminando mensaje' });
+      }
+    });
+
+    socket.on('message:react', async (data: { messageId: string; conversationId: string; emoji: string }) => {
+      try {
+        const { messageId, conversationId, emoji } = data;
+
+        const message = await Message.findOne({ _id: messageId, conversationId });
+        if (!message) return;
+
+        // Serialise current reactions to plain objects for manipulation
+        const reactions: Array<{ emoji: string; users: string[] }> =
+          (message.reactions ?? []).map((r) => ({
+            emoji: r.emoji,
+            users: r.users.map((u) => u.toString()),
+          }));
+
+        // Remove user from every other emoji (one reaction per user per message)
+        const withoutUser = reactions
+          .map((r) => r.emoji === emoji ? r : { ...r, users: r.users.filter((u) => u !== userId) })
+          .filter((r) => r.users.length > 0);
+
+        const idx = withoutUser.findIndex((r) => r.emoji === emoji);
+        if (idx >= 0) {
+          const alreadyIn = withoutUser[idx].users.includes(userId);
+          if (alreadyIn) {
+            withoutUser[idx].users = withoutUser[idx].users.filter((u) => u !== userId);
+            if (withoutUser[idx].users.length === 0) withoutUser.splice(idx, 1);
+          } else {
+            withoutUser[idx].users.push(userId);
+          }
+        } else {
+          withoutUser.push({ emoji, users: [userId] });
+        }
+
+        reactions.length = 0;
+        reactions.push(...withoutUser);
+
+        await Message.findByIdAndUpdate(messageId, { $set: { reactions } });
+
+        io.to(conversationId).emit('message:reaction', { messageId, conversationId, reactions });
+      } catch {
+        // silencioso
       }
     });
 
@@ -367,7 +438,7 @@ export function setupSocketHandlers(io: Server) {
 
     // ── Disconnect ──────────────────────────────────────────
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       removeOnlineUser(userId, socket.id);
       if (!isUserOnline(userId)) {
         // End any active call
@@ -384,8 +455,13 @@ export function setupSocketHandlers(io: Server) {
             break;
           }
         }
-        io.emit('user:offline', { userId, lastSeen: new Date() });
-        User.findByIdAndUpdate(userId, { lastLogin: new Date() }).exec();
+        const now = new Date();
+        User.findByIdAndUpdate(userId, { lastLogin: now, lastSeen: now }).exec();
+        const offlineUser = await User.findById(userId).select('privacySettings').lean();
+        const showOffline = offlineUser?.privacySettings?.showOnlineStatus ?? true;
+        if (showOffline) {
+          io.emit('user:offline', { userId, lastSeen: now });
+        }
       }
     });
   });

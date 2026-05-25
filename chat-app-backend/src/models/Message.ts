@@ -3,6 +3,20 @@ import { Schema, model, Document, Types } from 'mongoose';
 export type MessageStatus = 'sent' | 'delivered' | 'read';
 export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call';
 
+export interface IReplyTo {
+  messageId: Types.ObjectId;
+  senderName: string;
+  senderAvatar?: string;
+  content: string;
+  type: MessageType;
+  fileName?: string;
+}
+
+export interface IReactionEntry {
+  emoji: string;
+  users: Types.ObjectId[];
+}
+
 export interface IMessage extends Document {
   conversationId: Types.ObjectId;
   senderId: Types.ObjectId;
@@ -19,6 +33,8 @@ export interface IMessage extends Document {
   callStatus?: 'missed' | 'answered';
   callType?: 'audio' | 'video';
   callDuration?: number;
+  replyTo?: IReplyTo;
+  reactions?: IReactionEntry[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +56,18 @@ const MessageSchema = new Schema<IMessage>(
     callStatus: { type: String, enum: ['missed', 'answered'] },
     callType: { type: String, enum: ['audio', 'video'] },
     callDuration: { type: Number },
+    replyTo: {
+      messageId: { type: Schema.Types.ObjectId, ref: 'Message' },
+      senderName: { type: String },
+      senderAvatar: { type: String },
+      content: { type: String },
+      type: { type: String },
+      fileName: { type: String },
+    },
+    reactions: [{
+      emoji: { type: String, required: true },
+      users: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    }],
   },
   { timestamps: true }
 );
