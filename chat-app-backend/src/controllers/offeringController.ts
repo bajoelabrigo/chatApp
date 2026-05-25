@@ -20,10 +20,14 @@ const SUBSCRIPTION_PLANS: Record<string, string | undefined> = {
 
 // ── Simple HTML pages shown inside expo-web-browser ──────────
 
-function htmlPage(emoji: string, title: string, body: string): string {
+function htmlPage(emoji: string, title: string, body: string, autoClose = false): string {
+  const closeSnippet = autoClose
+    ? `<meta http-equiv="refresh" content="2;url=chatapp://">
+<script>setTimeout(function(){window.location.href='chatapp://'}, 2000);</script>`
+    : '';
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+${closeSnippet}<title>${title}</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,sans-serif;background:#F4F7FF;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
@@ -90,7 +94,7 @@ export async function captureOrderReturn(req: Request, res: Response) {
       }
 
       return res.send(
-        htmlPage('🙏', '¡Gracias por tu ofrenda!', 'Tu contribución fue recibida. Que Dios multiplique lo que has dado. Puedes cerrar esta ventana.')
+        htmlPage('🙏', '¡Gracias por tu ofrenda!', 'Tu contribución fue recibida. Que Dios multiplique lo que has dado.', true)
       );
     }
 
@@ -102,7 +106,7 @@ export async function captureOrderReturn(req: Request, res: Response) {
 }
 
 export function cancelReturn(_req: Request, res: Response) {
-  res.send(htmlPage('↩️', 'Ofrenda cancelada', 'No se realizó ningún cargo. Puedes cerrar esta ventana.'));
+  res.send(htmlPage('↩️', 'Ofrenda cancelada', 'No se realizó ningún cargo.', true));
 }
 
 // ── Subscriptions ─────────────────────────────────────────────
@@ -135,11 +139,11 @@ export async function createSubscriptionCheckout(req: Request, res: Response) {
 }
 
 export function subReturn(_req: Request, res: Response) {
-  res.send(htmlPage('🎉', '¡Suscripción activada!', 'Tu ofrenda mensual está activa. ¡Gracias por tu fidelidad! Puedes cerrar esta ventana.'));
+  res.send(htmlPage('🎉', '¡Suscripción activada!', 'Tu ofrenda mensual está activa. ¡Gracias por tu fidelidad!', true));
 }
 
 export function subCancel(_req: Request, res: Response) {
-  res.send(htmlPage('↩️', 'Suscripción cancelada', 'No se realizó ningún cargo. Puedes cerrar esta ventana.'));
+  res.send(htmlPage('↩️', 'Suscripción cancelada', 'No se realizó ningún cargo.', true));
 }
 
 // ── History & status ──────────────────────────────────────────
