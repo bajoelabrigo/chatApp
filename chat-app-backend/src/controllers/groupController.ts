@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import { Conversation } from '../models/Conversation';
 import { Message } from '../models/Message';
 import { Report } from '../models/Report';
+import { GroupActivity } from '../models/GroupActivity';
+import { ActivityCommitment } from '../models/ActivityCommitment';
+import { PrayerRequest } from '../models/PrayerRequest';
 import { getIO } from '../socket/ioSingleton';
 import { deleteCloudinaryAssets } from '../services/cloudinaryService';
 
@@ -125,6 +128,20 @@ export async function addGroupMembers(req: Request, res: Response) {
       $addToSet: { participants: { $each: memberIds } },
     });
 
+    // Notify newly added members so they join the socket room in real-time
+    const updated = await Conversation.findById(id)
+      .populate('participants', 'name avatar email')
+      .lean();
+    if (updated) {
+      const io = getIO();
+      const result = buildGroupResult(updated, userId);
+      if (io) {
+        for (const newMemberId of memberIds) {
+          io.to(`user:${newMemberId}`).emit('group:new', result);
+        }
+      }
+    }
+
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Error añadiendo miembros' });
@@ -208,22 +225,32 @@ export async function deleteGroup(req: Request, res: Response) {
     const isAdmin = conv.admins.some((a) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden eliminar el grupo' });
 
-    // Collect all media messages that have a Cloudinary asset
-    const mediaMessages = await Message.find(
-      { conversationId: id, type: { $ne: 'text' }, cloudinaryPublicId: { $exists: true, $ne: null } },
-      { type: 1, cloudinaryPublicId: 1 }
-    ).lean();
+    // Collect Cloudinary assets from messages AND prayer request images
+    const [mediaMessages, prayerImages] = await Promise.all([
+      Message.find(
+        { conversationId: id, type: { $ne: 'text' }, cloudinaryPublicId: { $exists: true, $ne: null } },
+        { type: 1, cloudinaryPublicId: 1 }
+      ).lean(),
+      PrayerRequest.find(
+        { groupId: id, cloudinaryPublicId: { $exists: true, $ne: null } },
+        { cloudinaryPublicId: 1 }
+      ).lean(),
+    ]);
 
     // Notify members BEFORE deleting so their socket room is still valid
     const io = getIO();
     if (io) io.to(id).emit('group:deleted', { groupId: id });
 
-    // Purge Cloudinary assets and DB records in parallel
+    // Full cascade: messages, prayers, activities, commitments, conversation, reports + Cloudinary
     await Promise.all([
-      deleteCloudinaryAssets(
-        mediaMessages.map((m) => ({ publicId: m.cloudinaryPublicId!, type: m.type as any }))
-      ),
+      deleteCloudinaryAssets([
+        ...mediaMessages.map((m) => ({ publicId: m.cloudinaryPublicId!, type: m.type as any })),
+        ...prayerImages.map((p) => ({ publicId: p.cloudinaryPublicId!, type: 'image' as const })),
+      ]),
       Message.deleteMany({ conversationId: id }),
+      PrayerRequest.deleteMany({ groupId: id }),
+      GroupActivity.deleteMany({ groupId: id }),
+      ActivityCommitment.deleteMany({ groupId: id }),
       Conversation.findByIdAndDelete(id),
       Report.deleteMany({ targetId: id }),
     ]);

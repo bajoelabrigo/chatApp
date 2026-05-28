@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
-import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings } from '../controllers/userController';
+import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount } from '../controllers/userController';
 import { getPersonalActivities, createPersonalActivity, updatePersonalActivity, deletePersonalActivity } from '../controllers/personalActivityController';
 
 const router = Router();
@@ -12,6 +12,8 @@ router.patch('/push-token', updatePushToken);
 router.get('/my-commitments', getAllMyCommitments);
 router.get('/me', getMyProfile);
 router.patch('/me', updateMyProfile);
+router.delete('/me', deleteAccount);
+router.patch('/me/password', changePassword);
 router.get('/me/settings', getMySettings);
 router.patch('/me/settings', updateSettings);
 router.get('/me/activities', getPersonalActivities);

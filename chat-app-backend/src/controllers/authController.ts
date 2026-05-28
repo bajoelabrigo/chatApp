@@ -39,7 +39,7 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
   } catch {
     res.status(401).json({ error: 'No se pudo autenticar con Google' });
   }
@@ -116,7 +116,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
   } catch {
     res.status(500).json({ error: 'Error verificando el código' });
   }
@@ -172,7 +172,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
   } catch {
     res.status(500).json({ error: 'Error iniciando sesión' });
   }

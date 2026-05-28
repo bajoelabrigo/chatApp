@@ -32,6 +32,32 @@ There are no test suites in this project.
 
 ---
 
+### Screenshot-to-Code Protocol (UI/UX Cloning)
+When I provide a screenshot or mockup image, your absolute priority is to replicate it with pixel-perfect precision inside the frontend (chat-app-frontend/). Follow this exact 4-step reverse-engineering process:
+
+**Visual Breakdown Analysis:**
+Layout & Spacing: Identify the flexbox alignment (row/col), padding, margins, and safe area requirements (Android Edge-to-Edge).
+
+**Typography:** Analyze font weights (bold, medium, regular), sizes, and text alignments.
+
+**Component Hierarchy:** Detect headers, avatar placements, input fields, badges, and list items.
+
+**Strict Stack Alignment:**
+**Styling:** Use exclusively NativeWind v4 utility classes. Never use inline styles or StyleSheet.create.
+
+**Theming:** Do not hardcode raw colors (e.g., #3B82F6 or bg-blue-500). You MUST use the active theme via the 
+useTheme() hook from src/context/ThemeContext.tsx and map values dynamically (e.g., style with custom Tailwind configuration mapping to colors.xxx or apply background/text dynamically).
+
+**Icons:** Use @expo/vector-icons (Lucide, Ionicons, MaterialIcons) checking which icon closest matches the visual reference.
+
+**Performance & Components Mapping:**
+If the screenshot shows a scrollable list, implement it using @shopify/flash-list with a realistic estimatedItemSize.
+If it displays images or avatars, use expo-image with proper sizing and standard blurhash setups.
+
+**Code Generation Output:**
+Provide the fully written React Native component using functional syntax: export function ComponentName() {}.
+Do not use generic placeholders or empty // TODO comments. Write the mockup state inline if backend data isn't fully ready yet so the visual result matches the screenshot immediately on render.
+
 ## Deploy workflow
 
 ### Backend → VPS
@@ -50,6 +76,14 @@ ssh root@145.223.27.84 "cd /var/www/chat-backend && npm install --production && 
 
 VPS: `145.223.27.84` · PM2: `chat-backend` (puerto 3000) · URL: `https://api.holyholyholy.es`
 La app web existente corre en `holy-backend` (puerto 5000) — no tocar.
+
+**nginx config**: `/etc/nginx/sites-enabled/api-chat` (no `api.holyholyholy.es`). Contiene el proxy a puerto 3000. Para editar: `scp` un archivo local al VPS y luego `nginx -t && systemctl reload nginx`.
+
+**Verificar WebSocket desde terminal** (debe devolver `101`):
+```bash
+curl.exe -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" "https://api.holyholyholy.es/socket.io/?EIO=4&transport=websocket"
+```
+Si devuelve `400 Missing or invalid Sec-WebSocket-Key` el WebSocket llega al backend (nginx OK). Si devuelve `400 Bad Gateway` o error de nginx, revisar los headers de nginx.
 
 ### Frontend → EAS Updates (OTA — no requiere rebuild)
 
@@ -98,6 +132,7 @@ eas build --platform android --profile preview
 - Mapas en memoria: `onlineUsers: Map<userId, Set<socketId>>` y `activeCalls: Map<callId, ActiveCall>`
 - Eventos: `message:send/read/edit/delete/react`, `typing:start/stop`, WebRTC signaling (`call:initiate/answer/ice-candidate/end/reject`), LiveKit (`call:group:start`)
 - Para enviar eventos desde controladores REST: `io.to(`user:${userId}`)` via `ioSingleton` (`src/socket/ioSingleton.ts`)
+- El frontend usa `transports: ['websocket']` únicamente — sin polling de fallback. Si el WebSocket falla (e.g., nginx sin headers de upgrade), socket.io no conecta en absoluto y todos los eventos de tiempo real fallan silenciosamente.
 
 **Auth** (`src/services/jwtService.ts`):
 - Access token: 24h — `JWT_SECRET`, payload `{ userId, email }`
@@ -115,7 +150,7 @@ eas build --platform android --profile preview
 - `GroupActivity` — ligada a un grupo (Conversation), tipos: `ayuno|vigilia|cilicio|escala_oracion|bible_reading|evangelism`
 - `ActivityCommitment` — usuario se compromete a una GroupActivity con horario semanal + timezone
 - `PersonalCommitment` — igual que ActivityCommitment pero sin grupo
-- `PrayerRequest` — ligada a un grupo
+- `PrayerRequest` — ligada a un grupo; campos: `content`, `isAnonymous`, `imageUrl?`, `cloudinaryPublicId?`, `deadline?` (Date), `prayingUsers[]`, `isAnswered`, `answeredNote?`
 - `Offering` — ciclo de vida PayPal (`pending→paid/failed/cancelled`)
 
 **PayPal** (`src/services/paypalService.ts`, `src/controllers/offeringController.ts`):
@@ -139,12 +174,18 @@ eas build --platform android --profile preview
 - `(tabs)/` — tabs: chats, actividades, bible, ofrendas, settings
 - `chat/[id].tsx` — pantalla de conversación
 - `group-activities/[id].tsx`, `group-activities/commit/[activityId].tsx`
+- `group-prayer/[id].tsx` — peticiones de oración de grupo (foto opcional, fecha límite, anónimo)
 - `call.tsx` (WebRTC 1:1), `group-call.tsx` (LiveKit grupal)
 - `contact/[id].tsx`, `group-profile/[id].tsx`, `group-media/[id].tsx`
+- `info/reglamentos.tsx`, `info/faq.tsx`, `info/quienes-somos.tsx`, `info/contacto.tsx` — páginas estáticas informativas
 
 **Estado**: Zustand stores en `src/store/`. API calls via axios en `src/services/authService.ts` (instancia base apuntando a `EXPO_PUBLIC_API_URL`).
 
+**Persistencia offline**: `useChatsStore` y `useActivitiesStore` usan Zustand `persist` middleware con AsyncStorage. `partialize` excluye Sets y funciones (no serializables). La app muestra datos cacheados sin conexión al arrancar.
+
 **Theming**: `src/context/ThemeContext.tsx` — `ThemeProvider` + `useTheme()` hook. Paleta light (azul `#3B82F6`) y dark (indigo `#6366F1`). Todo el verde WhatsApp fue eliminado. Importar `useTheme()` en cualquier screen nueva y usar `colors.xxx` para todos los colores.
+- Bubble mine dark: `#4338CA` (indigo-700). Bubble theirs dark: `#1E2236`.
+- En cualquier componente que renderice texto sobre `bubbleMine` en dark, usar colores claros (e.g., `rgba(255,255,255,0.70)`) — el fondo indigo oscuro hace invisible cualquier texto oscuro.
 
 **Styling**: NativeWind v4 (Tailwind para React Native). `global.css` es el entry de Tailwind; `tailwind.config.js` configura los content paths.
 
@@ -200,10 +241,26 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.app
 - Montos en `Offering` se guardan en **centavos** (entero), no dólares.
 - `ioSingleton` (`setIO` / `getIO`) permite que controladores REST emitan eventos Socket.io sin importar `io` de `app.ts`.
 - Cuando `privacySettings.showOnlineStatus` es false, el servidor sigue rastreando al usuario internamente pero no emite `user:online`/`user:offline` a otros clientes.
+- **nginx WebSocket — headers obligatorios**: Para que Socket.io funcione a través del proxy nginx, el bloque `location /` DEBE incluir:
+  ```nginx
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  ```
+  Sin estos headers, el WebSocket no hace upgrade y todos los eventos de socket fallan silenciosamente (los mensajes parecen enviarse localmente con optimistic update pero no persisten en MongoDB). La sintoma clave: mensajes desaparecen al reiniciar la app.
 - El archivo `.env` del frontend **no llega a EAS**. Cualquier `EXPO_PUBLIC_*` nueva debe añadirse también en `eas.json` bajo `env` en cada perfil.
 - `src/lib/` contiene los JSONs de la Biblia — TypeScript no los copia al compilar. Siempre subir junto con `dist/` al VPS.
 - `expo-av` está deprecado en SDK 54 (warning en logs) — funciona pero migrar eventualmente a `expo-audio` / `expo-video`.
 - **New Architecture (`newArchEnabled: true`)**: con nueva arch, los paquetes deben usar TurboModules — `@react-native-async-storage/async-storage` v3.x y `react-native-get-random-values` v2.x. Las versiones anteriores (v2.x y v1.x respectivamente) usan el bridge viejo y `NativeModules` les llega `null`. No seguir ciegamente las recomendaciones de `expo-doctor` si el proyecto usa nueva arch.
+- **New Architecture — state flush síncrono en handlers**: Con `newArchEnabled: true`, llamar a un state setter (`setFoo(null)`) dentro de un handler puede hacer flush síncrono antes de que el resto del handler lea ese state. Siempre capturar el valor en una variable local ANTES de llamar al setter. Ejemplo en `chat/[id].tsx → handleReact`:
+  ```typescript
+  const handleReact = (emoji: string) => {
+    const msg = actionMessage; // capturar ANTES del setter
+    setActionMessage(null);
+    if (!msg || !socket) return; // msg sigue válido
+    socket.emit('message:react', { messageId: msg._id, ... });
+  };
+  ```
 - `expo-font` es peer dependency obligatoria de `@expo/vector-icons` en builds nativos (en Expo Go viene preinstalada). Sin ella, la app crashea al arrancar.
 
 ---

@@ -21,6 +21,8 @@ export interface IGroupActivity extends Document {
   emoji: string;
   name: string;
   description?: string;
+  startDate?: Date;
+  endDate?: Date;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -34,6 +36,8 @@ const GroupActivitySchema = new Schema<IGroupActivity>(
     emoji: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String },
+    startDate: { type: Date },
+    endDate: { type: Date },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }

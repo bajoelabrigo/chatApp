@@ -247,7 +247,7 @@ export function setupSocketHandlers(io: Server) {
 
         if (deleteFor === 'everyone') {
           if (message.senderId.toString() !== userId) return; // solo el autor
-          await Message.findByIdAndUpdate(messageId, { isDeletedForEveryone: true });
+          await Message.findByIdAndUpdate(messageId, { isDeletedForEveryone: true, reactions: [] });
           // Clean up Cloudinary asset if this was a media message
           if (message.cloudinaryPublicId && message.type !== 'text') {
             deleteCloudinaryAsset(message.cloudinaryPublicId, message.type as any);
@@ -275,9 +275,13 @@ export function setupSocketHandlers(io: Server) {
     socket.on('message:react', async (data: { messageId: string; conversationId: string; emoji: string }) => {
       try {
         const { messageId, conversationId, emoji } = data;
+        console.log(`[react] recv userId=${userId} msg=${messageId} conv=${conversationId} emoji=${emoji}`);
 
         const message = await Message.findOne({ _id: messageId, conversationId });
-        if (!message) return;
+        if (!message) {
+          console.log(`[react] message NOT found: _id=${messageId} conv=${conversationId}`);
+          return;
+        }
 
         // Serialise current reactions to plain objects for manipulation
         const reactions: Array<{ emoji: string; users: string[] }> =
@@ -308,10 +312,10 @@ export function setupSocketHandlers(io: Server) {
         reactions.push(...withoutUser);
 
         await Message.findByIdAndUpdate(messageId, { $set: { reactions } });
-
+        console.log(`[react] emitting to room=${conversationId} reactions=${JSON.stringify(reactions)}`);
         io.to(conversationId).emit('message:reaction', { messageId, conversationId, reactions });
-      } catch {
-        // silencioso
+      } catch (err) {
+        console.error('[react] ERROR:', err);
       }
     });
 

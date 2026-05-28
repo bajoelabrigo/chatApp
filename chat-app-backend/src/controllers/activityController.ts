@@ -4,8 +4,8 @@ import { GroupActivity, ACTIVITY_META, ActivityType } from '../models/GroupActiv
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
-import { sendCommitmentConfirmation } from '../services/emailService';
-import { sendPushNotification } from '../services/pushService';
+import { sendCommitmentConfirmation, sendActivityNotification } from '../services/emailService';
+import { sendPushNotification, sendPushNotifications } from '../services/pushService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
@@ -56,7 +56,7 @@ export async function createActivity(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId } = req.params;
-    const { type, name, description } = req.body;
+    const { type, name, description, startDate, endDate } = req.body;
 
     const conv = await assertMember(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -76,12 +76,36 @@ export async function createActivity(req: Request, res: Response) {
       emoji: meta.emoji,
       name: name?.trim() || meta.defaultName,
       description: description?.trim(),
+      startDate: startDate ? new Date(startDate) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
     });
 
     const io = getIO();
     if (io) io.to(groupId).emit('activity:created', { activity });
 
     res.status(201).json(activity);
+
+    // Notify all group members (fire-and-forget, after response)
+    const groupName: string = (conv as any).groupName ?? 'Grupo';
+    const activityNameStr: string = activity.name;
+    const activityEmoji: string = activity.emoji;
+    const startStr = startDate ? new Date(startDate).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined;
+    const endStr = endDate ? new Date(endDate).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined;
+
+    const members = await User.find({ _id: { $in: conv.participants } }).select('name email expoPushToken').lean();
+    const pushTokens = members.map((m) => (m as any).expoPushToken).filter(Boolean) as string[];
+
+    sendPushNotifications(
+      pushTokens,
+      `${activityEmoji} Nueva actividad: ${activityNameStr}`,
+      `En el grupo ${groupName}${startStr ? ` · ${startStr}` : ''}`,
+    );
+
+    members.forEach((m: any) => {
+      if (m.email) {
+        sendActivityNotification(m.email, m.name, activityEmoji, activityNameStr, groupName, startStr, endStr);
+      }
+    });
   } catch (err: any) {
     if (err.code === 11000) return res.status(409).json({ error: 'Ya existe una actividad de este tipo en el grupo' });
     console.error(err);
@@ -235,11 +259,9 @@ export async function getActivityCommitments(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { groupId, activityId } = req.params;
 
-    const conv = await assertMember(groupId, userId);
-    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
-
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
-    if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden ver los compromisos' });
+    if (!await assertMember(groupId, userId)) {
+      return res.status(404).json({ error: 'Grupo no encontrado' });
+    }
 
     const commitments = await ActivityCommitment.find({ activityId, isActive: true })
       .populate('userId', 'name avatar')

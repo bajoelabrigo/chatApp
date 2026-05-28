@@ -44,7 +44,7 @@ export async function createPrayerRequest(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId } = req.params;
-    const { content, isAnonymous } = req.body;
+    const { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline } = req.body;
 
     const conv = await assertMember(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -56,6 +56,9 @@ export async function createPrayerRequest(req: Request, res: Response) {
       authorId: userId,
       content: content.trim(),
       isAnonymous: !!isAnonymous,
+      imageUrl: imageUrl ?? undefined,
+      cloudinaryPublicId: cloudinaryPublicId ?? undefined,
+      deadline: deadline ? new Date(deadline) : undefined,
     });
 
     const populated = await PrayerRequest.findById(request._id)
@@ -103,10 +106,72 @@ export async function deletePrayerRequest(req: Request, res: Response) {
     const isAuthor = request.authorId.toString() === userId;
     if (!isAdmin && !isAuthor) return res.status(403).json({ error: 'Sin permiso' });
 
+    const prayingUserIds = request.prayingUsers
+      .map((p) => p.userId.toString())
+      .filter((id) => id !== userId);
+
     await PrayerRequest.findByIdAndDelete(requestId);
     res.json({ ok: true });
+
+    // Notify participants (fire-and-forget)
+    if (prayingUserIds.length > 0) {
+      const users = await User.find({
+        _id: { $in: prayingUserIds },
+        expoPushToken: { $exists: true, $ne: null },
+      }).select('expoPushToken').lean();
+      const tokens = users.map((u: any) => u.expoPushToken).filter(Boolean) as string[];
+      if (tokens.length > 0) {
+        sendPushNotifications(tokens, '🗑️ Petición eliminada', 'Una petición por la que estabas orando fue eliminada.', { groupId, screen: 'prayer' });
+      }
+    }
   } catch {
     res.status(500).json({ error: 'Error eliminando petición' });
+  }
+}
+
+export async function editPrayerRequest(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { groupId, requestId } = req.params;
+    const { content } = req.body;
+
+    if (!content?.trim()) return res.status(400).json({ error: 'El contenido es requerido' });
+
+    const conv = await assertMember(groupId, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const request = await PrayerRequest.findOne({ _id: requestId, groupId });
+    if (!request) return res.status(404).json({ error: 'Petición no encontrada' });
+
+    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAuthor = request.authorId.toString() === userId;
+    if (!isAdmin && !isAuthor) return res.status(403).json({ error: 'Sin permiso' });
+
+    const prayingUserIds = request.prayingUsers
+      .map((p) => p.userId.toString())
+      .filter((id) => id !== userId);
+
+    const updated = await PrayerRequest.findByIdAndUpdate(
+      requestId,
+      { $set: { content: content.trim() } },
+      { new: true }
+    ).populate('authorId', 'name avatar').populate('prayingUsers.userId', 'name avatar').lean();
+
+    res.json(updated);
+
+    // Notify participants (fire-and-forget)
+    if (prayingUserIds.length > 0) {
+      const users = await User.find({
+        _id: { $in: prayingUserIds },
+        expoPushToken: { $exists: true, $ne: null },
+      }).select('expoPushToken').lean();
+      const tokens = users.map((u: any) => u.expoPushToken).filter(Boolean) as string[];
+      if (tokens.length > 0) {
+        sendPushNotifications(tokens, '✏️ Petición actualizada', content.trim().slice(0, 80), { groupId, screen: 'prayer' });
+      }
+    }
+  } catch {
+    res.status(500).json({ error: 'Error editando petición' });
   }
 }
 

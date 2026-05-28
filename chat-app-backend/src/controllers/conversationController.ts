@@ -30,6 +30,22 @@ export async function getConversations(req: Request, res: Response) {
       (currentUser?.blockedUsers ?? []).map((id: any) => id.toString())
     );
 
+    const convIds = conversations.map((c) => c._id);
+    const unreadAgg = await Message.aggregate([
+      {
+        $match: {
+          conversationId: { $in: convIds },
+          senderId: { $ne: new Types.ObjectId(userId) },
+          readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
+          isDeletedForEveryone: { $ne: true },
+        },
+      },
+      { $group: { _id: '$conversationId', count: { $sum: 1 } } },
+    ]);
+    const unreadMap = new Map<string, number>(
+      unreadAgg.map((u: any) => [u._id.toString(), u.count])
+    );
+
     const result = conversations.map((conv) => {
       const otherUser = (conv.participants as any[]).find(
         (p: any) => p._id.toString() !== userId
@@ -41,6 +57,7 @@ export async function getConversations(req: Request, res: Response) {
         isFavorite: (conv.favoritedBy ?? []).some((id: any) => id.toString() === userId),
         isMuted: (conv.mutedBy ?? []).some((id: any) => id.toString() === userId),
         isBlocked: otherUser ? blockedSet.has(otherUser._id.toString()) : false,
+        unreadCount: unreadMap.get(conv._id.toString()) ?? 0,
       };
     });
 
@@ -89,6 +106,25 @@ export async function toggleFavorite(req: Request, res: Response) {
 export async function toggleMute(req: Request, res: Response) {
   try { await toggleConvField(req.params.id, (req as any).userId, 'mutedBy', res); }
   catch { res.status(500).json({ error: 'Error al silenciar conversación' }); }
+}
+
+export async function markAllRead(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const userConvs = await Conversation.find({ participants: userId }).select('_id').lean();
+    const convIds = userConvs.map((c) => c._id);
+    await Message.updateMany(
+      {
+        conversationId: { $in: convIds },
+        senderId: { $ne: new Types.ObjectId(userId) },
+        readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
+      },
+      { $addToSet: { readBy: new Types.ObjectId(userId) }, $set: { status: 'read' } }
+    );
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error al marcar como leído' });
+  }
 }
 
 export async function createOrGetConversation(req: Request, res: Response) {
@@ -166,5 +202,56 @@ export async function searchUsers(req: Request, res: Response) {
     res.json(users);
   } catch {
     res.status(500).json({ error: 'Error buscando usuarios' });
+  }
+}
+
+export async function getSuggestedUsers(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+
+    const existingConvs = await Conversation.find({
+      participants: userId,
+      isGroup: false,
+    }).select('participants').lean();
+
+    const knownIds = new Set<string>([userId.toString()]);
+    for (const conv of existingConvs) {
+      for (const p of conv.participants as any[]) {
+        knownIds.add(p.toString());
+      }
+    }
+
+    const users = await User.find({ _id: { $nin: Array.from(knownIds) } })
+      .select('name avatar email')
+      .sort({ createdAt: -1 })
+      .limit(15);
+
+    res.json(users);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo sugerencias' });
+  }
+}
+
+export async function getAllUsersSearch(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { q } = req.query;
+
+    const filter: any = { _id: { $ne: userId } };
+    if (q && (q as string).trim().length >= 2) {
+      filter.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+      ];
+    }
+
+    const users = await User.find(filter)
+      .select('name avatar email')
+      .sort({ name: 1 })
+      .limit(40);
+
+    res.json(users);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo usuarios' });
   }
 }

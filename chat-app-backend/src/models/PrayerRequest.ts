@@ -11,6 +11,9 @@ export interface IPrayerRequest extends Document {
   authorId: Types.ObjectId;
   content: string;
   isAnonymous: boolean;
+  imageUrl?: string;
+  cloudinaryPublicId?: string;
+  deadline?: Date;
   prayingUsers: PrayingEntry[];
   isAnswered: boolean;
   answeredAt?: Date;
@@ -33,6 +36,9 @@ const PrayerRequestSchema = new Schema<IPrayerRequest>(
         _id: false,
       },
     ],
+    imageUrl: { type: String },
+    cloudinaryPublicId: { type: String },
+    deadline: { type: Date },
     isAnswered: { type: Boolean, default: false },
     answeredAt: { type: Date },
     answeredNote: { type: String, maxlength: 300 },
