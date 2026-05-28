@@ -126,6 +126,11 @@ eas build --platform android --profile preview
 - `/offerings` — PayPal órdenes y suscripciones, webhook
 - `/upload` — subida de media a Cloudinary
 
+**Endpoints de usuarios en `/conversations`**:
+- `GET /conversations/users/search?q=` — búsqueda mínima 2 caracteres, límite 20
+- `GET /conversations/users/suggested` — usuarios sin conversación previa con el usuario actual, límite 15
+- `GET /conversations/users/all?q=` — todos los usuarios con búsqueda opcional (sin mínimo), límite 40
+
 **Real-time (Socket.io)** (`src/socket/socketHandler.ts`):
 - Auth middleware lee `socket.handshake.auth.token` (mismo JWT que REST)
 - Al conectar: rooms `user:<userId>` (personal) + una room por conversación
@@ -179,6 +184,22 @@ eas build --platform android --profile preview
 - `contact/[id].tsx`, `group-profile/[id].tsx`, `group-media/[id].tsx`
 - `info/reglamentos.tsx`, `info/faq.tsx`, `info/quienes-somos.tsx`, `info/contacto.tsx` — páginas estáticas informativas
 
+**Navegación cross-tab con parámetros**: Para abrir una sección específica dentro de otro tab, usar `router.navigate` con params y leerlos con `useLocalSearchParams`. Ejemplo: desde `chats.tsx` → settings abriendo sección archivados:
+```tsx
+// emisor (chats.tsx)
+router.navigate({ pathname: '/(tabs)/settings', params: { section: 'archivados' } } as any);
+
+// receptor (settings.tsx) — usa ref para no re-ejecutar si el usuario vuelve al tab sin cambiar el param
+const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
+const handledSectionParam = useRef<string | null>(null);
+useEffect(() => {
+  if (sectionParam && sectionParam !== handledSectionParam.current) {
+    handledSectionParam.current = sectionParam;
+    openSection_(sectionParam as Section);
+  }
+}, [sectionParam]);
+```
+
 **Estado**: Zustand stores en `src/store/`. API calls via axios en `src/services/authService.ts` (instancia base apuntando a `EXPO_PUBLIC_API_URL`).
 
 **Persistencia offline**: `useChatsStore` y `useActivitiesStore` usan Zustand `persist` middleware con AsyncStorage. `partialize` excluye Sets y funciones (no serializables). La app muestra datos cacheados sin conexión al arrancar.
@@ -192,6 +213,16 @@ eas build --platform android --profile preview
 **Llamadas**:
 - 1:1: WebRTC puro via Socket.io (`src/services/callService.ts`, `src/store/useCallStore.ts`)
 - Grupales: LiveKit (`@livekit/react-native`) — backend genera token en `/calls/token`
+
+**Gestos de deslizamiento** (patrón `Animated` + `PanResponder`, sin `react-native-gesture-handler`):
+- **Lista de chats** (`chats.tsx`) — `SwipeableRow`: deslizar izquierda revela botones "Más" y "Archivar". `ACTION_WIDTH = 144`, `SNAP_THRESHOLD = 40`. El componente vive al final del archivo fuera de `ChatsScreen`.
+- **Burbuja de mensaje** (`chat/[id].tsx`) — `SwipeableMessage`: deslizar derecha ≥ 64px activa reply automáticamente (`setReplyingTo(msg)`). Muestra icono `↩` semitransparente que se opacifica progresivamente. No aplica a mensajes eliminados (`isDeletedForEveryone`). El componente se define fuera de `ChatScreen`.
+- Patrón común: `onMoveShouldSetPanResponder` solo activa si movimiento horizontal > vertical y > umbral mínimo (8–10px). Usar `useRef(false)` para el flag `triggered`/`isOpen` — los callbacks del PanResponder leen el ref correctamente sin problemas de stale closure porque el ref es el mismo objeto durante todo el ciclo de vida.
+
+**Pantalla de chats — secciones**:
+- **"Quizás los conozcas"**: scroll horizontal en `ListHeaderComponent` con usuarios de `GET /conversations/users/suggested`. Botón `+` abre modal de todos los usuarios.
+- **Modal "Todos los usuarios"**: carga todos los usuarios al abrir (query vacío), filtra en tiempo real. Tapping crea/abre conversación.
+- **Archivados**: el botón navega a `/(tabs)/settings?section=archivados` en lugar de expandir inline. Los archivados se gestionan en `settings.tsx`.
 
 ---
 
