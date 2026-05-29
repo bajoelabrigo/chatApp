@@ -131,6 +131,9 @@ eas build --platform android --profile preview
 - `GET /conversations/users/suggested` — usuarios sin conversación previa con el usuario actual, límite 15
 - `GET /conversations/users/all?q=` — todos los usuarios con búsqueda opcional (sin mínimo), límite 40
 
+**Endpoints en `/users`** (además de perfil/settings):
+- `GET /users/me/prayer-requests` — peticiones de oración activas donde el usuario está en `prayingUsers`; popula `authorId` (name) y `groupId` (groupName). Devuelve `MyPrayingRequest[]`.
+
 **Real-time (Socket.io)** (`src/socket/socketHandler.ts`):
 - Auth middleware lee `socket.handshake.auth.token` (mismo JWT que REST)
 - Al conectar: rooms `user:<userId>` (personal) + una room por conversación
@@ -215,14 +218,61 @@ useEffect(() => {
 - Grupales: LiveKit (`@livekit/react-native`) — backend genera token en `/calls/token`
 
 **Gestos de deslizamiento** (patrón `Animated` + `PanResponder`, sin `react-native-gesture-handler`):
-- **Lista de chats** (`chats.tsx`) — `SwipeableRow`: deslizar izquierda revela botones "Más" y "Archivar". `ACTION_WIDTH = 144`, `SNAP_THRESHOLD = 40`. El componente vive al final del archivo fuera de `ChatsScreen`.
+- **Lista de chats** (`chats.tsx`) — `SwipeableRow`: deslizar izquierda revela botones "Más" y "Archivar". `SWIPE_ACTION_WIDTH = 148`, `SWIPE_SNAP_THRESHOLD = 40`. Vive al final del archivo fuera de `ChatsScreen`.
+- **Actividades personales** (`actividades.tsx`) — `SwipeablePersonalCard`: deslizar izquierda revela botones "Editar" (accent) y "Eliminar" (rojo `#EF4444`). `PERSONAL_SWIPE_WIDTH = 140`, `PERSONAL_CARD_WIDTH = Dimensions.get('window').width - 32`. Vive al final del archivo fuera de `ActividadesScreen`. La tarjeta mantiene los 3 puntos (`onOptions`) además del swipe.
 - **Burbuja de mensaje** (`chat/[id].tsx`) — `SwipeableMessage`: deslizar derecha ≥ 64px activa reply automáticamente (`setReplyingTo(msg)`). Muestra icono `↩` semitransparente que se opacifica progresivamente. No aplica a mensajes eliminados (`isDeletedForEveryone`). El componente se define fuera de `ChatScreen`.
-- Patrón común: `onMoveShouldSetPanResponder` solo activa si movimiento horizontal > vertical y > umbral mínimo (8–10px). Usar `useRef(false)` para el flag `triggered`/`isOpen` — los callbacks del PanResponder leen el ref correctamente sin problemas de stale closure porque el ref es el mismo objeto durante todo el ciclo de vida.
+
+**Layout del SwipeableRow (patrón correcto para Android)**:
+NO usar `position: 'absolute'` para los botones — en Android `overflow: 'hidden'` no clipea hijos absolute confiablemente. El patrón correcto es layout horizontal en el `Animated.View`:
+```tsx
+<View style={{ overflow: 'hidden', width: SCREEN_WIDTH }}>
+  <Animated.View style={{ flexDirection: 'row', transform: [{ translateX }] }} {...panResponder.panHandlers}>
+    <View style={{ width: SCREEN_WIDTH }}>{children}</View>   {/* contenido */}
+    <View style={{ width: SWIPE_ACTION_WIDTH }}>...botones</View>  {/* fuera del área visible */}
+  </Animated.View>
+</View>
+```
+Cuando `translateX = 0` los botones están fuera del área clipeada; cuando `translateX = -SWIPE_ACTION_WIDTH` los botones son visibles.
+
+**Cerrar el swipe al tocar fuera — patrón de coordinación**:
+Cada `SwipeableRow`/`SwipeablePersonalCard` recibe prop `onOpen?: (closeFn: () => void) => void`. Cuando se abre, llama `onOpen(close)` para registrarse. El padre coordina:
+```tsx
+// En el padre:
+const activeSwipeClose = useRef<(() => void) | null>(null);
+
+// En cada item:
+onOpen={(closeFn) => {
+  if (activeSwipeClose.current && activeSwipeClose.current !== closeFn) {
+    activeSwipeClose.current();  // cierra el swipe diferente que estaba abierto
+  }
+  activeSwipeClose.current = closeFn;
+}}
+
+// En FlatList/ScrollView:
+onScrollBeginDrag={() => { activeSwipeClose.current?.(); activeSwipeClose.current = null; }}
+```
+**Anti-bounce crítico**: comparar `activeSwipeClose.current !== closeFn` antes de llamarla. Si no se hace esta comparación, al abrir el mismo swipe por segunda vez `activeSwipeClose.current` ya apunta a su propia función `close` (capturada en el primer render por el `useRef` del PanResponder) y se cierra inmediatamente, produciendo efecto rebote.
+
+**Overlay para cerrar al tocar el área de contenido**:
+Dentro del componente, usar `useState(false)` para `overlay`. Cuando se abre el swipe: `setOverlay(true)`. Overlay transparente sobre el contenido (no sobre los botones):
+```tsx
+{overlay && (
+  <Pressable style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 10 }} onPress={close} />
+)}
+```
+Cuando se cierra (close): `setOverlay(false)`.
+
+**Patrón común**: `onStartShouldSetPanResponder: () => false` + `onMoveShouldSetPanResponder` activa solo si horizontal > vertical y > 10px. `isOpen` como `useRef` (no state) para que los callbacks del PanResponder siempre lean el valor actual sin stale closure.
 
 **Pantalla de chats — secciones**:
 - **"Quizás los conozcas"**: scroll horizontal en `ListHeaderComponent` con usuarios de `GET /conversations/users/suggested`. Botón `+` abre modal de todos los usuarios.
 - **Modal "Todos los usuarios"**: carga todos los usuarios al abrir (query vacío), filtra en tiempo real. Tapping crea/abre conversación.
 - **Archivados**: el botón navega a `/(tabs)/settings?section=archivados` en lugar de expandir inline. Los archivados se gestionan en `settings.tsx`.
+
+**Pantalla de actividades — secciones**:
+- **"Mis actividades"**: compromisos grupales (`ActivityCommitment`) + actividades personales (`PersonalCommitment`). Los personales tienen swipe para editar/eliminar.
+- **"Orando por"**: peticiones de oración activas (`isAnswered: false`) donde el usuario aparece en `prayingUsers`. Cargadas con `GET /users/me/prayer-requests` → `getMyPrayingRequests()`. Muestra autor, nombre del grupo, contenido truncado, fecha de inicio y fecha límite. El botón **"Estoy orando"** (verde) llama a `togglePray` y elimina la tarjeta de la lista al confirmar. Tocar la tarjeta navega a `group-prayer/[groupId]`.
+- **"Mis grupos"**: grupos únicos derivados de los compromisos activos, con acceso rápido a peticiones de oración y actividades del grupo.
 
 ---
 
@@ -246,7 +296,7 @@ SMTP_FROM=
 LIVEKIT_URL=
 LIVEKIT_API_KEY=
 LIVEKIT_API_SECRET=
-PAYPAL_MODE=sandbox
+PAYPAL_MODE=live
 PAYPAL_CLIENT_ID=
 PAYPAL_CLIENT_SECRET=
 PAYPAL_WEBHOOK_ID=
@@ -293,10 +343,25 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.app
   };
   ```
 - `expo-font` es peer dependency obligatoria de `@expo/vector-icons` en builds nativos (en Expo Go viene preinstalada). Sin ella, la app crashea al arrancar.
+- **Colores de iconos/texto — nunca hardcodear `'#fff'`**: Cualquier color de texto o icono hardcodeado como `#fff` o `rgba(255,255,255,…)` es invisible en light mode si el fondo es blanco/claro. Siempre usar `colors.textPrimary`, `colors.textSecondary`, `colors.accent`, etc. del hook `useTheme()`.
+- **Reaction pills (`MessageBubble.tsx`)**: los pills de reacción se renderizan FUERA de la burbuja (sobre `bgPrimary`), no dentro. En light mode, `isMine` + no-reacted usaba `countColor: 'rgba(255,255,255,0.8)'` → invisible sobre fondo blanco. El fix: para light mode usar `colors.bgSecondary`/`colors.textSecondary` independientemente de si es burbuja propia o ajena.
+- **Modal con `KeyboardAvoidingView`**: el `KeyboardAvoidingView` debe ser el wrapper MÁS EXTERNO del modal (con `style={{ flex: 1 }}`), no estar dentro del backdrop `Pressable`. Si está dentro, `maxHeight: '92%'` no tiene referencia de altura correcta y el modal queda cortado. Usar `behavior="height"` en Android (`behavior="padding"` en iOS). Patrón correcto:
+  ```tsx
+  <Modal transparent>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <Pressable style={{ flex: 1, justifyContent: 'flex-end' }} onPress={onClose}>   {/* backdrop */}
+        <Pressable onPress={() => {}}>   {/* stop propagation */}
+          <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+            ...contenido del modal...
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </KeyboardAvoidingView>
+  </Modal>
+  ```
 
 ---
 
 ## Pending work
 
-- **PayPal sandbox → live** — cambiar `PAYPAL_MODE=live` en el VPS y usar credenciales live cuando esté listo para producción real.
 - **Migrar expo-av** — `expo-av` muestra warning de deprecación en SDK 54. Migrar a `expo-audio` y `expo-video` en algún momento (no urgente).

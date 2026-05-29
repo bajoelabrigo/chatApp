@@ -212,6 +212,37 @@ export async function togglePray(req: Request, res: Response) {
   }
 }
 
+export async function getMyActivePrayerRequests(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+
+    const requests = await PrayerRequest.find({
+      'prayingUsers.userId': userId,
+      isAnswered: false,
+    })
+      .populate('authorId', 'name avatar')
+      .populate('groupId', 'groupName')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const result = requests.map((r) => ({
+      _id: r._id,
+      groupId: r.groupId,
+      authorId: r.isAnonymous ? null : r.authorId,
+      content: r.content,
+      isAnonymous: r.isAnonymous,
+      imageUrl: r.imageUrl,
+      deadline: r.deadline,
+      createdAt: r.createdAt,
+      prayingCount: r.prayingUsers.length,
+    }));
+
+    res.json(result);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo peticiones' });
+  }
+}
+
 export async function markAnswered(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
