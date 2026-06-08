@@ -1,0 +1,13 @@
+# App web (red social HolyHolyHoly) — es su propio repo git, NO parte de este repo.
+# Contiene .env con secretos, scripts de migración con credenciales y backups de usuarios.
+holy_app/
+
+# Artefactos de build
+chatapp.apk
+*.apk
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

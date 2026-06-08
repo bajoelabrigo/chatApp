@@ -34,6 +34,9 @@ export interface IUser extends Document {
   lastOfferingAt?: Date;
   createdAt: Date;
   lastLogin: Date;
+  // ── Campos espejo para compatibilidad con la web (misma colección) ──
+  isVerified?: boolean;      // espejo de emailVerified
+  profilePicture?: string;   // espejo de avatar
 }
 
 const UserSchema = new Schema<IUser>(
@@ -66,8 +69,34 @@ const UserSchema = new Schema<IUser>(
     lastSeen:              { type: Date },
     isActiveSubscriber:    { type: Boolean, default: false },
     lastOfferingAt:        { type: Date },
+    // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)
+    isVerified:            { type: Boolean, default: false },
+    profilePicture:        { type: String },
   },
-  { timestamps: true }
+  { timestamps: true, strict: false }
 );
+
+// Mantener sincronizados los campos equivalentes web <-> móvil al guardar un documento
+UserSchema.pre('save', function (next) {
+  if (this.isModified('emailVerified')) this.isVerified = this.emailVerified;
+  else if (this.isModified('isVerified')) this.emailVerified = !!this.isVerified;
+
+  if (this.isModified('avatar') && this.avatar) this.profilePicture = this.avatar;
+  else if (this.isModified('profilePicture') && this.profilePicture) this.avatar = this.profilePicture;
+  next();
+});
+
+// Igual para las actualizaciones por query (findByIdAndUpdate / findOneAndUpdate)
+UserSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (next) {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set ?? update) as Record<string, any>;
+  if (set && typeof set === 'object') {
+    if (set.avatar !== undefined) set.profilePicture = set.avatar;
+    else if (set.profilePicture !== undefined) set.avatar = set.profilePicture;
+    if (set.emailVerified !== undefined) set.isVerified = set.emailVerified;
+    else if (set.isVerified !== undefined) set.emailVerified = set.isVerified;
+  }
+  next();
+});
 
 export const User = model<IUser>('User', UserSchema);

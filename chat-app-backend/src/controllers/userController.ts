@@ -11,6 +11,7 @@ import { Report } from '../models/Report';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { deleteCloudinaryAsset, deleteCloudinaryAssets } from '../services/cloudinaryService';
 import { sendAccountDeletedEmail } from '../services/emailService';
+import { cleanWebDomainReferences } from '../services/userCascade';
 
 function extractCloudinaryPublicId(url: string): string | null {
   try {
@@ -301,12 +302,18 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
       { $pull: { participants: userId, admins: userId, archivedBy: userId, mutedBy: userId, pinnedBy: userId, favoritedBy: userId } }
     );
 
-    // 6. Enviar email de confirmación antes de borrar el documento
+    // 6. Sacarlo de la lista de bloqueados de otros usuarios
+    await User.updateMany({ blockedUsers: userId }, { $pull: { blockedUsers: userId } });
+
+    // 7. Limpiar referencias del dominio web (base unificada: posts, conexiones, etc.)
+    await cleanWebDomainReferences(userId);
+
+    // 8. Enviar email de confirmación antes de borrar el documento
     if (userDoc?.email) {
       await sendAccountDeletedEmail(userDoc.email, userDoc.name ?? 'Usuario');
     }
 
-    // 7. Borrar el documento del usuario
+    // 9. Borrar el documento del usuario
     await User.findByIdAndDelete(userId);
 
     res.json({ message: 'Cuenta eliminada correctamente' });

@@ -20,22 +20,44 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
 
   try {
     const googlePayload = await verifyGoogleToken(idToken);
+    const email = googlePayload.email.toLowerCase().trim();
 
-    const user = await User.findOneAndUpdate(
-      { googleId: googlePayload.googleId },
-      {
-        $set: {
-          email: googlePayload.email,
-          name: googlePayload.name,
-          avatar: googlePayload.avatar,
-          lastLogin: new Date(),
-          emailVerified: true,
-          authProvider: 'google',
-        },
-        $setOnInsert: { googleId: googlePayload.googleId },
-      },
-      { upsert: true, new: true }
-    );
+    // 1) Coincidencia directa por googleId
+    let user = await User.findOne({ googleId: googlePayload.googleId });
+
+    // 2) Fallback: cuenta existente con el mismo email pero sin googleId
+    //    (p. ej. usuarios migrados desde la web, que nunca guardaron googleId).
+    //    Se le adjunta el googleId la primera vez que entra con Google.
+    if (!user) {
+      const byEmail = await User.findOne({ email });
+      if (byEmail) {
+        user = byEmail;
+        if (!user.googleId) user.googleId = googlePayload.googleId;
+      }
+    }
+
+    if (user) {
+      // Preservar el nombre/foto que el usuario ya tenga (incluida la foto migrada);
+      // solo rellenar si faltan.
+      if (!user.name) user.name = googlePayload.name;
+      if (!user.avatar && googlePayload.avatar) user.avatar = googlePayload.avatar;
+      user.email = email;
+      user.lastLogin = new Date();
+      user.emailVerified = true;
+      user.authProvider = 'google';
+      await user.save();
+    } else {
+      // Usuario nuevo de Google
+      user = await User.create({
+        googleId: googlePayload.googleId,
+        email,
+        name: googlePayload.name,
+        avatar: googlePayload.avatar,
+        emailVerified: true,
+        authProvider: 'google',
+        lastLogin: new Date(),
+      });
+    }
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
