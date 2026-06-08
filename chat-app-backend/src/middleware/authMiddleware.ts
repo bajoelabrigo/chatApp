@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyAccessToken } from '../services/jwtService';
+import { verifyAnyToken } from '../services/jwtService';
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -15,7 +15,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = verifyAccessToken(token);
+    const decoded = verifyAnyToken(token);
     req.userId = decoded.userId;
     req.userEmail = decoded.email;
     next();

@@ -1,5 +1,5 @@
 import { Server, Socket } from 'socket.io';
-import { verifyToken } from '../services/jwtService';
+import { verifyAnyToken } from '../services/jwtService';
 import { Message } from '../models/Message';
 import { Conversation } from '../models/Conversation';
 import { User } from '../models/User';
@@ -71,7 +71,7 @@ export function setupSocketHandlers(io: Server) {
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('No token'));
     try {
-      const payload = verifyToken(token) as { userId: string };
+      const payload = verifyAnyToken(token);
       (socket as any).userId = payload.userId;
       next();
     } catch {
