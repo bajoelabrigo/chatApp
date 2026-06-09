@@ -52,7 +52,7 @@ export async function createOrderCheckout(req: Request, res: Response) {
     }
 
     const amountUSD = rawAmount.toFixed(2);
-    const { orderId, approvalUrl } = await createOrder(amountUSD, userId);
+    const { orderId, approvalUrl } = await createOrder(amountUSD, userId, req.body.web === true);
 
     await Offering.create({
       userId,
@@ -71,6 +71,7 @@ export async function createOrderCheckout(req: Request, res: Response) {
 
 export async function captureOrderReturn(req: Request, res: Response) {
   const orderId = req.query.token as string;
+  const isWeb = req.query.platform === 'web';
   if (!orderId) {
     return res.status(400).send(htmlPage('❌', 'Error', 'No se encontró la orden. Intenta de nuevo.'));
   }
@@ -94,7 +95,7 @@ export async function captureOrderReturn(req: Request, res: Response) {
       }
 
       return res.send(
-        htmlPage('🙏', '¡Gracias por tu ofrenda!', 'Tu contribución fue recibida. Que Dios multiplique lo que has dado.', true)
+        htmlPage('🙏', '¡Gracias por tu ofrenda!', 'Tu contribución fue recibida. Que Dios multiplique lo que has dado.', !isWeb)
       );
     }
 
@@ -105,8 +106,8 @@ export async function captureOrderReturn(req: Request, res: Response) {
   }
 }
 
-export function cancelReturn(_req: Request, res: Response) {
-  res.send(htmlPage('↩️', 'Ofrenda cancelada', 'No se realizó ningún cargo.', true));
+export function cancelReturn(req: Request, res: Response) {
+  res.send(htmlPage('↩️', 'Ofrenda cancelada', 'No se realizó ningún cargo.', req.query.platform !== 'web'));
 }
 
 // ── Subscriptions ─────────────────────────────────────────────
@@ -121,7 +122,7 @@ export async function createSubscriptionCheckout(req: Request, res: Response) {
       return res.status(400).json({ error: 'Tier de suscripción no válido' });
     }
 
-    const { subscriptionId, approvalUrl } = await createSubscription(planId, userId);
+    const { subscriptionId, approvalUrl } = await createSubscription(planId, userId, req.body.web === true);
 
     await Offering.create({
       userId,
@@ -138,12 +139,12 @@ export async function createSubscriptionCheckout(req: Request, res: Response) {
   }
 }
 
-export function subReturn(_req: Request, res: Response) {
-  res.send(htmlPage('🎉', '¡Suscripción activada!', 'Tu ofrenda mensual está activa. ¡Gracias por tu fidelidad!', true));
+export function subReturn(req: Request, res: Response) {
+  res.send(htmlPage('🎉', '¡Suscripción activada!', 'Tu ofrenda mensual está activa. ¡Gracias por tu fidelidad!', req.query.platform !== 'web'));
 }
 
-export function subCancel(_req: Request, res: Response) {
-  res.send(htmlPage('↩️', 'Suscripción cancelada', 'No se realizó ningún cargo.', true));
+export function subCancel(req: Request, res: Response) {
+  res.send(htmlPage('↩️', 'Suscripción cancelada', 'No se realizó ningún cargo.', req.query.platform !== 'web'));
 }
 
 // ── History & status ──────────────────────────────────────────

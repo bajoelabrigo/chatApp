@@ -20,7 +20,7 @@ export async function getConversations(req: Request, res: Response) {
     }
 
     const conversations = await Conversation.find(query)
-      .populate('participants', 'name avatar email')
+      .populate('participants', 'name avatar email lastSeen showLastSeen')
       .populate({ path: 'lastMessage', populate: { path: 'senderId', select: 'name avatar' } })
       .sort({ lastMessageAt: -1 })
       .lean();
@@ -141,11 +141,11 @@ export async function createOrGetConversation(req: Request, res: Response) {
     // Buscar conversación existente entre ambos
     let conversation = await Conversation.findOne({
       participants: { $all: [userId, targetUserId], $size: 2 },
-    }).populate('participants', 'name avatar email');
+    }).populate('participants', 'name avatar email lastSeen showLastSeen');
 
     if (!conversation) {
       conversation = await Conversation.create({ participants: [userId, targetUserId] });
-      conversation = await conversation.populate('participants', 'name avatar email');
+      conversation = await conversation.populate('participants', 'name avatar email lastSeen showLastSeen');
     }
 
     res.json(conversation);

@@ -54,9 +54,12 @@ async function paypalFetch(path: string, options: RequestInit = {}): Promise<any
 
 export async function createOrder(
   amountUSD: string,
-  userId: string
+  userId: string,
+  isWeb = false
 ): Promise<{ orderId: string; approvalUrl: string }> {
   const base = process.env.BACKEND_URL!;
+  // En web, la página de retorno NO debe redirigir a chatapp:// (eso es del móvil).
+  const q = isWeb ? '?platform=web' : '';
   const order = await paypalFetch('/v2/checkout/orders', {
     method: 'POST',
     body: JSON.stringify({
@@ -70,8 +73,8 @@ export async function createOrder(
       payment_source: {
         paypal: {
           experience_context: {
-            return_url: `${base}/offerings/capture`,
-            cancel_url: `${base}/offerings/cancel`,
+            return_url: `${base}/offerings/capture${q}`,
+            cancel_url: `${base}/offerings/cancel${q}`,
             user_action: 'PAY_NOW',
           },
         },
@@ -93,17 +96,19 @@ export async function captureOrder(orderId: string): Promise<any> {
 
 export async function createSubscription(
   planId: string,
-  userId: string
+  userId: string,
+  isWeb = false
 ): Promise<{ subscriptionId: string; approvalUrl: string }> {
   const base = process.env.BACKEND_URL!;
+  const q = isWeb ? '?platform=web' : '';
   const sub = await paypalFetch('/v1/billing/subscriptions', {
     method: 'POST',
     body: JSON.stringify({
       plan_id: planId,
       custom_id: userId,
       application_context: {
-        return_url: `${base}/offerings/sub-return`,
-        cancel_url: `${base}/offerings/sub-cancel`,
+        return_url: `${base}/offerings/sub-return${q}`,
+        cancel_url: `${base}/offerings/sub-cancel${q}`,
         user_action: 'SUBSCRIBE_NOW',
       },
     }),

@@ -160,6 +160,37 @@ export async function updatePushToken(req: Request, res: Response) {
   }
 }
 
+// Seguidores + conexiones (+ seguidos) del usuario actual, para sugerir al crear
+// un grupo. La base es compartida con la web: estos arrays viven en el doc User
+// (schema con strict:false), así que se leen con .lean().
+export async function getMyConnections(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const myId = req.userId!;
+    const me = (await User.findById(myId).lean()) as any;
+    if (!me) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
+
+    const ids = new Set<string>();
+    for (const key of ['connections', 'followers', 'following']) {
+      for (const id of me[key] ?? []) {
+        const s = id?.toString();
+        if (s && s !== myId.toString()) ids.add(s);
+      }
+    }
+
+    if (ids.size === 0) { res.json([]); return; }
+
+    const users = await User.find({ _id: { $in: Array.from(ids) } })
+      .select('name avatar email')
+      .sort({ name: 1 })
+      .limit(100)
+      .lean();
+
+    res.json(users);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo conexiones' });
+  }
+}
+
 export async function getUserProfile(req: AuthRequest, res: Response): Promise<void> {
   try {
     const myId = req.userId!;

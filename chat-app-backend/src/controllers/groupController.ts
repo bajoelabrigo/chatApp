@@ -74,7 +74,7 @@ export async function updateGroup(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { id } = req.params;
-    const { name, permissions, tempMessageDuration } = req.body;
+    const { name, permissions, tempMessageDuration, groupAvatar } = req.body;
 
     const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId });
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -84,6 +84,7 @@ export async function updateGroup(req: Request, res: Response) {
 
     const update: Record<string, any> = {};
     if (name?.trim()) update.groupName = name.trim();
+    if (groupAvatar !== undefined) update.groupAvatar = groupAvatar;
     if (permissions !== undefined) {
       const cur = conv.permissions as any;
       update.permissions = {
