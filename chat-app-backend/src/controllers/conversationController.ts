@@ -180,6 +180,69 @@ export async function getMessages(req: Request, res: Response) {
   }
 }
 
+// Búsqueda de mensajes dentro de una conversación (todo el historial, no solo
+// la página cargada). Devuelve { results, page, total }.
+export async function searchMessages(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { conversationId } = req.params;
+    const { query = '', page = '1', limit = '20' } = req.query as Record<string, string>;
+
+    const term = String(query).trim();
+    if (!term) return res.json({ results: [], page: 1, total: 0 });
+
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      participants: userId,
+    });
+    if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
+
+    // Búsqueda insensible a mayúsculas/minúsculas y a acentos (á=a, ñ=n…), por
+    // coincidencia parcial. Normaliza el término y acepta variantes acentuadas.
+    const stripAccents = (s: string) =>
+      s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const accentMap: Record<string, string> = {
+      a: '[aáàäâã]',
+      e: '[eéèëê]',
+      i: '[iíìïî]',
+      o: '[oóòöôõ]',
+      u: '[uúùüû]',
+      n: '[nñ]',
+      c: '[cç]',
+    };
+    const pattern = [...stripAccents(term)]
+      .map((ch) =>
+        accentMap[ch] ? accentMap[ch] : ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      )
+      .join('');
+    const rx = new RegExp(pattern, 'i');
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(50, Math.max(1, Number(limit) || 20));
+
+    const filter: any = {
+      conversationId,
+      isDeletedForEveryone: { $ne: true },
+      deletedFor: { $ne: userId },
+      // Texto por contenido; archivos (documento/imagen) por nombre.
+      $or: [{ type: 'text', content: rx }, { fileName: rx }],
+    };
+
+    const [results, total] = await Promise.all([
+      Message.find(filter)
+        .populate('senderId', 'name avatar')
+        .sort({ createdAt: -1 })
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Message.countDocuments(filter),
+    ]);
+
+    res.json({ results, page: pageNum, total });
+  } catch {
+    res.status(500).json({ error: 'Error buscando mensajes' });
+  }
+}
+
 export async function searchUsers(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
@@ -253,5 +316,78 @@ export async function getAllUsersSearch(req: Request, res: Response) {
     res.json(users);
   } catch {
     res.status(500).json({ error: 'Error obteniendo usuarios' });
+  }
+}
+
+// Búsqueda GLOBAL de mensajes: recorre todas las conversaciones del usuario y
+// devuelve los mensajes de texto (o nombres de archivo) que coinciden con el
+// término. Insensible a mayúsculas y acentos. Cada resultado incluye la
+// conversación a la que pertenece para poder abrirla desde la barra de búsqueda.
+export async function searchAllMessages(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { q = '', limit = '30' } = req.query as Record<string, string>;
+    const term = String(q).trim();
+    if (term.length < 2) return res.json({ results: [] });
+
+    // Conversaciones del usuario (para acotar la búsqueda y poder mostrarlas).
+    const conversations = await Conversation.find({ participants: userId })
+      .populate('participants', 'name avatar')
+      .lean();
+    const convIds = conversations.map((c) => c._id);
+    if (convIds.length === 0) return res.json({ results: [] });
+
+    // Regex insensible a acentos (á=a, ñ=n…), coincidencia parcial.
+    const stripAccents = (s: string) =>
+      s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const accentMap: Record<string, string> = {
+      a: '[aáàäâã]', e: '[eéèëê]', i: '[iíìïî]',
+      o: '[oóòöôõ]', u: '[uúùüû]', n: '[nñ]', c: '[cç]',
+    };
+    const pattern = [...stripAccents(term)]
+      .map((ch) => accentMap[ch] ?? ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('');
+    const rx = new RegExp(pattern, 'i');
+
+    const limitNum = Math.min(50, Math.max(1, Number(limit) || 30));
+    const messages = await Message.find({
+      conversationId: { $in: convIds },
+      isDeletedForEveryone: { $ne: true },
+      deletedFor: { $ne: userId },
+      $or: [{ type: 'text', content: rx }, { fileName: rx }],
+    })
+      .populate('senderId', 'name avatar')
+      .sort({ createdAt: -1 })
+      .limit(limitNum)
+      .lean();
+
+    // Mapa de conversación → datos de visualización (nombre/avatar/grupo).
+    const convMap = new Map<string, any>();
+    conversations.forEach((c: any) => {
+      const other = (c.participants as any[]).find(
+        (p) => p._id.toString() !== userId
+      );
+      convMap.set(c._id.toString(), {
+        _id: c._id,
+        isGroup: !!c.isGroup,
+        name: c.isGroup ? c.groupName || 'Grupo' : other?.name || 'Usuario',
+        avatar: c.isGroup ? c.groupAvatar : other?.avatar,
+      });
+    });
+
+    const results = messages.map((m: any) => ({
+      _id: m._id,
+      conversationId: m.conversationId,
+      content: m.content,
+      type: m.type,
+      fileName: m.fileName,
+      createdAt: m.createdAt,
+      senderName: m.senderId?.name,
+      conversation: convMap.get(m.conversationId.toString()) || null,
+    }));
+
+    res.json({ results });
+  } catch {
+    res.status(500).json({ error: 'Error buscando mensajes' });
   }
 }
