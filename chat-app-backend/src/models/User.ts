@@ -30,6 +30,7 @@ export interface IUser extends Document {
   notificationSettings: INotificationSettings;
   privacySettings: IPrivacySettings;
   lastSeen?: Date;
+  lastNotificationsSeen?: Date;
   isActiveSubscriber?: boolean;
   lastOfferingAt?: Date;
   createdAt: Date;
@@ -67,6 +68,7 @@ const UserSchema = new Schema<IUser>(
       showLastSeen:       { type: Boolean, default: true },
     },
     lastSeen:              { type: Date },
+    lastNotificationsSeen: { type: Date },
     isActiveSubscriber:    { type: Boolean, default: false },
     lastOfferingAt:        { type: Date },
     // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)
