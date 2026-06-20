@@ -31,6 +31,11 @@ export interface IUser extends Document {
   privacySettings: IPrivacySettings;
   lastSeen?: Date;
   lastNotificationsSeen?: Date;
+  // Notificaciones derivadas (chat unificado) marcadas como leídas / eliminadas.
+  // Se guarda el `at` para que un item reaparezca si su timestamp se vuelve más
+  // reciente que el marcado (p.ej. un chat eliminado recibe un mensaje nuevo).
+  readNotifications?: { id: string; at: Date }[];
+  dismissedNotifications?: { id: string; at: Date }[];
   isActiveSubscriber?: boolean;
   lastOfferingAt?: Date;
   createdAt: Date;
@@ -69,6 +74,8 @@ const UserSchema = new Schema<IUser>(
     },
     lastSeen:              { type: Date },
     lastNotificationsSeen: { type: Date },
+    readNotifications:     [{ id: String, at: Date, _id: false }],
+    dismissedNotifications:[{ id: String, at: Date, _id: false }],
     isActiveSubscriber:    { type: Boolean, default: false },
     lastOfferingAt:        { type: Date },
     // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)

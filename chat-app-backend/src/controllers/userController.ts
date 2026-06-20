@@ -287,11 +287,36 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
       if (publicId) await deleteCloudinaryAsset(publicId, 'image');
     }
 
-    // 2. Compromisos y actividades propias
+    // 2. Compromisos propios (grupales y personales)
     await ActivityCommitment.deleteMany({ userId });
     await PersonalCommitment.deleteMany({ userId });
+
+    // 2b. Actividades creadas por el usuario → borrar también los compromisos
+    // que OTROS usuarios hicieron sobre ellas (si no, quedan huérfanos).
+    const ownActivities = await GroupActivity.find({ createdBy: userId })
+      .select('_id')
+      .lean();
+    const ownActivityIds = ownActivities.map((a) => a._id);
+    if (ownActivityIds.length > 0) {
+      await ActivityCommitment.deleteMany({ activityId: { $in: ownActivityIds } });
+      await GroupActivity.deleteMany({ _id: { $in: ownActivityIds } });
+    }
+
+    // 2c. Peticiones de oración propias → limpiar sus imágenes de Cloudinary y borrarlas.
+    const ownPrayers = await PrayerRequest.find({ authorId: userId })
+      .select('cloudinaryPublicId')
+      .lean();
+    const prayerImages = ownPrayers
+      .filter((p) => p.cloudinaryPublicId)
+      .map((p) => ({ publicId: p.cloudinaryPublicId as string, type: 'image' as const }));
+    if (prayerImages.length > 0) await deleteCloudinaryAssets(prayerImages);
     await PrayerRequest.deleteMany({ authorId: userId });
-    await GroupActivity.deleteMany({ createdBy: userId });
+
+    // 2d. Quitar al usuario de la lista de "orando por" de peticiones de OTROS.
+    await PrayerRequest.updateMany(
+      { 'prayingUsers.userId': userId },
+      { $pull: { prayingUsers: { userId } } } as any
+    );
 
     // 3. Conversaciones 1:1: borrar media de Cloudinary + mensajes + conversación
     const directConvs = await Conversation.find({

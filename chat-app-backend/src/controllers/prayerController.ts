@@ -6,9 +6,21 @@ import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendPushNotifications } from '../services/pushService';
 import { ActivityCommitment } from '../models/ActivityCommitment';
+import { isGlobalAdmin } from '../services/adminService';
+import { deleteCloudinaryAssets } from '../services/cloudinaryService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
+}
+
+// Resuelve la conversación de grupo permitiendo al admin general (web role:'admin')
+// operar sin ser miembro. Devuelve { conv, globalAdmin }.
+async function resolveGroup(groupId: string, userId: string) {
+  const globalAdmin = await isGlobalAdmin(userId);
+  const conv = globalAdmin
+    ? await Conversation.findOne({ _id: groupId, isGroup: true })
+    : await assertMember(groupId, userId);
+  return { conv, globalAdmin };
 }
 
 export async function getPrayerRequests(req: Request, res: Response) {
@@ -17,7 +29,8 @@ export async function getPrayerRequests(req: Request, res: Response) {
     const { groupId } = req.params;
     const answered = req.query.answered === 'true';
 
-    if (!await assertMember(groupId, userId)) return res.status(404).json({ error: 'Grupo no encontrado' });
+    const { conv } = await resolveGroup(groupId, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const requests = await PrayerRequest.find({ groupId, isAnswered: answered })
       .populate('authorId', 'name avatar')
@@ -96,19 +109,27 @@ export async function deletePrayerRequest(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { groupId, requestId } = req.params;
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const request = await PrayerRequest.findOne({ _id: requestId, groupId });
     if (!request) return res.status(404).json({ error: 'Petición no encontrada' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     const isAuthor = request.authorId.toString() === userId;
     if (!isAdmin && !isAuthor) return res.status(403).json({ error: 'Sin permiso' });
 
     const prayingUserIds = request.prayingUsers
       .map((p) => p.userId.toString())
       .filter((id) => id !== userId);
+
+    // Limpiar la imagen de Cloudinary de la petición (si tiene) para no dejar
+    // assets huérfanos.
+    if (request.cloudinaryPublicId) {
+      await deleteCloudinaryAssets([
+        { publicId: request.cloudinaryPublicId, type: 'image' },
+      ]);
+    }
 
     await PrayerRequest.findByIdAndDelete(requestId);
     res.json({ ok: true });
@@ -133,17 +154,17 @@ export async function editPrayerRequest(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId, requestId } = req.params;
-    const { content } = req.body;
+    const { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline } = req.body;
 
     if (!content?.trim()) return res.status(400).json({ error: 'El contenido es requerido' });
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const request = await PrayerRequest.findOne({ _id: requestId, groupId });
     if (!request) return res.status(404).json({ error: 'Petición no encontrada' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     const isAuthor = request.authorId.toString() === userId;
     if (!isAdmin && !isAuthor) return res.status(403).json({ error: 'Sin permiso' });
 
@@ -151,9 +172,31 @@ export async function editPrayerRequest(req: Request, res: Response) {
       .map((p) => p.userId.toString())
       .filter((id) => id !== userId);
 
+    // Construir la actualización campo a campo. Solo se tocan los campos enviados
+    // (compatibilidad con clientes que solo mandan `content`). Para quitar la foto
+    // o la fecha el cliente envía `null` explícito.
+    const set: Record<string, any> = { content: content.trim() };
+    const unset: Record<string, any> = {};
+
+    if (typeof isAnonymous === 'boolean') set.isAnonymous = isAnonymous;
+
+    if (deadline === null || deadline === '') unset.deadline = '';
+    else if (deadline !== undefined) set.deadline = new Date(deadline);
+
+    if (imageUrl === null) {
+      unset.imageUrl = '';
+      unset.cloudinaryPublicId = '';
+    } else if (typeof imageUrl === 'string' && imageUrl) {
+      set.imageUrl = imageUrl;
+      if (cloudinaryPublicId) set.cloudinaryPublicId = cloudinaryPublicId;
+    }
+
+    const update: Record<string, any> = { $set: set };
+    if (Object.keys(unset).length) update.$unset = unset;
+
     const updated = await PrayerRequest.findByIdAndUpdate(
       requestId,
-      { $set: { content: content.trim() } },
+      update,
       { new: true }
     ).populate('authorId', 'name avatar').populate('prayingUsers.userId', 'name avatar').lean();
 
@@ -249,13 +292,13 @@ export async function markAnswered(req: Request, res: Response) {
     const { groupId, requestId } = req.params;
     const { answeredNote } = req.body;
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const request = await PrayerRequest.findOne({ _id: requestId, groupId });
     if (!request) return res.status(404).json({ error: 'Petición no encontrada' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     const isAuthor = request.authorId.toString() === userId;
     if (!isAdmin && !isAuthor) return res.status(403).json({ error: 'Sin permiso' });
 

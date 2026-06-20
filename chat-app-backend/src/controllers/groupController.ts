@@ -7,6 +7,17 @@ import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PrayerRequest } from '../models/PrayerRequest';
 import { getIO } from '../socket/ioSingleton';
 import { deleteCloudinaryAssets } from '../services/cloudinaryService';
+import { isGlobalAdmin } from '../services/adminService';
+
+// Resuelve el grupo permitiendo al admin general (web role:'admin') operar sin
+// ser miembro ni admin del grupo. Devuelve { conv, globalAdmin }.
+async function resolveGroup(groupId: string, userId: string) {
+  const globalAdmin = await isGlobalAdmin(userId);
+  const conv = globalAdmin
+    ? await Conversation.findOne({ _id: groupId, isGroup: true })
+    : await Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
+  return { conv, globalAdmin };
+}
 
 function buildGroupResult(conv: any, userId: string) {
   return {
@@ -76,10 +87,10 @@ export async function updateGroup(req: Request, res: Response) {
     const { id } = req.params;
     const { name, permissions, tempMessageDuration, groupAvatar } = req.body;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId });
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden editar el grupo' });
 
     const update: Record<string, any> = {};
@@ -117,10 +128,10 @@ export async function addGroupMembers(req: Request, res: Response) {
     const { id } = req.params;
     const { memberIds } = req.body;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId });
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
     if (!isAdmin && !conv.permissions.membersCanAddMembers) {
       return res.status(403).json({ error: 'No tienes permiso para añadir miembros' });
     }
@@ -154,7 +165,10 @@ export async function toggleAdmin(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { id, memberId } = req.params;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, admins: userId });
+    const globalAdmin = await isGlobalAdmin(userId);
+    const conv = globalAdmin
+      ? await Conversation.findOne({ _id: id, isGroup: true })
+      : await Conversation.findOne({ _id: id, isGroup: true, admins: userId });
     if (!conv) { res.status(403).json({ error: 'Solo los admins pueden cambiar roles' }); return; }
 
     const isCurrentlyAdmin = conv.admins.some((a) => a.toString() === memberId);
@@ -175,10 +189,10 @@ export async function removeGroupMember(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { id, memberId } = req.params;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId });
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
     const isSelf = memberId === userId;
     if (!isAdmin && !isSelf) return res.status(403).json({ error: 'No tienes permiso' });
 
@@ -194,13 +208,18 @@ export async function getGroupInfo(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { id } = req.params;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId })
+    const globalAdmin = await isGlobalAdmin(userId);
+    const conv = await Conversation.findOne(
+      globalAdmin
+        ? { _id: id, isGroup: true }
+        : { _id: id, isGroup: true, participants: userId }
+    )
       .populate('participants', 'name avatar email')
       .lean();
 
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = (conv.admins ?? []).some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || (conv.admins ?? []).some((a: any) => a.toString() === userId);
 
     res.json({
       ...conv,
@@ -220,10 +239,10 @@ export async function deleteGroup(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { id } = req.params;
 
-    const conv = await Conversation.findOne({ _id: id, isGroup: true, participants: userId });
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden eliminar el grupo' });
 
     // Collect Cloudinary assets from messages AND prayer request images

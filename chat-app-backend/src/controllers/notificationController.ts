@@ -18,6 +18,7 @@ interface NotificationItem {
   body: string;
   timestamp: string;
   isNew: boolean;
+  isRead?: boolean;
   avatar?: string;
   emoji?: string;
   // hacia dónde navega el tap en el frontend
@@ -53,9 +54,23 @@ export async function getNotifications(req: Request, res: Response) {
     const userId = (req as any).userId;
     const userObjId = new Types.ObjectId(userId);
 
-    const user = await User.findById(userId).select('lastNotificationsSeen blockedUsers').lean();
+    const user = await User.findById(userId)
+      .select('lastNotificationsSeen blockedUsers readNotifications dismissedNotifications')
+      .lean();
     const lastSeen = user?.lastNotificationsSeen ? new Date(user.lastNotificationsSeen) : new Date(0);
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+    // Mapas id → timestamp (ms) del marcado más reciente como leído / eliminado.
+    const latestFlag = (arr?: { id: string; at: Date }[]) => {
+      const m = new Map<string, number>();
+      for (const f of arr ?? []) {
+        const t = new Date(f.at).getTime();
+        if (!m.has(f.id) || t > (m.get(f.id) as number)) m.set(f.id, t);
+      }
+      return m;
+    };
+    const readMap = latestFlag(user?.readNotifications);
+    const dismissedMap = latestFlag(user?.dismissedNotifications);
 
     // Conversaciones del usuario (no archivadas) — para chats, llamadas y para
     // derivar los grupos a los que pertenece.
@@ -108,11 +123,12 @@ export async function getNotifications(req: Request, res: Response) {
     }
 
     // ── 2. Llamadas perdidas ────────────────────────────────────────────────
+    // Se notifica a AMBOS lados: al receptor ("Llamada perdida") y a quien llamó
+    // ("Llamada no contestada"). El mensaje guarda senderId = quien llamó.
     const missedCalls = await Message.find({
       conversationId: { $in: convIds },
       type: 'call',
       callStatus: 'missed',
-      senderId: { $ne: userObjId },
       deletedFor: { $ne: userObjId },
       createdAt: { $gte: windowStart },
     })
@@ -126,14 +142,32 @@ export async function getNotifications(req: Request, res: Response) {
       if (!conv) continue;
       const caller = call.senderId as any;
       const isVideo = call.callType === 'video';
+      const iAmCaller = caller?._id?.toString() === userId;
+      // Para quien llamó, la tarjeta muestra al otro participante (a quien no contestó).
+      const other = conv.isGroup
+        ? null
+        : (conv.participants as any[]).find((p) => p._id.toString() !== userId);
+      const title = iAmCaller
+        ? conv.isGroup
+          ? conv.groupName || 'Grupo'
+          : other?.name || 'Llamada'
+        : caller?.name || 'Llamada perdida';
+      const avatar = iAmCaller
+        ? conv.isGroup
+          ? conv.groupAvatar
+          : other?.avatar
+        : caller?.avatar;
+      const body = iAmCaller
+        ? `Llamada ${isVideo ? 'de video' : 'de voz'} no contestada`
+        : `Llamada perdida ${isVideo ? 'de video' : 'de voz'}`;
       items.push({
         id: `call:${call._id}`,
         kind: 'missed_call',
-        title: caller?.name || 'Llamada perdida',
-        body: `Llamada perdida ${isVideo ? 'de video' : 'de voz'}`,
+        title,
+        body,
         timestamp: call.createdAt as any,
         isNew: new Date(call.createdAt).getTime() > lastSeen.getTime(),
-        avatar: caller?.avatar,
+        avatar,
         nav: { screen: 'chat', id: call.conversationId.toString() },
         data: { callType: isVideo ? 'video' : 'audio' },
       });
@@ -312,18 +346,34 @@ export async function getNotifications(req: Request, res: Response) {
       if (reminder) items.push(reminder);
     }
 
+    // Aplicar marcados de leído / eliminado. Un item solo queda oculto (o leído)
+    // si el marcado es igual o posterior a su timestamp; si el item se "renueva"
+    // (timestamp más reciente que el marcado) vuelve a aparecer como nuevo.
+    const visible = items.filter((it) => {
+      const dAt = dismissedMap.get(it.id);
+      return dAt === undefined || dAt < new Date(it.timestamp).getTime();
+    });
+    for (const it of visible) {
+      const rAt = readMap.get(it.id);
+      if (rAt !== undefined && rAt >= new Date(it.timestamp).getTime()) {
+        it.isRead = true;
+        it.isNew = false;
+      }
+    }
+
     // Orden cronológico descendente (más reciente primero).
-    items.sort(
+    visible.sort(
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
 
-    const unreadCount = items.reduce((acc, it) => {
+    const unreadCount = visible.reduce((acc, it) => {
+      if (it.isRead) return acc; // leídos no cuentan
       if (it.kind === 'reminder') return acc; // recordatorios: informativos, no cuentan
       if (it.kind === 'chat') return acc + (it.data?.unreadCount ?? 1);
       return acc + (it.isNew ? 1 : 0);
     }, 0);
 
-    res.json({ items, unreadCount });
+    res.json({ items: visible, unreadCount });
   } catch (err) {
     console.error('[notifications] error', err);
     res.status(500).json({ error: 'Error obteniendo notificaciones' });
@@ -337,5 +387,40 @@ export async function markNotificationsSeen(req: Request, res: Response) {
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Error actualizando notificaciones' });
+  }
+}
+
+// Marca un item derivado (chat/llamada/oración/actividad/recordatorio) con un
+// flag `at: ahora`. Se reescribe el registro previo del mismo id para refrescar
+// la fecha. `field` es 'readNotifications' o 'dismissedNotifications'.
+async function flagNotification(userId: string, field: string, id: string) {
+  await User.updateOne({ _id: userId }, { $pull: { [field]: { id } } } as any);
+  await User.updateOne(
+    { _id: userId },
+    { $push: { [field]: { id, at: new Date() } } } as any
+  );
+}
+
+export async function markNotificationRead(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.body ?? {};
+    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id requerido' });
+    await flagNotification(userId, 'readNotifications', id);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error marcando notificación como leída' });
+  }
+}
+
+export async function dismissNotification(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.body ?? {};
+    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id requerido' });
+    await flagNotification(userId, 'dismissedNotifications', id);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error eliminando notificación' });
   }
 }

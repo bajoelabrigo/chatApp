@@ -6,16 +6,28 @@ import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendCommitmentConfirmation, sendActivityNotification } from '../services/emailService';
 import { sendPushNotification, sendPushNotifications } from '../services/pushService';
+import { isGlobalAdmin } from '../services/adminService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
+}
+
+// Resuelve la conversación de grupo permitiendo al admin general (web role:'admin')
+// operar sin ser miembro ni admin del grupo.
+async function resolveGroup(groupId: string, userId: string) {
+  const globalAdmin = await isGlobalAdmin(userId);
+  const conv = globalAdmin
+    ? await Conversation.findOne({ _id: groupId, isGroup: true })
+    : await assertMember(groupId, userId);
+  return { conv, globalAdmin };
 }
 
 export async function getActivities(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId } = req.params;
-    if (!await assertMember(groupId, userId)) return res.status(404).json({ error: 'Grupo no encontrado' });
+    const { conv } = await resolveGroup(groupId, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
     const activities = await GroupActivity.find({ groupId, isActive: true }).lean();
 
@@ -58,10 +70,10 @@ export async function createActivity(req: Request, res: Response) {
     const { groupId } = req.params;
     const { type, name, description, startDate, endDate } = req.body;
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden crear actividades' });
 
     if (!type || !ACTIVITY_META[type as ActivityType]) {
@@ -119,10 +131,10 @@ export async function updateActivity(req: Request, res: Response) {
     const { groupId, activityId } = req.params;
     const { name, description, isActive } = req.body;
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden editar actividades' });
 
     const update: Record<string, any> = {};
@@ -148,10 +160,10 @@ export async function deleteActivity(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { groupId, activityId } = req.params;
 
-    const conv = await assertMember(groupId, userId);
+    const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
 
-    const isAdmin = conv.admins.some((a: any) => a.toString() === userId);
+    const isAdmin = globalAdmin || conv.admins.some((a: any) => a.toString() === userId);
     if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden eliminar actividades' });
 
     await Promise.all([
