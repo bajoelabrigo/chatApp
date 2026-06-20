@@ -1,0 +1,34 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.holyholyholy.es",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.apps.googleusercontent.com"
+      }
+    },
+    "preview": {
+      "channel": "preview",
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.holyholyholy.es",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.apps.googleusercontent.com"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.holyholyholy.es",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.apps.googleusercontent.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

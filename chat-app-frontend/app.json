@@ -1,0 +1,92 @@
+{
+  "expo": {
+    "name": "HolyChat",
+    "slug": "chat-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D1533"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.chatapp",
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio",
+          "voip"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.chatapp",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "edgeToEdgeEnabled": true,
+      "softwareKeyboardLayoutMode": "pan",
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.FOREGROUND_SERVICE_CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite a HolyChat acceder a tus fotos para enviarlas.",
+          "cameraPermission": "Permite a HolyChat usar la cámara para tomar fotos."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permite a HolyChat grabar notas de voz."
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.4776256007-leuqtje39jv3oul8edhljqjg0eicoq9j"
+        }
+      ],
+      "expo-web-browser",
+      "expo-font"
+    ],
+    "updates": {
+      "url": "https://u.expo.dev/fd20a97c-6470-4f96-9bd3-0ecb586a4816"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "scheme": "chatapp",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fd20a97c-6470-4f96-9bd3-0ecb586a4816"
+      }
+    }
+  }
+}
