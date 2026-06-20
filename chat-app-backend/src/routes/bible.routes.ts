@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/authMiddleware';
 import { getVersions, getBooks, getChapters, getVerses, searchVerses, downloadBible } from '../controllers/bibleController';
 
 const router = Router();
 
-router.use(authMiddleware);
+// La Biblia es contenido público (datos estáticos): accesible también para
+// invitados de la web. Sin authMiddleware. Los controladores no usan req.userId.
 
 // Static routes before dynamic ones
 router.get('/versions', getVersions);

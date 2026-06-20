@@ -6,7 +6,7 @@ import { GroupActivity } from '../models/GroupActivity';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PrayerRequest } from '../models/PrayerRequest';
 import { getIO } from '../socket/ioSingleton';
-import { deleteCloudinaryAssets } from '../services/cloudinaryService';
+import { deleteCloudinaryAssets, deleteCloudinaryUrls } from '../services/cloudinaryService';
 import { isGlobalAdmin } from '../services/adminService';
 
 // Resuelve el grupo permitiendo al admin general (web role:'admin') operar sin
@@ -95,7 +95,13 @@ export async function updateGroup(req: Request, res: Response) {
 
     const update: Record<string, any> = {};
     if (name?.trim()) update.groupName = name.trim();
-    if (groupAvatar !== undefined) update.groupAvatar = groupAvatar;
+    if (groupAvatar !== undefined) {
+      update.groupAvatar = groupAvatar;
+      // Si se cambia o elimina el avatar, borrar el anterior de Cloudinary.
+      if (conv.groupAvatar && conv.groupAvatar !== groupAvatar) {
+        deleteCloudinaryUrls([conv.groupAvatar]);
+      }
+    }
     if (permissions !== undefined) {
       const cur = conv.permissions as any;
       update.permissions = {
@@ -267,6 +273,8 @@ export async function deleteGroup(req: Request, res: Response) {
         ...mediaMessages.map((m) => ({ publicId: m.cloudinaryPublicId!, type: m.type as any })),
         ...prayerImages.map((p) => ({ publicId: p.cloudinaryPublicId!, type: 'image' as const })),
       ]),
+      // El avatar del grupo solo guarda la URL (sin publicId) → derivarlo de la URL.
+      deleteCloudinaryUrls([conv.groupAvatar]),
       Message.deleteMany({ conversationId: id }),
       PrayerRequest.deleteMany({ groupId: id }),
       GroupActivity.deleteMany({ groupId: id }),

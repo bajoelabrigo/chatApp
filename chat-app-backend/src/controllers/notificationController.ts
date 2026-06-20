@@ -8,8 +8,17 @@ import { PrayerRequest } from '../models/PrayerRequest';
 import { GroupActivity } from '../models/GroupActivity';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PersonalCommitment } from '../models/PersonalCommitment';
+import { Material } from '../models/Material';
+import { MaterialView } from '../models/MaterialView';
 
-type NotificationKind = 'chat' | 'missed_call' | 'prayer' | 'prayer_pray' | 'activity' | 'reminder';
+type NotificationKind =
+  | 'chat'
+  | 'missed_call'
+  | 'prayer'
+  | 'prayer_pray'
+  | 'activity'
+  | 'reminder'
+  | 'material';
 
 interface NotificationItem {
   id: string;
@@ -22,7 +31,7 @@ interface NotificationItem {
   avatar?: string;
   emoji?: string;
   // hacia dónde navega el tap en el frontend
-  nav: { screen: 'chat' | 'prayer' | 'activities' | 'activities-tab'; id: string };
+  nav: { screen: 'chat' | 'prayer' | 'activities' | 'activities-tab' | 'material'; id: string };
   data?: { unreadCount?: number; callType?: 'audio' | 'video'; prayingCount?: number };
 }
 
@@ -344,6 +353,44 @@ export async function getNotifications(req: Request, res: Response) {
         'Personal'
       );
       if (reminder) items.push(reminder);
+    }
+
+    // ── Materiales nuevos ───────────────────────────────────────────────────
+    // Materiales publicados en la ventana que el usuario aún no ha visto/descargado.
+    const recentMaterials = await Material.find({
+      published: true,
+      $or: [
+        { notifiedAt: { $gte: windowStart } },
+        { notifiedAt: null, createdAt: { $gte: windowStart } },
+      ],
+    })
+      .sort({ notifiedAt: -1, createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    if (recentMaterials.length > 0) {
+      const seen = await MaterialView.find({
+        userId: userObjId,
+        materialId: { $in: recentMaterials.map((m) => m._id) },
+      })
+        .select('materialId')
+        .lean();
+      const seenSet = new Set(seen.map((s) => s.materialId.toString()));
+
+      for (const m of recentMaterials) {
+        if (seenSet.has(m._id.toString())) continue;
+        items.push({
+          id: `material:${m._id}`,
+          kind: 'material',
+          title: '📚 Nuevo material',
+          body: m.title,
+          timestamp: (m.notifiedAt ?? m.createdAt) as any,
+          isNew: true,
+          emoji: '📚',
+          avatar: m.thumbnail || m.coverImage || undefined,
+          nav: { screen: 'material', id: m.slug },
+        });
+      }
     }
 
     // Aplicar marcados de leído / eliminado. Un item solo queda oculto (o leído)

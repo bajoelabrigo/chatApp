@@ -16,6 +16,7 @@ import bibleRoutes from './routes/bible.routes';
 import offeringRoutes from './routes/offering.routes';
 import notificationRoutes from './routes/notification.routes';
 import adminRoutes from './routes/admin.routes';
+import materialRoutes from './routes/material.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 import { setIO } from './socket/ioSingleton';
 import { startCronJobs } from './services/cronService';
@@ -43,6 +44,7 @@ app.use('/bible', bibleRoutes);
 app.use('/offerings', offeringRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/admin', adminRoutes);
+app.use('/materials', materialRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

@@ -186,9 +186,17 @@ export async function editPrayerRequest(req: Request, res: Response) {
     if (imageUrl === null) {
       unset.imageUrl = '';
       unset.cloudinaryPublicId = '';
+      // Imagen eliminada → borrar el asset anterior de Cloudinary.
+      if (request.cloudinaryPublicId) {
+        deleteCloudinaryAssets([{ publicId: request.cloudinaryPublicId, type: 'image' }]);
+      }
     } else if (typeof imageUrl === 'string' && imageUrl) {
       set.imageUrl = imageUrl;
       if (cloudinaryPublicId) set.cloudinaryPublicId = cloudinaryPublicId;
+      // Imagen reemplazada por otra distinta → borrar la anterior de Cloudinary.
+      if (request.cloudinaryPublicId && request.cloudinaryPublicId !== cloudinaryPublicId) {
+        deleteCloudinaryAssets([{ publicId: request.cloudinaryPublicId, type: 'image' }]);
+      }
     }
 
     const update: Record<string, any> = { $set: set };
