@@ -21,6 +21,7 @@ function publicFields(m: any, flags: { owned?: boolean; viewed?: boolean } = {})
     slug: m.slug,
     description: m.description,
     features: m.features,
+    tags: m.tags || [],
     coverImage: m.coverImage,
     thumbnail: m.thumbnail,
     price: m.price,

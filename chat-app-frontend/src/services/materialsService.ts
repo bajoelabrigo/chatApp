@@ -6,11 +6,13 @@ export interface Material {
   slug: string;
   description?: string;
   features?: string[];
+  tags?: string[];
   coverImage?: string;
   thumbnail?: string;
   price: number;
   payWhatYouWant: boolean;
   salesCount?: number;
+  createdAt?: string;
   files?: { fileName?: string; fileType?: string }[];
   fileCount?: number;
   fileName?: string;

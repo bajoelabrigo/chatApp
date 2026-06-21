@@ -7,6 +7,7 @@ export interface IMaterial extends Document {
   slug: string;
   description?: string;
   features?: string[];
+  tags?: string[];
   coverImage?: string;
   thumbnail?: string;
   files?: { url: string; fileName?: string; fileType?: string; fileSize?: number }[];
@@ -29,6 +30,7 @@ const MaterialSchema = new Schema<IMaterial>(
     slug: { type: String, required: true },
     description: { type: String, default: '' },
     features: [{ type: String }],
+    tags: [{ type: String }],
     coverImage: { type: String, default: '' },
     thumbnail: { type: String, default: '' },
     files: [
