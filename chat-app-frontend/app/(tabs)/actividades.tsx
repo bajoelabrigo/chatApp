@@ -69,11 +69,6 @@ function getActivityName(c: ActivityCommitment): string {
   return a?.name ?? 'Actividad';
 }
 
-function getActivityEmoji(c: ActivityCommitment): string {
-  const a = c.activityId as any;
-  return a?.emoji ?? '🙏';
-}
-
 function getActivityType(c: ActivityCommitment): string | undefined {
   const a = c.activityId as any;
   return a?.type;
