@@ -416,6 +416,7 @@ export default function GroupActivitiesScreen() {
                       groupId,
                       activityName: detailActivity.name,
                       activityEmoji: detailActivity.emoji,
+                      activityType: detailActivity.type,
                     },
                   });
                 }}

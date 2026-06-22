@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useAuthStore } from '../../../src/store/useAuthStore';
 import { useTheme } from '../../../src/context/ThemeContext';
+import { ActivityIcon } from '../../../src/components/ActivityIcon';
 import { useActivitiesStore } from '../../../src/store/useActivitiesStore';
 import {
   commitToActivity,
@@ -109,11 +110,12 @@ function TimePickerModal({
 
 export default function CommitScreen() {
   const { colors, isDark } = useTheme();
-  const { activityId, groupId, activityName, activityEmoji } = useLocalSearchParams<{
+  const { activityId, groupId, activityName, activityEmoji, activityType } = useLocalSearchParams<{
     activityId: string;
     groupId: string;
     activityName: string;
     activityEmoji: string;
+    activityType: string;
   }>();
   const { token } = useAuthStore();
   const { myCommitments, setMyCommitments } = useActivitiesStore();
@@ -260,9 +262,12 @@ export default function CommitScreen() {
         <TouchableOpacity onPress={() => router.back()} style={{ alignSelf: 'flex-start', marginBottom: 8 }}>
           <Text style={{ color: colors.accent, fontSize: 15 }}>← Volver</Text>
         </TouchableOpacity>
-        <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 20 }}>
-          {activityEmoji} {activityName}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <ActivityIcon type={activityType} size={24} color={colors.accent} />
+          <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 20, flex: 1 }}>
+            {activityName}
+          </Text>
+        </View>
       </View>
 
       <KeyboardAvoidingView
