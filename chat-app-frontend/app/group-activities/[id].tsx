@@ -61,6 +61,7 @@ export default function GroupActivitiesScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<ActivityType>('ayuno');
   const [activityName, setActivityName] = useState('');
   const [activityDesc, setActivityDesc] = useState('');
@@ -116,8 +117,38 @@ export default function GroupActivitiesScreen() {
     return d.toLocaleDateString('es', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
+  function closeCreateModal() {
+    setShowCreate(false);
+    setEditingId(null);
+    setActivityName('');
+    setActivityDesc('');
+    setStartDate(undefined);
+    setEndDate(undefined);
+  }
+
   async function handleCreate() {
     if (!token) return;
+    // Modo edición: solo nombre y descripción (el backend no cambia tipo/fechas)
+    if (editingId) {
+      if (!activityName.trim()) {
+        Alert.alert('Nombre requerido', 'El nombre no puede quedar vacío.');
+        return;
+      }
+      setSaving(true);
+      try {
+        const act = await updateActivity(token, groupId, editingId, {
+          name: activityName.trim(),
+          description: activityDesc.trim(),
+        });
+        setActivities(groupId, groupActivities.map((a) => (a._id === editingId ? act : a)));
+        closeCreateModal();
+      } catch (err: any) {
+        Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo editar la actividad');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (startDate && endDate && endDate <= startDate) {
       Alert.alert('Fechas inválidas', 'La fecha de término debe ser posterior a la de inicio.');
       return;
@@ -132,11 +163,7 @@ export default function GroupActivitiesScreen() {
         endDate,
       });
       setActivities(groupId, [act, ...groupActivities]);
-      setShowCreate(false);
-      setActivityName('');
-      setActivityDesc('');
-      setStartDate(undefined);
-      setEndDate(undefined);
+      closeCreateModal();
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo crear la actividad');
     } finally {
@@ -147,6 +174,18 @@ export default function GroupActivitiesScreen() {
   function handleLongPress(activity: GroupActivity) {
     if (!isAdmin) return;
     Alert.alert(activity.name, 'Opciones de administrador', [
+      {
+        text: 'Editar',
+        onPress: () => {
+          setEditingId(activity._id);
+          setSelectedType(activity.type);
+          setActivityName(activity.name);
+          setActivityDesc(activity.description ?? '');
+          setStartDate(undefined);
+          setEndDate(undefined);
+          setShowCreate(true);
+        },
+      },
       {
         text: activity.isActive ? 'Desactivar' : 'Activar',
         onPress: async () => {
@@ -454,32 +493,45 @@ export default function GroupActivitiesScreen() {
 
       {/* Create Activity Modal */}
       <Modal visible={showCreate} animationType="slide" transparent>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} onPress={() => setShowCreate(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} onPress={closeCreateModal}>
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}>
             <Pressable onPress={() => {}} style={{ backgroundColor: colors.bgPrimary, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '92%' }}>
               <ScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
-                <Text style={{ color: colors.textPrimary, fontWeight: 'bold', fontSize: 18, marginBottom: 16 }}>Nueva actividad</Text>
+                <Text style={{ color: colors.textPrimary, fontWeight: 'bold', fontSize: 18, marginBottom: 16 }}>
+                  {editingId ? 'Editar actividad' : 'Nueva actividad'}
+                </Text>
 
-                <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Tipo de actividad</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                  {ACTIVITY_TYPES.map((at) => (
-                    <TouchableOpacity
-                      key={at.type}
-                      onPress={() => setSelectedType(at.type)}
-                      style={{
-                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-                        borderWidth: 1,
-                        backgroundColor: selectedType === at.type ? colors.accent : colors.bgSecondary,
-                        borderColor: selectedType === at.type ? colors.accentDark : colors.border,
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <ActivityIcon type={at.type} size={15} color={colors.textPrimary} />
-                        <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.label}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                {!editingId ? (
+                  <>
+                    <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Tipo de actividad</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                      {ACTIVITY_TYPES.map((at) => (
+                        <TouchableOpacity
+                          key={at.type}
+                          onPress={() => setSelectedType(at.type)}
+                          style={{
+                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+                            borderWidth: 1,
+                            backgroundColor: selectedType === at.type ? colors.accent : colors.bgSecondary,
+                            borderColor: selectedType === at.type ? colors.accentDark : colors.border,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <ActivityIcon type={at.type} size={15} color={colors.textPrimary} />
+                            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.label}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                    <ActivityIcon type={selectedType} size={18} color={colors.accent} />
+                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+                      {ACTIVITY_TYPES.find((a) => a.type === selectedType)?.label ?? 'Actividad'} · el tipo no se puede cambiar
+                    </Text>
+                  </View>
+                )}
 
                 <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 4 }}>Nombre (opcional)</Text>
                 <TextInput
@@ -501,7 +553,10 @@ export default function GroupActivitiesScreen() {
                   numberOfLines={3}
                 />
 
+                {!editingId && (
                 <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Fechas (opcional)</Text>
+                )}
+                {!editingId && (
                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 6 }}>Inicio</Text>
@@ -541,6 +596,7 @@ export default function GroupActivitiesScreen() {
                     ) : null}
                   </View>
                 </View>
+                )}
 
                 <TouchableOpacity
                   onPress={handleCreate}
@@ -550,7 +606,7 @@ export default function GroupActivitiesScreen() {
                   {saving ? (
                     <ActivityIndicator color="#fff" />
                   ) : (
-                    <Text style={{ color: '#fff', fontWeight: '600' }}>Crear actividad</Text>
+                    <Text style={{ color: '#fff', fontWeight: '600' }}>{editingId ? 'Guardar cambios' : 'Crear actividad'}</Text>
                   )}
                 </TouchableOpacity>
               </ScrollView>
