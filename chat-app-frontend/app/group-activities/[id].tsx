@@ -62,6 +62,7 @@ export default function GroupActivitiesScreen() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [adminMenu, setAdminMenu] = useState<GroupActivity | null>(null);
   const [selectedType, setSelectedType] = useState<ActivityType>('ayuno');
   const [activityName, setActivityName] = useState('');
   const [activityDesc, setActivityDesc] = useState('');
@@ -128,7 +129,11 @@ export default function GroupActivitiesScreen() {
 
   async function handleCreate() {
     if (!token) return;
-    // Modo edición: solo nombre y descripción (el backend no cambia tipo/fechas)
+    if (startDate && endDate && endDate <= startDate) {
+      Alert.alert('Fechas inválidas', 'La fecha de término debe ser posterior a la de inicio.');
+      return;
+    }
+    // Modo edición: nombre, descripción, tipo y fechas
     if (editingId) {
       if (!activityName.trim()) {
         Alert.alert('Nombre requerido', 'El nombre no puede quedar vacío.');
@@ -137,8 +142,11 @@ export default function GroupActivitiesScreen() {
       setSaving(true);
       try {
         const act = await updateActivity(token, groupId, editingId, {
+          type: selectedType,
           name: activityName.trim(),
           description: activityDesc.trim(),
+          startDate: startDate ?? '',
+          endDate: endDate ?? '',
         });
         setActivities(groupId, groupActivities.map((a) => (a._id === editingId ? act : a)));
         closeCreateModal();
@@ -147,10 +155,6 @@ export default function GroupActivitiesScreen() {
       } finally {
         setSaving(false);
       }
-      return;
-    }
-    if (startDate && endDate && endDate <= startDate) {
-      Alert.alert('Fechas inválidas', 'La fecha de término debe ser posterior a la de inicio.');
       return;
     }
     setSaving(true);
@@ -171,57 +175,50 @@ export default function GroupActivitiesScreen() {
     }
   }
 
-  function handleLongPress(activity: GroupActivity) {
-    if (!isAdmin) return;
-    Alert.alert(activity.name, 'Opciones de administrador', [
-      {
-        text: 'Editar',
-        onPress: () => {
-          setEditingId(activity._id);
-          setSelectedType(activity.type);
-          setActivityName(activity.name);
-          setActivityDesc(activity.description ?? '');
-          setStartDate(undefined);
-          setEndDate(undefined);
-          setShowCreate(true);
-        },
-      },
-      {
-        text: activity.isActive ? 'Desactivar' : 'Activar',
-        onPress: async () => {
-          try {
-            await updateActivity(token!, groupId, activity._id, { isActive: !activity.isActive });
-            setActivities(groupId, groupActivities.map((a) =>
-              a._id === activity._id ? { ...a, isActive: !a.isActive } : a
-            ));
-          } catch {
-            Alert.alert('Error', 'No se pudo actualizar la actividad');
-          }
-        },
-      },
+  function openEditModal(activity: GroupActivity) {
+    setEditingId(activity._id);
+    setSelectedType(activity.type);
+    setActivityName(activity.name);
+    setActivityDesc(activity.description ?? '');
+    setStartDate(activity.startDate ?? undefined);
+    setEndDate(activity.endDate ?? undefined);
+    setShowCreate(true);
+  }
+
+  async function toggleActive(activity: GroupActivity) {
+    if (!token) return;
+    try {
+      await updateActivity(token, groupId, activity._id, { isActive: !activity.isActive });
+      setActivities(groupId, groupActivities.map((a) =>
+        a._id === activity._id ? { ...a, isActive: !a.isActive } : a
+      ));
+    } catch {
+      Alert.alert('Error', 'No se pudo actualizar la actividad');
+    }
+  }
+
+  function confirmDelete(activity: GroupActivity) {
+    Alert.alert('¿Eliminar actividad?', 'Esta acción es permanente. Se eliminará la actividad y todos los compromisos que los miembros hicieron sobre ella. No se puede deshacer.', [
+      { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
-        onPress: () => {
-          Alert.alert('¿Eliminar actividad?', 'Esta acción es permanente. Se eliminará la actividad y todos los compromisos que los miembros hicieron sobre ella. No se puede deshacer.', [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Eliminar',
-              style: 'destructive',
-              onPress: async () => {
-                try {
-                  await deleteActivity(token!, groupId, activity._id);
-                  setActivities(groupId, groupActivities.filter((a) => a._id !== activity._id));
-                } catch {
-                  Alert.alert('Error', 'No se pudo eliminar');
-                }
-              },
-            },
-          ]);
+        onPress: async () => {
+          try {
+            await deleteActivity(token!, groupId, activity._id);
+            setActivities(groupId, groupActivities.filter((a) => a._id !== activity._id));
+          } catch {
+            Alert.alert('Error', 'No se pudo eliminar');
+          }
         },
       },
-      { text: 'Cancelar', style: 'cancel' },
     ]);
+  }
+
+  // Android limita Alert.alert a 3 botones; usamos un menú propio para las 4 opciones.
+  function handleLongPress(activity: GroupActivity) {
+    if (!isAdmin) return;
+    setAdminMenu(activity);
   }
 
   async function handleCancelCommitment() {
@@ -501,37 +498,26 @@ export default function GroupActivitiesScreen() {
                   {editingId ? 'Editar actividad' : 'Nueva actividad'}
                 </Text>
 
-                {!editingId ? (
-                  <>
-                    <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Tipo de actividad</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-                      {ACTIVITY_TYPES.map((at) => (
-                        <TouchableOpacity
-                          key={at.type}
-                          onPress={() => setSelectedType(at.type)}
-                          style={{
-                            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
-                            borderWidth: 1,
-                            backgroundColor: selectedType === at.type ? colors.accent : colors.bgSecondary,
-                            borderColor: selectedType === at.type ? colors.accentDark : colors.border,
-                          }}
-                        >
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <ActivityIcon type={at.type} size={15} color={colors.textPrimary} />
-                            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.label}</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </>
-                ) : (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <ActivityIcon type={selectedType} size={18} color={colors.accent} />
-                    <Text style={{ color: colors.textMuted, fontSize: 13 }}>
-                      {ACTIVITY_TYPES.find((a) => a.type === selectedType)?.label ?? 'Actividad'} · el tipo no se puede cambiar
-                    </Text>
-                  </View>
-                )}
+                <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Tipo de actividad</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                  {ACTIVITY_TYPES.map((at) => (
+                    <TouchableOpacity
+                      key={at.type}
+                      onPress={() => setSelectedType(at.type)}
+                      style={{
+                        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12,
+                        borderWidth: 1,
+                        backgroundColor: selectedType === at.type ? colors.accent : colors.bgSecondary,
+                        borderColor: selectedType === at.type ? colors.accentDark : colors.border,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <ActivityIcon type={at.type} size={15} color={colors.textPrimary} />
+                        <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.label}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
 
                 <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 4 }}>Nombre (opcional)</Text>
                 <TextInput
@@ -553,10 +539,7 @@ export default function GroupActivitiesScreen() {
                   numberOfLines={3}
                 />
 
-                {!editingId && (
                 <Text style={{ color: colors.textSecondary, fontSize: 14, marginBottom: 8 }}>Fechas (opcional)</Text>
-                )}
-                {!editingId && (
                 <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 6 }}>Inicio</Text>
@@ -596,7 +579,6 @@ export default function GroupActivitiesScreen() {
                     ) : null}
                   </View>
                 </View>
-                )}
 
                 <TouchableOpacity
                   onPress={handleCreate}
@@ -613,6 +595,51 @@ export default function GroupActivitiesScreen() {
             </Pressable>
             </KeyboardAvoidingView>
           </Pressable>
+      </Modal>
+
+      {/* Menú de opciones de admin (modal propio: Android limita Alert.alert a 3 botones) */}
+      <Modal visible={!!adminMenu} transparent animationType="fade">
+        <Pressable
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+          onPress={() => setAdminMenu(null)}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{ backgroundColor: colors.bgPrimary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 8, paddingBottom: 28 }}
+          >
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginVertical: 8 }} />
+            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', marginBottom: 6 }} numberOfLines={1}>
+              {adminMenu?.name}
+            </Text>
+            <TouchableOpacity
+              onPress={() => { const a = adminMenu!; setAdminMenu(null); openEditModal(a); }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 }}
+            >
+              <Ionicons name="pencil" size={20} color={colors.accent} />
+              <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Editar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { const a = adminMenu!; setAdminMenu(null); toggleActive(a); }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 }}
+            >
+              <Ionicons name={adminMenu?.isActive ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.textPrimary} />
+              <Text style={{ color: colors.textPrimary, fontSize: 16 }}>{adminMenu?.isActive ? 'Desactivar' : 'Activar'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { const a = adminMenu!; setAdminMenu(null); confirmDelete(a); }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 24 }}
+            >
+              <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              <Text style={{ color: colors.danger, fontSize: 16 }}>Eliminar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setAdminMenu(null)}
+              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+            >
+              <Text style={{ color: colors.textMuted, fontSize: 16 }}>Cancelar</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <DatePickerModal

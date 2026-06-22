@@ -102,7 +102,7 @@ export async function updateActivity(
   token: string,
   groupId: string,
   activityId: string,
-  payload: { name?: string; description?: string; isActive?: boolean }
+  payload: { name?: string; description?: string; isActive?: boolean; type?: ActivityType; startDate?: string; endDate?: string }
 ): Promise<GroupActivity> {
   const { data } = await api.patch<GroupActivity>(`/groups/${groupId}/activities/${activityId}`, payload, h(token));
   return data;

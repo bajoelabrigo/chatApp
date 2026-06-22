@@ -129,7 +129,7 @@ export async function updateActivity(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId, activityId } = req.params;
-    const { name, description, isActive } = req.body;
+    const { name, description, isActive, type, startDate, endDate } = req.body;
 
     const { conv, globalAdmin } = await resolveGroup(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -141,12 +141,30 @@ export async function updateActivity(req: Request, res: Response) {
     if (name?.trim()) update.name = name.trim();
     if (description !== undefined) update.description = description?.trim() ?? '';
     if (isActive !== undefined) update.isActive = isActive;
+    if (type !== undefined) {
+      if (!ACTIVITY_META[type as ActivityType]) {
+        return res.status(400).json({ error: 'Tipo de actividad inválido' });
+      }
+      update.type = type;
+      update.emoji = ACTIVITY_META[type as ActivityType].emoji;
+    }
+    if (startDate !== undefined) update.startDate = startDate ? new Date(startDate) : null;
+    if (endDate !== undefined) update.endDate = endDate ? new Date(endDate) : null;
 
-    const updated = await GroupActivity.findOneAndUpdate(
-      { _id: activityId, groupId },
-      { $set: update },
-      { new: true }
-    );
+    let updated;
+    try {
+      updated = await GroupActivity.findOneAndUpdate(
+        { _id: activityId, groupId },
+        { $set: update },
+        { new: true }
+      );
+    } catch (err: any) {
+      // Índice único { groupId, type }: ya hay una actividad de ese tipo en el grupo
+      if (err?.code === 11000) {
+        return res.status(409).json({ error: 'Ya existe una actividad de ese tipo en el grupo' });
+      }
+      throw err;
+    }
     if (!updated) return res.status(404).json({ error: 'Actividad no encontrada' });
 
     res.json(updated);
