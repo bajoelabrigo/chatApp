@@ -4,7 +4,7 @@ export type ActivityType = 'ayuno' | 'vigilia' | 'cilicio' | 'escala_oracion' | 
 
 export const ACTIVITY_META: Record<ActivityType, { emoji: string; defaultName: string }> = {
   ayuno:          { emoji: '🤲', defaultName: 'Ayuno' },
-  vigilia:        { emoji: '🕯️', defaultName: 'Vigilia' },
+  vigilia:        { emoji: '🏆', defaultName: 'Vigilia' },
   cilicio:        { emoji: '⛓️', defaultName: 'Cilicio' },
   escala_oracion: { emoji: '🙏', defaultName: 'Escala de Oración' },
   bible_reading:  { emoji: '📖', defaultName: 'Lectura Bíblica' },

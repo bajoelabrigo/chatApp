@@ -92,6 +92,7 @@ export async function getUserContent(req: Request, res: Response) {
         _id: a._id,
         name: a.name,
         emoji: a.emoji,
+        type: a.type,
         groupId: a.groupId?._id ?? a.groupId,
         groupName: a.groupId?.groupName ?? 'Grupo',
         isActive: a.isActive,

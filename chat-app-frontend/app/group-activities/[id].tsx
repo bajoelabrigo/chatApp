@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { ActivityIcon } from '../../src/components/ActivityIcon';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useActivitiesStore } from '../../src/store/useActivitiesStore';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -39,7 +40,7 @@ const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const ACTIVITY_TYPES: { type: ActivityType; emoji: string; label: string }[] = [
   { type: 'ayuno',          emoji: '🤲', label: 'Ayuno' },
-  { type: 'vigilia',        emoji: '🕯️', label: 'Vigilia' },
+  { type: 'vigilia',        emoji: '🏆', label: 'Vigilia' },
   { type: 'cilicio',        emoji: '⛓️', label: 'Cilicio' },
   { type: 'escala_oracion', emoji: '🙏', label: 'Escala de Oración' },
   { type: 'bible_reading',  emoji: '📖', label: 'Lectura Bíblica' },
@@ -263,7 +264,7 @@ export default function GroupActivitiesScreen() {
             style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, padding: 16, opacity: item.isActive ? 1 : 0.5 }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Text style={{ fontSize: 28 }}>{item.emoji}</Text>
+              <ActivityIcon type={item.type} size={28} color={colors.accent} />
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 16 }}>{item.name}</Text>
                 {item.description ? (
@@ -301,7 +302,7 @@ export default function GroupActivitiesScreen() {
                 <Text style={{ color: colors.accent, fontSize: 15 }}>← Volver</Text>
               </TouchableOpacity>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Text style={{ fontSize: 30 }}>{detailActivity.emoji}</Text>
+                <ActivityIcon type={detailActivity.type} size={30} color={colors.accent} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 20 }}>{detailActivity.name}</Text>
                   {detailActivity.description ? (
@@ -471,7 +472,10 @@ export default function GroupActivitiesScreen() {
                         borderColor: selectedType === at.type ? colors.accentDark : colors.border,
                       }}
                     >
-                      <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.emoji} {at.label}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <ActivityIcon type={at.type} size={15} color={colors.textPrimary} />
+                        <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{at.label}</Text>
+                      </View>
                     </TouchableOpacity>
                   ))}
                 </View>

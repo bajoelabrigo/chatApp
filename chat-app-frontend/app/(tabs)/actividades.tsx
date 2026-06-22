@@ -22,6 +22,7 @@ const PERSONAL_CARD_WIDTH = Dimensions.get('window').width - 32;
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { ActivityIcon } from '../../src/components/ActivityIcon';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useActivitiesStore } from '../../src/store/useActivitiesStore';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -38,7 +39,7 @@ const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const ACTIVITY_TYPES: { type: ActivityType; emoji: string; label: string }[] = [
   { type: 'ayuno',          emoji: '🤲', label: 'Ayuno' },
-  { type: 'vigilia',        emoji: '🕯️', label: 'Vigilia' },
+  { type: 'vigilia',        emoji: '🏆', label: 'Vigilia' },
   { type: 'cilicio',        emoji: '⛓️', label: 'Cilicio' },
   { type: 'escala_oracion', emoji: '🙏', label: 'Escala de Oración' },
   { type: 'bible_reading',  emoji: '📖', label: 'Lectura Bíblica' },
@@ -71,6 +72,11 @@ function getActivityName(c: ActivityCommitment): string {
 function getActivityEmoji(c: ActivityCommitment): string {
   const a = c.activityId as any;
   return a?.emoji ?? '🙏';
+}
+
+function getActivityType(c: ActivityCommitment): string | undefined {
+  const a = c.activityId as any;
+  return a?.type;
 }
 
 // ── Inline time picker (chevrons) ──────────────────────────
@@ -120,10 +126,10 @@ function TimePicker({
 
 // ── Commitment card ─────────────────────────────────────────
 function CommitmentCard({
-  emoji, name, tag, proposito, daysOfWeek, startHour, startMinute, endHour, endMinute,
+  type, name, tag, proposito, daysOfWeek, startHour, startMinute, endHour, endMinute,
   notificationsEnabled, colors, onPress, onOptions, style,
 }: {
-  emoji: string;
+  type?: ActivityType | string;
   name: string;
   tag: string;
   proposito?: string;
@@ -144,9 +150,9 @@ function CommitmentCard({
       activeOpacity={onPress ? 0.7 : 1}
       style={[{ backgroundColor: colors.bgSecondary, borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: colors.border }, style]}
     >
-      {/* Row 1: emoji + name + notif */}
+      {/* Row 1: icon + name + notif */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <Text style={{ fontSize: 22 }}>{emoji}</Text>
+        <ActivityIcon type={type} size={22} color={colors.accent} />
         <View style={{ flex: 1 }}>
           <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>{name}</Text>
           <Text style={{ color: colors.textMuted, fontSize: 12 }}>{tag}</Text>
@@ -242,7 +248,7 @@ function SwipeablePersonalCard({
             />
           )}
           <CommitmentCard
-            emoji={p.emoji}
+            type={p.type}
             name={p.name}
             tag="Personal"
             proposito={p.proposito}
@@ -461,7 +467,7 @@ export default function ActividadesScreen() {
             {myCommitments.map((c) => (
               <CommitmentCard
                 key={`group-${c._id}`}
-                emoji={getActivityEmoji(c)}
+                type={getActivityType(c)}
                 name={getActivityName(c)}
                 tag={getGroupName(c)}
                 proposito={c.proposito}
@@ -701,9 +707,12 @@ export default function ActividadesScreen() {
                       borderColor: newType === at.type ? colors.accentDark : colors.border,
                     }}
                   >
-                    <Text style={{ color: newType === at.type ? '#fff' : colors.textPrimary, fontSize: 13 }}>
-                      {at.emoji} {at.label}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <ActivityIcon type={at.type} size={14} color={newType === at.type ? '#fff' : colors.textPrimary} />
+                      <Text style={{ color: newType === at.type ? '#fff' : colors.textPrimary, fontSize: 13 }}>
+                        {at.label}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
