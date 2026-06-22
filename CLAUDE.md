@@ -132,6 +132,23 @@ eas build --platform android --profile preview
 
 **Regla crítica — variables de entorno en builds EAS:** El archivo `.env` está en `.gitignore` y los servidores de EAS nunca lo reciben. Todas las variables `EXPO_PUBLIC_*` deben estar declaradas en `eas.json` bajo `env` en cada perfil de build. Si se agrega una nueva variable de entorno al frontend, agregarla también en `eas.json`.
 
+### Web (`holy_app`) → VPS
+
+Repo aparte (`holy_app`). Backend PM2 `holy-backend` en `/var/www/holy-app/backend`; frontend (Vite/PWA) servido desde `/var/www/holy-app/frontend/dist`.
+
+**Backend web** (no requiere build; reiniciar PM2): subir por `scp` los archivos cambiados a su ruta espejo bajo `/var/www/holy-app/backend/` y luego:
+```bash
+ssh root@145.223.27.84 "pm2 restart holy-backend"
+```
+
+**Frontend web** (requiere build: `npm run build` en `holy_app/frontend` → `dist/`). Subir el dist completo (incluye `sw.js`/`registerSW.js` del PWA) — **estas son las líneas exactas que usa el usuario**:
+```bash
+cd holy_app/frontend
+scp -r dist/* root@145.223.27.84:/var/www/holy-app/frontend/dist/
+ssh root@145.223.27.84 "chmod -R a+rX /var/www/holy-app/frontend/dist"
+```
+PWA con Service Worker: tras subir puede requerir recarga forzada (Ctrl+Shift+R) para ver el cambio.
+
 ---
 
 ## Backend architecture

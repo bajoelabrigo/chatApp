@@ -163,7 +163,7 @@ export default function GroupActivitiesScreen() {
         text: 'Eliminar',
         style: 'destructive',
         onPress: () => {
-          Alert.alert('¿Eliminar actividad?', 'Se eliminarán todos los compromisos asociados.', [
+          Alert.alert('¿Eliminar actividad?', 'Esta acción es permanente. Se eliminará la actividad y todos los compromisos que los miembros hicieron sobre ella. No se puede deshacer.', [
             { text: 'Cancelar', style: 'cancel' },
             {
               text: 'Eliminar',

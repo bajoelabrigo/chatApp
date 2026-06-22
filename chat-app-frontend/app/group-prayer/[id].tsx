@@ -302,7 +302,7 @@ export default function GroupPrayerScreen() {
   }
 
   async function handleDelete(requestId: string) {
-    Alert.alert('¿Eliminar petición?', '', [
+    Alert.alert('¿Eliminar petición?', 'Esta acción es permanente. Se eliminará la petición, su imagen (si tiene) y el registro de quienes estaban orando por ella. No se puede deshacer.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
@@ -320,7 +320,7 @@ export default function GroupPrayerScreen() {
   }
 
   async function handleDeleteAnswered(requestId: string) {
-    Alert.alert('¿Eliminar petición respondida?', '', [
+    Alert.alert('¿Eliminar petición respondida?', 'Esta acción es permanente. Se eliminará la petición, su imagen (si tiene) y su nota de respuesta. No se puede deshacer.', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',

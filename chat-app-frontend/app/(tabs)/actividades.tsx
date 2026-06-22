@@ -502,7 +502,7 @@ export default function ActividadesScreen() {
                 }}
                 onEdit={() => openEditPersonal(p)}
                 onDelete={() => {
-                  Alert.alert('¿Eliminar actividad?', `Se eliminará "${p.name}".`, [
+                  Alert.alert('¿Eliminar actividad?', `Se eliminará "${p.name}" de forma permanente. No se puede deshacer.`, [
                     { text: 'Cancelar', style: 'cancel' },
                     {
                       text: 'Eliminar',

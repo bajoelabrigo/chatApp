@@ -331,10 +331,13 @@ export default function GroupProfileScreen() {
   };
 
   const handleDelete = () => {
-    Alert.alert('Eliminar grupo', 'Esta acción es permanente. Se eliminarán todos los mensajes del grupo.', [
+    Alert.alert(
+      '⚠️ Eliminar grupo permanentemente',
+      'Esta acción es DEFINITIVA e IRRECUPERABLE. Se eliminará para TODOS los miembros:\n\n• Todos los mensajes del grupo\n• Todas las fotos, audios y archivos enviados\n• Las actividades espirituales y compromisos\n• Las peticiones de oración y sus imágenes\n• La foto del grupo\n\nNo existe ninguna forma de recuperar esta información una vez eliminada.',
+      [
       { text: 'Cancelar', style: 'cancel' },
       {
-        text: 'Eliminar', style: 'destructive',
+        text: 'Sí, eliminar grupo', style: 'destructive',
         onPress: async () => {
           if (!token) return;
           try {
