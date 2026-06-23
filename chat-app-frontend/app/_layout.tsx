@@ -177,6 +177,8 @@ function RootLayoutInner() {
         <Stack.Screen name="call" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="group-call" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="contact/[id]" />
+        <Stack.Screen name="u/[id]" />
+        <Stack.Screen name="g/[id]" />
       </Stack>
 
       {/* Incoming 1-on-1 call overlay */}

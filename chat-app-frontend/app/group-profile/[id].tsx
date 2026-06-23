@@ -39,6 +39,7 @@ import {
   type GroupPermissions,
 } from '../../src/services/conversationService';
 import { uploadFile } from '../../src/services/uploadService';
+import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 
 const TEMP_OPTIONS: { label: string; value: number | null }[] = [
   { label: 'Desactivado', value: null },
@@ -69,6 +70,7 @@ export default function GroupProfileScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [showPermissions, setShowPermissions] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [showTempMsg, setShowTempMsg] = useState(false);
   const [showAddMembers, setShowAddMembers] = useState(false);
 
@@ -637,6 +639,10 @@ export default function GroupProfileScreen() {
 
         {/* Action buttons */}
         <View style={s.card}>
+          <TouchableOpacity style={s.row} onPress={() => setShowShare(true)}>
+            <Ionicons name="share-social-outline" size={20} color={colors.textSecondary} style={{ marginRight: 16 }} />
+            <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Compartir grupo</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={s.row} onPress={handleReport}>
             <Text style={{ fontSize: 20, marginRight: 16 }}>🚩</Text>
             <Text style={{ color: '#f59e0b', fontSize: 16 }}>Reportar grupo</Text>
@@ -949,6 +955,15 @@ export default function GroupProfileScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Compartir grupo (enlace + QR) */}
+      <ShareSheet
+        visible={showShare}
+        onClose={() => setShowShare(false)}
+        url={`${WEB_URL}/g/${groupId}`}
+        title="Compartir grupo"
+        message={`Únete a "${group.groupName}" en Holyholyholy`}
+      />
     </SafeAreaView>
   );
 }

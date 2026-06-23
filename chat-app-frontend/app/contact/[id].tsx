@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, Image,
-  TextInput, Alert, Share, ActivityIndicator, Modal, Pressable, StatusBar,
+  TextInput, Alert, ActivityIndicator, Modal, Pressable, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +10,7 @@ import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useChatsStore } from '../../src/store/useChatsStore';
 import { useTheme } from '../../src/context/ThemeContext';
+import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 import {
   getUserProfile, reportUser, apiToggleFavorite, apiToggleBlock,
   apiToggleArchive, addGroupMembers, type ContactProfile,
@@ -41,6 +42,7 @@ export default function ContactInfoScreen() {
   const [showAllGroups, setShowAllGroups] = useState(false);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [addingToGroupId, setAddingToGroupId] = useState<string | null>(null);
+  const [showShare, setShowShare] = useState(false);
 
   const conv = conversations.find((c) => c._id === conversationId);
   const isFavorite = conv?.isFavorite ?? false;
@@ -171,12 +173,9 @@ export default function ContactInfoScreen() {
     }
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     if (!profile) return;
-    await Share.share({
-      message: `${displayName}\n${profile.email}`,
-      title: displayName,
-    });
+    setShowShare(true);
   };
 
   const handleAddToGroup = async (groupId: string) => {
@@ -494,6 +493,15 @@ export default function ContactInfoScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Compartir contacto (enlace + QR) */}
+      <ShareSheet
+        visible={showShare}
+        onClose={() => setShowShare(false)}
+        url={`${WEB_URL}/u/${userId}`}
+        title="Compartir contacto"
+        message={`Chatea con ${displayName} en Holyholyholy`}
+      />
     </SafeAreaView>
   );
 }
