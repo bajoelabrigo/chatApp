@@ -321,6 +321,28 @@ Cuando se cierra (close): `setOverlay(false)`.
 
 ---
 
+## Compartir (enlaces, QR y Open Graph)
+
+Compartir con enlace + QR (añadido 2026-06-23). Tres superficies: materiales, la web, y usuarios/grupos del chat.
+
+**Endpoints públicos del chat-backend** (`/public`, sin auth — `publicController.ts` + `public.routes.ts`):
+- `GET /public/users/:id`, `GET /public/groups/:id` — perfil mínimo para la página de invitación.
+- `GET /public/qr?data=<url>&size=300` — PNG del QR (lib `qrcode`). Lo usa la app móvil (no tiene librería de QR nativa).
+
+**Web (`holy_app`)** — usa `qrcode.react` + `react-share`:
+- `ShareModal.jsx` (reutilizable: QR + redes + copiar/descargar). Prop opcional `socialUrl`: URL distinta para los botones de redes/sistema (la que genera Open Graph) cuando difiere de la mostrada/QR.
+- Página de invitación `InvitePage.jsx` en `/u/:id` y `/g/:id`: perfil + "abrir en web" (`/chat?startUser=` / `?openGroup=`, manejado en `ChatPage.jsx`) + "abrir en app" (`chatapp://u/:id`).
+- `LinkPreview.jsx`: para enlaces a `/materiales/:slug` arma la vista previa con los datos reales del material (no microlink, que solo vería el index.html genérico). Caché versionada (`linkpreview:v2:`).
+
+**Móvil (`chat-app-frontend`)**: `ShareSheet.tsx` (QR del backend + Share nativo; exporta `WEB_URL` = API_URL sin `api.`). Botón compartir en `contact/[id]` y `group-profile/[id]`. Deep links `app/u/[id].tsx` y `app/g/[id].tsx` (`chatapp://u/:id`, `chatapp://g/:id`) abren/crean la conversación. Sin paquetes nativos → se despliega con `eas update`.
+
+**Open Graph para previews en WhatsApp/Facebook** (los scrapers no ejecutan JS; la SPA solo entrega el index.html genérico → logo + "Holy App"):
+- Backend web (`holy_app/backend/routes/shareRoutes.js`): sirve OG a bots (UA tipo `facebookexternalhit|whatsapp|...`) y redirige humanos a la SPA.
+  - `/api/share/post/:id` — si el post enlaza un material y no tiene imagen propia, usa la portada/título del material como OG.
+  - `/api/share/material/:slug` — OG con la portada del material.
+- **nginx** (`/etc/nginx/sites-available/holyholyholy`; copia versionada en `holy_app/deploy/nginx-holyholyholy.conf`): un `map $http_user_agent $holy_is_bot` (contexto http) + `location ~ ^/materiales/(?<mslug>[^/]+)/?$` que enruta SOLO bots a `/api/share/material/<slug>` (humanos → SPA). Patrón seguro `error_page 418 = @og_material` (evita el combo problemático `if + proxy_pass`). Deploy nginx: backup → `scp` el archivo → `nginx -t && systemctl reload nginx`.
+- WhatsApp **cachea** las previews por URL y no tiene "scrape again" público (Facebook sí: developers.facebook.com/tools/debug). Para forzar refresco al probar: añadir `?v=2` al final de la URL.
+
 ## Environment variables
 
 ### Backend (`chat-app-backend/.env`)
