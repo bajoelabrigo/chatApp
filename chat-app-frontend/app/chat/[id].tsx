@@ -802,10 +802,10 @@ export default function ChatScreen() {
   };
 
   // ── Descarga y compartir ────────────────────────────────
-  const handleDownload = (msg: Message) => {
+  const handleDownload = useCallback((msg: Message) => {
     // Abre la URL — en Android el navegador descarga automáticamente
     Linking.openURL(msg.content);
-  };
+  }, []);
 
   const handleShare = async (msg: Message) => {
     setActionMessage(null);
@@ -835,13 +835,13 @@ export default function ChatScreen() {
     socket.emit('message:react', { messageId: msg._id, conversationId, emoji });
   };
 
-  const handleReactFromBubble = (msg: Message, emoji: string) => {
+  const handleReactFromBubble = useCallback((msg: Message, emoji: string) => {
     socket?.emit('message:react', { messageId: msg._id, conversationId, emoji });
-  };
+  }, [socket, conversationId]);
 
-  const handleOpenReactionDetail = (msg: Message, emoji: string) => {
+  const handleOpenReactionDetail = useCallback((msg: Message, emoji: string) => {
     setReactionDetail({ messageId: msg._id, filterEmoji: emoji });
-  };
+  }, []);
 
   const handleChangeReaction = (newEmoji: string) => {
     if (!reactionDetail || !socket) return;
@@ -874,7 +874,21 @@ export default function ChatScreen() {
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
-  const handleLongPress = (msg: Message) => setActionMessage(msg);
+  const handleLongPress = useCallback((msg: Message) => setActionMessage(msg), []);
+
+  // Callbacks estables para las burbujas (memoizadas): evitan recrear funciones
+  // en cada render del chat, lo que anularía el React.memo de MessageBubble.
+  const handleAvatarPress = useCallback((sender: ChatUser) => setMemberModal(sender), []);
+  const handleCallBack = useCallback((msg: Message) => {
+    if (!otherParticipant || callState !== 'idle') return;
+    startCall({
+      peerId: otherParticipant._id,
+      peerName: otherParticipant.name,
+      peerAvatar: otherParticipant.avatar,
+      conversationId,
+      callType: msg.callType ?? 'audio',
+    });
+  }, [otherParticipant, callState, startCall, conversationId]);
 
   const handleEdit = () => {
     if (!actionMessage) return;
@@ -1140,17 +1154,8 @@ export default function ChatScreen() {
                   onDownload={handleDownload}
                   onReact={handleReactFromBubble}
                   onReactDetail={handleOpenReactionDetail}
-                  onAvatarPress={isGroupChat ? (sender) => setMemberModal(sender) : undefined}
-                  onCallBack={(msg) => {
-                    if (!otherParticipant || callState !== 'idle') return;
-                    startCall({
-                      peerId: otherParticipant._id,
-                      peerName: otherParticipant.name,
-                      peerAvatar: otherParticipant.avatar,
-                      conversationId,
-                      callType: msg.callType ?? 'audio',
-                    });
-                  }}
+                  onAvatarPress={isGroupChat ? handleAvatarPress : undefined}
+                  onCallBack={handleCallBack}
                 />
               );
               if (selectionMode) {

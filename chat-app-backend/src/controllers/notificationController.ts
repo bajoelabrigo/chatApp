@@ -63,11 +63,24 @@ export async function getNotifications(req: Request, res: Response) {
     const userId = (req as any).userId;
     const userObjId = new Types.ObjectId(userId);
 
-    const user = await User.findById(userId)
-      .select('lastNotificationsSeen blockedUsers readNotifications dismissedNotifications')
-      .lean();
-    const lastSeen = user?.lastNotificationsSeen ? new Date(user.lastNotificationsSeen) : new Date(0);
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+
+    // Usuario + conversaciones en paralelo (no dependen entre sí).
+    const [user, conversations] = await Promise.all([
+      User.findById(userId)
+        .select('lastNotificationsSeen blockedUsers readNotifications dismissedNotifications')
+        .lean(),
+      // Conversaciones del usuario (no archivadas) — para chats, llamadas y para
+      // derivar los grupos a los que pertenece.
+      Conversation.find({
+        participants: userId,
+        archivedBy: { $ne: userId },
+      })
+        .populate('participants', 'name avatar')
+        .populate({ path: 'lastMessage', populate: { path: 'senderId', select: 'name avatar' } })
+        .lean(),
+    ]);
+    const lastSeen = user?.lastNotificationsSeen ? new Date(user.lastNotificationsSeen) : new Date(0);
 
     // Mapas id → timestamp (ms) del marcado más reciente como leído / eliminado.
     const latestFlag = (arr?: { id: string; at: Date }[]) => {
@@ -80,16 +93,6 @@ export async function getNotifications(req: Request, res: Response) {
     };
     const readMap = latestFlag(user?.readNotifications);
     const dismissedMap = latestFlag(user?.dismissedNotifications);
-
-    // Conversaciones del usuario (no archivadas) — para chats, llamadas y para
-    // derivar los grupos a los que pertenece.
-    const conversations = await Conversation.find({
-      participants: userId,
-      archivedBy: { $ne: userId },
-    })
-      .populate('participants', 'name avatar')
-      .populate({ path: 'lastMessage', populate: { path: 'senderId', select: 'name avatar' } })
-      .lean();
 
     const convIds = conversations.map((c) => c._id);
     const groupIds = conversations.filter((c) => c.isGroup).map((c) => c._id);

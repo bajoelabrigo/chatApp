@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, memo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, Image, Linking, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message, MessageReplyTo, Reaction, ChatUser } from '../../services/conversationService';
@@ -306,7 +306,7 @@ interface Props {
   highlighted?: boolean;
 }
 
-export function MessageBubble({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId._id;
@@ -685,3 +685,8 @@ export function MessageBubble({ item, isMine, currentUserId, isGroup = false, on
     </View>
   );
 }
+
+// Memoizado: las burbujas solo se re-renderizan cuando cambia su propio mensaje
+// (los objetos Message se reemplazan de forma inmutable en el store) o una de
+// sus props primitivas. Evita re-renderizar toda la lista en cada scroll/typing.
+export const MessageBubble = memo(MessageBubbleComponent);
