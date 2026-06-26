@@ -273,6 +273,12 @@ export const useChatsStore = create<ChatsState>()(
       store.upsertConversation(conv);
       socket.emit('conversation:join', { conversationId: conv._id });
     });
+    // Chat 1:1 nuevo: el backend envía la conversación poblada al recibir el
+    // primer mensaje, para que aparezca en la lista sin tener que refrescar.
+    socket.on('conversation:new', (conv: Conversation) => {
+      store.upsertConversation(conv);
+      socket.emit('conversation:join', { conversationId: conv._id });
+    });
     socket.on('group:deleted', ({ groupId }: { groupId: string }) => {
       set((s) => ({
         conversations: s.conversations.filter((c) => c._id !== groupId),
@@ -352,6 +358,7 @@ export const useChatsStore = create<ChatsState>()(
     const socket = getSocket();
     if (!socket) return;
     socket.off('group:new');
+    socket.off('conversation:new');
     socket.off('group:deleted');
     socket.off('message:new');
     socket.off('message:delivered');

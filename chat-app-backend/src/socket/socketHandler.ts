@@ -165,6 +165,12 @@ export function setupSocketHandlers(io: Server) {
           replyTo,
         });
 
+        // ¿Primer mensaje del chat? (la conversación aún no tenía lastMessage).
+        // `conversation` se leyó arriba ANTES de actualizar lastMessage, así que
+        // refleja el estado previo. Sirve para detectar un chat 1:1 nuevo cuyo
+        // receptor todavía no lo tiene en su lista.
+        const isFirstMessage = !conversation.lastMessage;
+
         await Conversation.findByIdAndUpdate(conversationId, {
           lastMessage: message._id,
           lastMessageAt: message.createdAt,
@@ -176,6 +182,27 @@ export function setupSocketHandlers(io: Server) {
           // Only echo back to sender — recipient never sees it
           socket.emit('message:new', populated);
           return;
+        }
+
+        // Asegura que los sockets de los demás participantes estén en la room de
+        // la conversación. Al conectar, un usuario solo se une a las rooms de las
+        // conversaciones que YA existían; sin esto, el primer mensaje de un chat
+        // nuevo no llega en tiempo real (el chat aparece solo tras refrescar).
+        const personalRooms = otherParticipants.map((id) => `user:${id}`);
+        if (personalRooms.length > 0) io.in(personalRooms).socketsJoin(conversationId);
+
+        // Si es el primer mensaje de un chat 1:1, el receptor aún no tiene la
+        // conversación en su lista. Le enviamos la conversación poblada a su room
+        // personal ANTES del mensaje, para que la tarjeta aparezca al instante.
+        if (isFirstMessage && !conversation.isGroup) {
+          const fullConv = await Conversation.findById(conversationId)
+            .populate('participants', 'name avatar email lastSeen showLastSeen')
+            .lean();
+          if (fullConv) {
+            for (const pid of otherParticipants) {
+              io.to(`user:${pid}`).emit('conversation:new', fullConv);
+            }
+          }
         }
 
         // Emitir a todos en la room (incluyendo el emisor para confirmar)
