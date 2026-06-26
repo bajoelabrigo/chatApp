@@ -40,6 +40,18 @@ Desde 2026-06-08, la app móvil (`chat-app-backend`) y la web (`holy_app`) **com
 
 ---
 
+## Seminario web (`holy_app`) — gotchas
+
+El "seminario" es una `Activity` con `seminar.enabled` (`activityModel.js`). Toda la lógica vive en `seminarController.js` + `submissionController.js` (backend) y `frontend/src/components/seminario/`.
+
+- **`seminar.studentProgress` embebido — SIEMPRE escribir con updates atómicos**, nunca `findById`+`.save()` (reescribe el doc y pisa cambios concurrentes de otros alumnos → lost-update). Patrón: paso 1 crea la entrada del alumno solo si falta (`{ "seminar.studentProgress.user": { $ne: userId } }` + `$push`), paso 2 modifica con `$[s]`/`$[t]` + `arrayFilters`. **OJO**: en `arrayFilters` Mongoose NO castea por esquema → convertir `req.params.userId`/`classId` a ObjectId explícito (`new mongoose.Types.ObjectId`); `req.user._id` ya es ObjectId.
+- **Proyección anti-fuga**: los endpoints que NO necesitan el progreso de todos lo excluyen con `.select("-seminar.studentProgress")` (`getActivityById`, `getSeminarDetails`, `getAllActivities` también `-seminar.classes`). El populate de usuarios SIEMPRE con `select` (el campo `password` del User web NO tiene `select:false`).
+- **`getActivityById` NO ordena `seminar.classes`** — el reordenar (`reorderSeminarClasses`) cambia el campo `order`, no la posición en el array. Cualquier vista que liste clases desde `/activities/:id` debe ordenar por `order` en cliente (`getSeminarDetails` sí ordena).
+- **React Query con `staleTime: 1h` global** (`main.jsx`): tras editar algo, los datos cacheados se muestran hasta refrescar. Fix: invalidar la key concreta en `onSuccess` (no solo la lista — p.ej. `["activity", id]` además de `["activities"]`) o `refetchOnMount: "always"` en la query de la página de destino. Patrón ya aplicado en `SeminarPage`/`AdminStudentProgressPage`/`EditActivityPage`.
+- **Enlaces a archivos de Cloudinary**: usar `target="_blank" rel="noopener noreferrer"`. El atributo `download` se ignora en URLs cross-origin → sin `target` el navegador navega la pestaña actual al PDF y "cierra" la web.
+
+---
+
 ## Commands
 
 ### Backend (`chat-app-backend/`)
@@ -186,6 +198,8 @@ PWA con Service Worker: tras subir puede requerir recarga forzada (Ctrl+Shift+R)
 - Eventos: `message:send/read/edit/delete/react`, `typing:start/stop`, WebRTC signaling (`call:initiate/answer/ice-candidate/end/reject`), LiveKit (`call:group:start`)
 - Para enviar eventos desde controladores REST: `io.to(`user:${userId}`)` via `ioSingleton` (`src/socket/ioSingleton.ts`)
 - El frontend usa `transports: ['websocket']` únicamente — sin polling de fallback. Si el WebSocket falla (e.g., nginx sin headers de upgrade), socket.io no conecta en absoluto y todos los eventos de tiempo real fallan silenciosamente.
+- **Chats nuevos en tiempo real**: un socket solo se une a las rooms de sus conversaciones **al conectar**, así que una conversación creada DESPUÉS (primer mensaje de alguien nuevo) no llegaría hasta refrescar. En `message:send`, el backend hace `io.in(personalRooms).socketsJoin(conversationId)` (mete a los demás participantes en la room) y, si es el primer mensaje de un 1:1 (`!conversation.lastMessage` y `!isGroup`), emite `conversation:new` (conversación poblada) a `user:<pid>` ANTES del `message:new`. El frontend escucha `conversation:new` en `useChatsStore.bindSocketEvents` (espejo de `group:new`) → `upsertConversation` + `conversation:join`. `addMessage` solo actualiza conversaciones existentes, por eso se necesita el `conversation:new`.
+- **Perf de la lista de mensajes**: `MessageBubble` está envuelto en `React.memo`; los mensajes se actualizan inmutablemente en el store (`.map` con `{ ...m }`), así que memo es seguro. Los handlers que recibe la burbuja en `chat/[id].tsx` (`handleLongPress`, `handleCallBack`, `handleAvatarPress`, etc.) deben ir en `useCallback` o memo se anula.
 
 **Auth** (`src/services/jwtService.ts`):
 - Access token: 24h — `JWT_SECRET`, payload `{ userId, email }`
