@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { Conversation } from '../models/Conversation';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
+import { isGlobalAdmin } from '../services/adminService';
 
 export async function getConversations(req: Request, res: Response) {
   try {
@@ -10,7 +11,12 @@ export async function getConversations(req: Request, res: Response) {
     const archived = req.query.archived === 'true';
     const favorite = req.query.favorite === 'true';
 
-    const query: any = { participants: userId };
+    // El admin general ve TODOS los grupos del chat (aunque no sea miembro) además
+    // de sus conversaciones propias, para poder moderarlos.
+    const admin = await isGlobalAdmin(userId);
+    const query: any = admin
+      ? { $or: [{ participants: userId }, { isGroup: true }] }
+      : { participants: userId };
     if (favorite) {
       query.favoritedBy = userId; // all favorites regardless of archive state
     } else if (archived) {
@@ -160,10 +166,14 @@ export async function getMessages(req: Request, res: Response) {
     const { conversationId } = req.params;
     const { before, limit = '50' } = req.query;
 
-    const conversation = await Conversation.findOne({
+    let conversation = await Conversation.findOne({
       _id: conversationId,
       participants: userId,
     });
+    // El admin general puede leer los mensajes de cualquier grupo para moderarlo.
+    if (!conversation && (await isGlobalAdmin(userId))) {
+      conversation = await Conversation.findOne({ _id: conversationId, isGroup: true });
+    }
     if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
 
     const query: any = { conversationId };

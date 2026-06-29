@@ -4,6 +4,7 @@ import { Message } from '../models/Message';
 import { Conversation } from '../models/Conversation';
 import { User } from '../models/User';
 import { deleteCloudinaryAsset } from '../services/cloudinaryService';
+import { isGlobalAdmin } from '../services/adminService';
 
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
@@ -245,8 +246,17 @@ export function setupSocketHandlers(io: Server) {
         const trimmed = content.trim();
         if (!trimmed) return;
 
-        const message = await Message.findOne({ _id: messageId, conversationId, senderId: userId });
-        if (!message) return; // solo el autor puede editar
+        let message = await Message.findOne({ _id: messageId, conversationId, senderId: userId });
+        // El admin general puede editar cualquier mensaje de un grupo o de sus
+        // propios chats 1:1 (moderación de usuarios y grupos).
+        if (!message && (await isGlobalAdmin(userId))) {
+          const conv = await Conversation.findOne({
+            _id: conversationId,
+            $or: [{ isGroup: true }, { participants: userId }],
+          }).select('_id');
+          if (conv) message = await Message.findOne({ _id: messageId, conversationId });
+        }
+        if (!message) return; // solo el autor (o el admin general) puede editar
 
         const updated = await Message.findByIdAndUpdate(
           messageId,
@@ -273,7 +283,16 @@ export function setupSocketHandlers(io: Server) {
         if (!message) return;
 
         if (deleteFor === 'everyone') {
-          if (message.senderId.toString() !== userId) return; // solo el autor
+          let allowed = message.senderId.toString() === userId; // el autor
+          // El admin general puede eliminar para todos en grupos o en sus chats 1:1.
+          if (!allowed && (await isGlobalAdmin(userId))) {
+            const conv = await Conversation.findOne({
+              _id: conversationId,
+              $or: [{ isGroup: true }, { participants: userId }],
+            }).select('_id');
+            allowed = !!conv;
+          }
+          if (!allowed) return;
           await Message.findByIdAndUpdate(messageId, { isDeletedForEveryone: true, reactions: [] });
           // Clean up Cloudinary asset if this was a media message
           if (message.cloudinaryPublicId && message.type !== 'text') {
@@ -348,7 +367,11 @@ export function setupSocketHandlers(io: Server) {
 
     socket.on('conversation:join', async (data: { conversationId: string }) => {
       const { conversationId } = data;
-      const valid = await Conversation.findOne({ _id: conversationId, participants: userId }).select('_id');
+      let valid = await Conversation.exists({ _id: conversationId, participants: userId });
+      // El admin general puede entrar a cualquier grupo aunque no sea miembro.
+      if (!valid && (await isGlobalAdmin(userId))) {
+        valid = await Conversation.exists({ _id: conversationId, isGroup: true });
+      }
       if (valid) socket.join(conversationId);
     });
 
