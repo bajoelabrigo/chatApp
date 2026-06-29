@@ -161,6 +161,18 @@ ssh root@145.223.27.84 "chmod -R a+rX /var/www/holy-app/frontend/dist"
 ```
 PWA con Service Worker: tras subir puede requerir recarga forzada (Ctrl+Shift+R) para ver el cambio.
 
+**Gotcha PWA — deploys que "no se ven"**: el navegador puede quedarse con un `sw.js` viejo cacheado y servir la app vieja indefinidamente; "borrar datos de navegación" de Chrome NO desregistra el Service Worker (solo "Clear site data" en DevTools o desinstalar la PWA). Fix permanente ya aplicado en nginx (`deploy/nginx-holyholyholy.conf`): `location = /sw.js` y `location = /registerSW.js` con `Cache-Control: no-cache` → cada visita revalida el SW. Para diagnosticar: confirmar primero que el SERVIDOR ya sirve el bundle nuevo (`curl` a index.html → ver el hash `index-*.js` → `curl` al bundle → grep de una clase única del cambio); si el servidor ya lo tiene, es caché del cliente, no el deploy.
+
+---
+
+## Web móvil (`holy_app`) — patrones
+
+La mayoría de usuarios entran a `holyholyholy.es` desde el móvil. Patrones aplicados (2026-06-28):
+- **Scroll horizontal**: NO usar `min-w-screen` (= 100vw, incluye el scrollbar → desbordamiento); el root del Layout usa `w-full overflow-x-hidden`. Tooltips de hover (`HoverUserList`) ocultos en móvil (`hidden md:group-hover:block`) porque ocupan espacio aunque estén invisibles.
+- **Videos de YouTube**: `LiteYouTube.jsx` (facade) muestra solo la miniatura (`i.ytimg.com/vi/<id>/hqdefault.jpg`) + botón play y monta el iframe solo al tocar. Usado en `Posts.jsx` y `PostDetailModal.jsx` — evita cargar N reproductores a la vez en el feed.
+- **Editor de post estilo Facebook**: en móvil el feed muestra una fila (avatar + "¿Qué estás pensando?") que abre `PostCreation` en un modal a pantalla completa (`Home.jsx`, `lg:hidden`). El editor inline solo en escritorio (`hidden lg:block`). `PostCreation` acepta `onPosted` para cerrar el modal al publicar. Su emoji picker va en `fixed` centrado (`z-[91]`) para que no lo recorte el `overflow` del modal. NO usar FAB en la esquina inferior derecha: choca con `MaterialPopup` (banner de materiales, `fixed bottom-4 right-4 z-[90]`).
+- **Targets táctiles**: botones de acción del post (`PostAction` + "Me gusta") con `min-w-0` (para que encojan y quepan los 5) y `min-h-[44px]`; el menú de 3 puntos a 44×44.
+
 ---
 
 ## Backend architecture
