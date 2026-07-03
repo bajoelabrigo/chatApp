@@ -18,7 +18,8 @@ type NotificationKind =
   | 'prayer_pray'
   | 'activity'
   | 'reminder'
-  | 'material';
+  | 'material'
+  | 'group_join';
 
 interface NotificationItem {
   id: string;
@@ -131,6 +132,25 @@ export async function getNotifications(req: Request, res: Response) {
         avatar,
         nav: { screen: 'chat', id: conv._id.toString() },
         data: { unreadCount: u.count },
+      });
+    }
+
+    // ── 1b. Fuiste aceptado en un grupo (aprobación de ingreso) ─────────────
+    for (const conv of conversations) {
+      if (!conv.isGroup || !Array.isArray(conv.approvedMembers)) continue;
+      const mine = conv.approvedMembers.find(
+        (am: any) => am.userId?.toString() === userId
+      );
+      if (!mine?.at || new Date(mine.at) < windowStart) continue;
+      items.push({
+        id: `group_join:${conv._id}`,
+        kind: 'group_join',
+        title: `✅ ${conv.groupName || 'Grupo'}`,
+        body: 'Tu solicitud para unirte fue aceptada',
+        timestamp: mine.at as any,
+        isNew: new Date(mine.at).getTime() > lastSeen.getTime(),
+        avatar: conv.groupAvatar,
+        nav: { screen: 'chat', id: conv._id.toString() },
       });
     }
 

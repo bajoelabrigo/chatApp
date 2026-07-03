@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { Conversation } from '../models/Conversation';
+import { User } from '../models/User';
 import { Message } from '../models/Message';
+import { sendGroupJoinApproved } from '../services/emailService';
 import { Report } from '../models/Report';
 import { GroupActivity } from '../models/GroupActivity';
 import { ActivityCommitment } from '../models/ActivityCommitment';
@@ -125,6 +127,72 @@ export async function updateGroup(req: Request, res: Response) {
     res.json(updated);
   } catch {
     res.status(500).json({ error: 'Error actualizando grupo' });
+  }
+}
+
+// Media compartida del grupo para el panel "Archivos, enlaces y docs":
+//  - files: fotos/videos/audios (type image|audio)
+//  - docs:  documentos (type document)
+//  - links: URLs encontradas en mensajes de texto
+const URL_REGEX = /(https?:\/\/[^\s<]+)/gi;
+
+export async function getGroupMedia(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    const { conv } = await resolveGroup(id, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    // Solo mensajes vivos (no borrados para todos ni para este usuario).
+    const baseFilter = {
+      conversationId: id,
+      isDeletedForEveryone: { $ne: true },
+      deletedFor: { $ne: userId },
+    };
+
+    const [mediaMessages, textMessages] = await Promise.all([
+      Message.find(
+        { ...baseFilter, type: { $in: ['image', 'audio', 'document'] } },
+        { type: 1, content: 1, fileName: 1, fileSize: 1, senderId: 1, createdAt: 1 }
+      )
+        .sort({ createdAt: -1 })
+        .lean(),
+      Message.find(
+        { ...baseFilter, type: 'text', content: /https?:\/\//i },
+        { content: 1, senderId: 1, createdAt: 1 }
+      )
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    const files: any[] = [];
+    const docs: any[] = [];
+    for (const m of mediaMessages) {
+      const entry = {
+        _id: m._id,
+        url: m.content,
+        type: m.type,
+        fileName: m.fileName,
+        fileSize: m.fileSize,
+        createdAt: m.createdAt,
+      };
+      if (m.type === 'document') docs.push(entry);
+      else files.push(entry);
+    }
+
+    const links: any[] = [];
+    for (const m of textMessages) {
+      const found = (m.content || '').match(URL_REGEX) || [];
+      for (const url of found) {
+        links.push({ _id: m._id, url, createdAt: m.createdAt });
+      }
+    }
+
+    res.json({ files, docs, links });
+  } catch (err) {
+    console.error('getGroupMedia error:', err);
+    res.status(500).json({ error: 'Error obteniendo archivos del grupo' });
   }
 }
 
@@ -315,6 +383,185 @@ export async function leaveGroup(req: Request, res: Response) {
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Error al salir del grupo' });
+  }
+}
+
+// Unirse a un grupo mediante un enlace compartido (/g/:id). Cualquier usuario
+// autenticado con el enlace puede unirse; el _id del grupo actúa como "invitación".
+// Si el grupo exige aprobación (requireAdminApproval), la solicitud queda
+// pendiente y el admin debe aceptarla.
+export async function joinGroup(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    const conv = await Conversation.findOne({ _id: id, isGroup: true });
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const alreadyMember = conv.participants.some((p) => p.toString() === userId);
+
+    // Grupo con aprobación previa: no unir directamente, encolar la solicitud.
+    if (!alreadyMember && conv.permissions?.requireAdminApproval) {
+      const alreadyPending = (conv.pendingMembers ?? []).some(
+        (pm: any) => pm.userId?.toString() === userId
+      );
+      if (!alreadyPending) {
+        await Conversation.updateOne(
+          { _id: id, 'pendingMembers.userId': { $ne: userId } },
+          { $push: { pendingMembers: { userId, requestedAt: new Date() } } }
+        );
+        // Avisar a los admins (barra de alerta en tiempo real).
+        const io = getIO();
+        if (io) {
+          for (const adminId of conv.admins) {
+            io.to(`user:${adminId.toString()}`).emit('group:pending', { groupId: id });
+          }
+        }
+      }
+      return res.status(202).json({ pending: true, alreadyPending, groupName: conv.groupName });
+    }
+
+    if (!alreadyMember) {
+      await Conversation.findByIdAndUpdate(id, { $addToSet: { participants: userId } });
+    }
+
+    const updated = await Conversation.findById(id)
+      .populate('participants', 'name avatar email')
+      .lean();
+    if (!updated) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const result = buildGroupResult(updated, userId);
+
+    const io = getIO();
+    if (io) {
+      // El que se une entra a su lista de chats en tiempo real…
+      io.to(`user:${userId}`).emit('group:new', result);
+      // …y, si es nuevo miembro, se une a la room y se avisa a los demás.
+      if (!alreadyMember) {
+        io.in(`user:${userId}`).socketsJoin(id);
+        io.to(id).emit('group:updated', updated);
+      }
+    }
+
+    res.status(alreadyMember ? 200 : 201).json({ ...result, alreadyMember });
+  } catch {
+    res.status(500).json({ error: 'Error al unirse al grupo' });
+  }
+}
+
+// Lista de solicitudes de ingreso pendientes (solo admins del grupo / admin general).
+export async function getPendingMembers(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
+    if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden ver las solicitudes' });
+
+    const populated = await Conversation.findById(id)
+      .select('pendingMembers')
+      .populate('pendingMembers.userId', 'name avatar email')
+      .lean();
+
+    const pending = (populated?.pendingMembers ?? [])
+      .filter((pm: any) => pm.userId) // por si el usuario fue borrado
+      .map((pm: any) => ({
+        _id: pm.userId._id,
+        name: pm.userId.name,
+        avatar: pm.userId.avatar,
+        email: pm.userId.email,
+        requestedAt: pm.requestedAt,
+      }));
+
+    res.json(pending);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo solicitudes' });
+  }
+}
+
+// Aprobar una solicitud: mover de pendingMembers a participants + notificar.
+export async function approvePendingMember(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id, memberId } = req.params;
+
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
+    if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden aprobar' });
+
+    const isPending = (conv.pendingMembers ?? []).some(
+      (pm: any) => pm.userId?.toString() === memberId
+    );
+    if (!isPending) return res.status(404).json({ error: 'La solicitud ya no existe' });
+
+    await Conversation.findByIdAndUpdate(id, {
+      $pull: { pendingMembers: { userId: memberId }, approvedMembers: { userId: memberId } },
+      $addToSet: { participants: memberId },
+    });
+    // Registrar la aprobación (para la notificación derivada "fuiste aceptado").
+    await Conversation.findByIdAndUpdate(id, {
+      $push: { approvedMembers: { userId: memberId, at: new Date() } },
+    });
+
+    const updated = await Conversation.findById(id)
+      .populate('participants', 'name avatar email')
+      .lean();
+
+    const io = getIO();
+    if (io && updated) {
+      const result = buildGroupResult(updated, memberId);
+      io.to(`user:${memberId}`).emit('group:new', result);
+      io.in(`user:${memberId}`).socketsJoin(id);
+      io.to(id).emit('group:updated', updated);
+      // Refrescar la barra de solicitudes de los admins.
+      for (const adminId of conv.admins) {
+        io.to(`user:${adminId.toString()}`).emit('group:pending', { groupId: id });
+      }
+    }
+
+    // Email de bienvenida (best-effort, no bloquea la respuesta).
+    const member = await User.findById(memberId).select('name email').lean();
+    if (member?.email) {
+      sendGroupJoinApproved(member.email, member.name || 'Hermano(a)', conv.groupName || 'el grupo');
+    }
+
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error aprobando la solicitud' });
+  }
+}
+
+// Rechazar una solicitud: quitarla de pendingMembers.
+export async function rejectPendingMember(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { id, memberId } = req.params;
+
+    const { conv, globalAdmin } = await resolveGroup(id, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const isAdmin = globalAdmin || conv.admins.some((a) => a.toString() === userId);
+    if (!isAdmin) return res.status(403).json({ error: 'Solo los administradores pueden rechazar' });
+
+    await Conversation.findByIdAndUpdate(id, {
+      $pull: { pendingMembers: { userId: memberId } },
+    });
+
+    const io = getIO();
+    if (io) {
+      for (const adminId of conv.admins) {
+        io.to(`user:${adminId.toString()}`).emit('group:pending', { groupId: id });
+      }
+    }
+
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error rechazando la solicitud' });
   }
 }
 

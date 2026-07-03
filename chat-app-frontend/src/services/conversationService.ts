@@ -292,6 +292,48 @@ export async function deleteGroup(token: string, groupId: string) {
   return data as { ok: boolean };
 }
 
+// Unirse a un grupo mediante un enlace compartido (chatapp://g/:id).
+// - Grupo abierto: devuelve la conversación (+ alreadyMember).
+// - Grupo con aprobación previa: devuelve { pending: true, ... }.
+export async function joinGroup(token: string, groupId: string) {
+  const { data } = await api.post(`/groups/${groupId}/join`, {}, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as
+    | (Conversation & { alreadyMember?: boolean })
+    | { pending: true; alreadyPending?: boolean; groupName?: string };
+}
+
+export interface PendingMember {
+  _id: string;
+  name: string;
+  avatar?: string;
+  email?: string;
+  requestedAt: string;
+}
+
+// Solicitudes de ingreso pendientes de un grupo (solo admins).
+export async function getPendingMembers(token: string, groupId: string) {
+  const { data } = await api.get(`/groups/${groupId}/pending`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as PendingMember[];
+}
+
+export async function approvePendingMember(token: string, groupId: string, memberId: string) {
+  const { data } = await api.post(`/groups/${groupId}/pending/${memberId}/approve`, {}, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as { ok: boolean };
+}
+
+export async function rejectPendingMember(token: string, groupId: string, memberId: string) {
+  const { data } = await api.post(`/groups/${groupId}/pending/${memberId}/reject`, {}, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as { ok: boolean };
+}
+
 export async function leaveGroup(token: string, groupId: string) {
   const { data } = await api.post(`/groups/${groupId}/leave`, {}, {
     headers: { Authorization: `Bearer ${token}` },

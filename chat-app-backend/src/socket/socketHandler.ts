@@ -153,6 +153,13 @@ export function setupSocketHandlers(io: Server) {
           }
         }
 
+        // Mensajes temporales: si el grupo tiene una duración configurada (en
+        // horas), el mensaje expira y MongoDB lo borra vía índice TTL.
+        const expiresAt =
+          conversation.tempMessageDuration != null
+            ? new Date(Date.now() + conversation.tempMessageDuration * 3600 * 1000)
+            : undefined;
+
         const message = await Message.create({
           conversationId,
           senderId: userId,
@@ -164,6 +171,7 @@ export function setupSocketHandlers(io: Server) {
           status: 'sent',
           readBy: [userId],
           replyTo,
+          expiresAt,
         });
 
         // ¿Primer mensaje del chat? (la conversación aún no tenía lastMessage).

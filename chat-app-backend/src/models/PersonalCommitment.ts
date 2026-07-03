@@ -13,6 +13,7 @@ export interface IPersonalCommitment extends Document {
   endHour: number;
   endMinute: number;
   notificationsEnabled: boolean;
+  timezone?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -31,6 +32,7 @@ const PersonalCommitmentSchema = new Schema<IPersonalCommitment>(
     endHour:              { type: Number, required: true, min: 0, max: 23 },
     endMinute:            { type: Number, required: true, enum: [0, 30] },
     notificationsEnabled: { type: Boolean, default: true },
+    timezone:             { type: String },
     isActive:             { type: Boolean, default: true },
   },
   { timestamps: true }

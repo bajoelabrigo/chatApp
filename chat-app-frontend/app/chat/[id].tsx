@@ -36,6 +36,7 @@ import { useChatsStore } from '../../src/store/useChatsStore';
 import { useCallStore } from '../../src/store/useCallStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getSocket } from '../../src/services/socketService';
+import GroupPendingBar from '../../src/components/GroupPendingBar';
 import {
   getMessages,
   createOrGetConversation,
@@ -383,6 +384,20 @@ export default function ChatScreen() {
 
   const conversationMessages = messages[conversationId] ?? [];
   const listData = useMemo(() => buildListData(conversationMessages), [conversationMessages]);
+
+  // Al tocar la cita de un mensaje respondido: desplaza y resalta el mensaje
+  // original (si sigue cargado en la lista).
+  const jumpToMessage = useCallback((messageId?: string) => {
+    if (!messageId) return;
+    const idx = listData.findIndex(
+      (it) => it.kind === 'message' && it.data._id === messageId
+    );
+    if (idx < 0) return; // el original no está cargado (mensaje muy antiguo)
+    flatListRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+    setHighlightedId(messageId);
+    setTimeout(() => setHighlightedId(null), 2000);
+  }, [listData]);
+
   const socket = getSocket();
   // DEBUG — eliminar después del diagnóstico
   if (__DEV__) console.log('[socket] connected=', socket?.connected, 'exists=', !!socket);
@@ -687,6 +702,9 @@ export default function ChatScreen() {
     try {
       const result = await uploadFile(token, fileUri, mimeType, fileName);
 
+      // Si se está respondiendo a un mensaje, la cita se adjunta al archivo
+      // (como en WhatsApp: la foto/audio/doc lleva la respuesta).
+      const reply = replyingTo;
       const temp: Message = {
         _id: `temp_${Date.now()}`,
         conversationId,
@@ -697,6 +715,14 @@ export default function ChatScreen() {
         fileSize: result.size,
         status: 'sent',
         createdAt: new Date().toISOString(),
+        replyTo: reply ? {
+          messageId: reply._id,
+          senderName: reply.senderId.name,
+          senderAvatar: reply.senderId.avatar,
+          content: reply.content,
+          type: reply.type,
+          fileName: reply.fileName,
+        } : undefined,
       };
       addMessage(temp);
 
@@ -707,7 +733,9 @@ export default function ChatScreen() {
         fileName: result.originalName,
         fileSize: result.size,
         cloudinaryPublicId: result.publicId,
+        replyToMessageId: reply?._id,
       });
+      if (reply) setReplyingTo(null);
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo enviar el archivo');
     } finally {
@@ -1079,6 +1107,11 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* Solicitudes de ingreso pendientes (solo admins de grupos con aprobación previa) */}
+      {isGroupChat && (
+        <GroupPendingBar groupId={conversationId} token={token} isAdmin={iAmAdmin} />
+      )}
+
       {/* Messages */}
       <ImageBackground
         source={isDark ? CHAT_BG_DARK : CHAT_BG_LIGHT}
@@ -1156,6 +1189,7 @@ export default function ChatScreen() {
                   onReactDetail={handleOpenReactionDetail}
                   onAvatarPress={isGroupChat ? handleAvatarPress : undefined}
                   onCallBack={handleCallBack}
+                  onReplyPress={jumpToMessage}
                 />
               );
               if (selectionMode) {

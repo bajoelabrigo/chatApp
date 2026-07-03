@@ -232,9 +232,15 @@ export default function ChatsScreen() {
 
 
   const sortedConversations = useMemo(() => {
-    const pinned = conversations.filter((c) => c.isPinned);
-    const rest = conversations.filter((c) => !c.isPinned);
-    return [...pinned, ...rest];
+    // Fijados arriba; dentro de cada grupo, por el mensaje más reciente (los
+    // usuarios con que me he comunicado primero, recientes arriba; los que nunca
+    // tuvieron mensaje quedan al final).
+    const lastActivity = (c: Conversation) =>
+      new Date(c.lastMessageAt || c.lastMessage?.createdAt || 0).getTime();
+    return [...conversations].sort((a, b) => {
+      if (!!a.isPinned !== !!b.isPinned) return a.isPinned ? -1 : 1;
+      return lastActivity(b) - lastActivity(a);
+    });
   }, [conversations]);
 
   // Búsqueda global por contenido de mensajes (debounced) cuando se escribe en

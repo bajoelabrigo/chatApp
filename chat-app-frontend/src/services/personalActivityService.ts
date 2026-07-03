@@ -31,13 +31,17 @@ export type PersonalCommitmentPayload = {
 
 const h = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
 
+// La timezone se envía siempre para que los recordatorios push (cron) usen la
+// hora local correcta del usuario, igual que en los compromisos de grupo.
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 export async function getMyPersonalActivities(token: string): Promise<PersonalCommitment[]> {
   const { data } = await api.get<PersonalCommitment[]>('/users/me/activities', h(token));
   return data;
 }
 
 export async function createPersonalActivity(token: string, payload: PersonalCommitmentPayload): Promise<PersonalCommitment> {
-  const { data } = await api.post<PersonalCommitment>('/users/me/activities', payload, h(token));
+  const { data } = await api.post<PersonalCommitment>('/users/me/activities', { timezone: tz(), ...payload }, h(token));
   return data;
 }
 
@@ -46,7 +50,7 @@ export async function updatePersonalActivity(
   id: string,
   payload: Partial<Omit<PersonalCommitmentPayload, 'type'>>
 ): Promise<PersonalCommitment> {
-  const { data } = await api.patch<PersonalCommitment>(`/users/me/activities/${id}`, payload, h(token));
+  const { data } = await api.patch<PersonalCommitment>(`/users/me/activities/${id}`, { timezone: tz(), ...payload }, h(token));
   return data;
 }
 

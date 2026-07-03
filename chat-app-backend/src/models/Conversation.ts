@@ -22,6 +22,10 @@ export interface IConversation extends Document {
   admins: Types.ObjectId[];
   permissions: IGroupPermissions;
   tempMessageDuration: number | null;
+  // Solicitudes de ingreso pendientes de aprobación (grupos con requireAdminApproval).
+  pendingMembers: { userId: Types.ObjectId; requestedAt: Date }[];
+  // Miembros aprobados recientemente (para derivar la notificación "fuiste aceptado").
+  approvedMembers: { userId: Types.ObjectId; at: Date }[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +50,18 @@ const ConversationSchema = new Schema<IConversation>(
       requireAdminApproval: { type: Boolean, default: false },
     },
     tempMessageDuration: { type: Number, default: null },
+    pendingMembers: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        requestedAt: { type: Date, default: Date.now },
+      },
+    ],
+    approvedMembers: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        at: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

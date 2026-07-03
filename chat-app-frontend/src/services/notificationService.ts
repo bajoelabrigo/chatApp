@@ -7,7 +7,8 @@ export type NotificationKind =
   | 'prayer_pray'
   | 'activity'
   | 'reminder'
-  | 'material';
+  | 'material'
+  | 'group_join';
 
 export interface NotificationItem {
   id: string;

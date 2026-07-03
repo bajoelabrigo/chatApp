@@ -95,7 +95,7 @@ export function docIcon(name?: string): string {
   return '📎';
 }
 
-function ReplyPreview({ reply, isMine, colors }: { reply: MessageReplyTo; isMine: boolean; colors: any }) {
+function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyTo; isMine: boolean; colors: any; onPress?: () => void }) {
   const previewContent = () => {
     if (reply.type === 'image') return '🖼️ Imagen';
     if (reply.type === 'audio') return '🎤 Nota de voz';
@@ -107,42 +107,44 @@ function ReplyPreview({ reply, isMine, colors }: { reply: MessageReplyTo; isMine
   const isDark = colors.bgPrimary === '#0A0A0A';
   const isImageReply = reply.type === 'image';
 
-  // La burbuja del reply siempre tiene fondo claro (blanco en light, #ECECEC en dark)
-  // → el nombre usa colores visibles sobre ese fondo, excepto isMine en light (burbuja azul → blanco)
-  const replyNameColor = isMine && !isDark ? '#FFFFFF' : bubbleNameColor(reply.senderName, isDark);
-
   let bg: string, nameTxt: string, contentTxt: string, border: string;
 
-  if (isMine && !isDark) {
-    bg = 'rgba(255,255,255,0.22)';
+  if (isMine) {
+    // Burbuja propia azul/índigo (en cualquier tema): el nombre y el mensaje
+    // citado SIEMPRE en colores claros para que no se pierdan contra el fondo
+    // azul de la burbuja.
+    bg = 'rgba(255,255,255,0.18)';
     nameTxt = '#FFFFFF';
-    contentTxt = 'rgba(255,255,255,0.85)';
-    border = 'rgba(255,255,255,0.55)';
-  } else if (isMine && isDark) {
-    bg = 'rgba(0,0,0,0.14)';
-    nameTxt = replyNameColor;
-    contentTxt = '#555555';
-    border = replyNameColor;
-  } else if (!isMine && !isDark) {
+    contentTxt = 'rgba(255,255,255,0.88)';
+    border = 'rgba(255,255,255,0.6)';
+  } else if (!isDark) {
+    // Ajena, tema claro (burbuja clara) → color de usuario + texto oscuro.
+    const c = bubbleNameColor(reply.senderName, false);
     bg = '#EEF2FF';
-    nameTxt = replyNameColor;
+    nameTxt = c;
     contentTxt = '#475569';
-    border = replyNameColor;
+    border = c;
   } else {
-    bg = 'rgba(0,0,0,0.08)';
-    nameTxt = replyNameColor;
-    contentTxt = '#555555';
-    border = replyNameColor;
+    // Ajena, tema oscuro (burbuja #1E2236) → color de usuario claro + texto claro.
+    const c = bubbleNameColor(reply.senderName, true);
+    bg = 'rgba(255,255,255,0.06)';
+    nameTxt = c;
+    contentTxt = 'rgba(255,255,255,0.75)';
+    border = c;
   }
 
   return (
-    <View style={{
-      borderLeftWidth: 3, borderLeftColor: border,
-      backgroundColor: bg, borderRadius: 8,
-      paddingHorizontal: 8, paddingVertical: isImageReply ? 6 : 5,
-      marginBottom: 6, marginHorizontal: 2,
-      flexDirection: 'row', alignItems: 'center',
-    }}>
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={onPress}
+      disabled={!onPress}
+      style={{
+        borderLeftWidth: 3, borderLeftColor: border,
+        backgroundColor: bg, borderRadius: 8,
+        paddingHorizontal: 8, paddingVertical: isImageReply ? 6 : 5,
+        marginBottom: 6, marginHorizontal: 2,
+        flexDirection: 'row', alignItems: 'center',
+      }}>
       <View style={{ flex: 1, marginRight: isImageReply ? 8 : 0 }}>
         <Text style={{
           color: nameTxt,
@@ -164,7 +166,7 @@ function ReplyPreview({ reply, isMine, colors }: { reply: MessageReplyTo; isMine
           resizeMode="cover"
         />
       )}
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -303,10 +305,11 @@ interface Props {
   onReact?: (msg: Message, emoji: string) => void;
   onReactDetail?: (msg: Message, emoji: string) => void;
   onAvatarPress?: (sender: ChatUser) => void;
+  onReplyPress?: (messageId?: string) => void;
   highlighted?: boolean;
 }
 
-function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId._id;
@@ -384,7 +387,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
         >
           {item.replyTo && (
             <View style={{ paddingHorizontal: 8, paddingTop: 8 }}>
-              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} />
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
             </View>
           )}
           <Image source={{ uri: item.content }} style={{ width: 224, height: 224 }} resizeMode="cover" />
@@ -415,7 +418,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             backgroundColor: bubbleBg, minWidth: 200,
           }, bubbleShadow]}
         >
-          {item.replyTo && <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} />}
+          {item.replyTo && <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />}
           <VoicePlayer uri={item.content} isMine={isMine} onLongPress={() => onLongPress(item)} />
           <View style={{ marginTop: 2 }}>{timestamp}</View>
         </Pressable>
@@ -435,7 +438,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
         >
           {item.replyTo && (
             <View style={{ paddingHorizontal: 8, paddingTop: 8 }}>
-              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} />
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
             </View>
           )}
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 8, gap: 12 }}>
@@ -584,7 +587,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
               </Text>
             )}
             {!emojiOnly && !isDeleted && item.replyTo && (
-              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} />
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
             )}
             {isDeleted ? (
               <Text style={{ color: bubbleSubtext, fontStyle: 'italic', fontSize: 14, paddingHorizontal: 4 }}>

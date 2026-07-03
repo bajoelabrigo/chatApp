@@ -2,6 +2,8 @@ import multer from 'multer';
 
 const ALLOWED_NON_IMAGE_TYPES = [
   'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/wav', 'audio/m4a', 'audio/x-m4a',
+  // Formatos que graba el navegador (MediaRecorder) en la web
+  'audio/webm', 'audio/ogg', 'video/webm',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

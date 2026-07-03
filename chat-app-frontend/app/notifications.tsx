@@ -31,11 +31,12 @@ function relativeTime(iso: string): string {
 }
 
 const KIND_ORDER: NotificationKind[] = [
-  'reminder', 'material', 'chat', 'missed_call', 'prayer_pray', 'prayer', 'activity',
+  'reminder', 'material', 'group_join', 'chat', 'missed_call', 'prayer_pray', 'prayer', 'activity',
 ];
 const KIND_TITLE: Record<NotificationKind, string> = {
   reminder: 'Hoy',
   material: 'Materiales nuevos',
+  group_join: 'Grupos',
   chat: 'Mensajes',
   missed_call: 'Llamadas perdidas',
   prayer_pray: 'Oraciones por tus peticiones',
@@ -47,6 +48,7 @@ function kindIcon(kind: NotificationKind): keyof typeof Ionicons.glyphMap {
   switch (kind) {
     case 'reminder': return 'today';
     case 'material': return 'library';
+    case 'group_join': return 'person-add';
     case 'chat': return 'chatbubble-ellipses';
     case 'missed_call': return 'call';
     case 'prayer_pray': return 'people';
@@ -59,6 +61,7 @@ function kindColor(kind: NotificationKind, colors: any): string {
   switch (kind) {
     case 'reminder': return colors.accent;
     case 'material': return '#6366F1';
+    case 'group_join': return '#22C55E';
     case 'chat': return colors.accent;
     case 'missed_call': return colors.danger;
     case 'prayer_pray': return '#8B5CF6';
@@ -89,7 +92,7 @@ export default function NotificationsScreen() {
 
   const sections = useMemo(() => {
     const grouped: Record<NotificationKind, NotificationItem[]> = {
-      reminder: [], material: [], chat: [], missed_call: [], prayer_pray: [], prayer: [], activity: [],
+      reminder: [], material: [], group_join: [], chat: [], missed_call: [], prayer_pray: [], prayer: [], activity: [],
     };
     for (const it of items) grouped[it.kind].push(it);
     return KIND_ORDER

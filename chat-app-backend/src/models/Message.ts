@@ -35,6 +35,7 @@ export interface IMessage extends Document {
   callDuration?: number;
   replyTo?: IReplyTo;
   reactions?: IReactionEntry[];
+  expiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,10 +69,16 @@ const MessageSchema = new Schema<IMessage>(
       emoji: { type: String, required: true },
       users: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     }],
+    // Mensajes temporales: si el grupo tiene `tempMessageDuration`, se fija una
+    // fecha de expiración y MongoDB borra el mensaje automáticamente (índice TTL).
+    expiresAt: { type: Date },
   },
   { timestamps: true }
 );
 
 MessageSchema.index({ conversationId: 1, createdAt: 1 });
+// TTL: borra el documento cuando `expiresAt` queda en el pasado. Los mensajes
+// sin `expiresAt` (chats normales) nunca expiran.
+MessageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Message = model<IMessage>('Message', MessageSchema);

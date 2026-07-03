@@ -191,6 +191,43 @@ export async function sendAccountDeletedEmail(to: string, name: string): Promise
   }
 }
 
+export async function sendGroupJoinApproved(
+  to: string,
+  userName: string,
+  groupName: string
+): Promise<void> {
+  try {
+    await getTransporter().sendMail({
+      from: `"HolyChat" <${process.env.SMTP_FROM}>`,
+      to,
+      subject: `✅ Fuiste aceptado en ${groupName}`,
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;margin:40px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+          <div style="background:linear-gradient(135deg,#4338CA,#6366F1);padding:32px 40px;text-align:center">
+            <p style="margin:0;font-size:32px">🎉</p>
+            <h1 style="margin:12px 0 0;color:#fff;font-size:22px;font-weight:700">HolyChat</h1>
+          </div>
+          <div style="padding:36px 40px">
+            <h2 style="margin:0 0 16px;color:#111;font-size:20px">¡Bienvenido al grupo!</h2>
+            <p style="color:#374151;font-size:15px;line-height:1.6">Hola <strong>${userName}</strong>,</p>
+            <p style="color:#374151;font-size:15px;line-height:1.6">
+              El administrador aceptó tu solicitud para unirte al grupo
+              <strong>${groupName}</strong>. Ya puedes participar en la conversación.
+            </p>
+            <p style="color:#374151;font-size:15px;line-height:1.6;margin-top:24px">
+              ¡Que Dios bendiga tu participación! 🙏
+            </p>
+          </div>
+          <div style="background:#F9FAFB;padding:16px 40px;text-align:center;border-top:1px solid #E5E7EB">
+            <p style="margin:0;color:#9CA3AF;font-size:12px">© HolyChat · holyholyholy.es</p>
+          </div>
+        </div>`,
+    });
+  } catch (err) {
+    console.error('[emailService] sendGroupJoinApproved error:', err);
+  }
+}
+
 const DAY_NAMES_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 function fmtTime(h: number, m: number): string {

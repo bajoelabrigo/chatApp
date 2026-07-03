@@ -1,6 +1,8 @@
 import cron from 'node-cron';
+import { Types } from 'mongoose';
 import { toZonedTime } from 'date-fns-tz';
 import { ActivityCommitment } from '../models/ActivityCommitment';
+import { PersonalCommitment } from '../models/PersonalCommitment';
 import { sendPushNotification } from './pushService';
 import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
 import { User } from '../models/User';
@@ -53,6 +55,47 @@ export function startCronJobs(): void {
             `${activity.emoji} Recordatorio: ${activity.name} en 15 min`,
             `Tu sesión de ${activity.name} empieza en 15 minutos.`
           );
+        }
+      }
+
+      // ── Compromisos PERSONALES (sin grupo) ──────────────────────────────
+      // No guardan expoPushToken (se usa el del usuario) y su timezone puede
+      // faltar en registros antiguos → se cae a la de sus compromisos grupales.
+      const personal = await PersonalCommitment.find({ isActive: true, notificationsEnabled: true }).lean();
+      if (personal.length > 0) {
+        const userIds = [...new Set(personal.map((p) => String(p.userId)))];
+        const users = await User.find({ _id: { $in: userIds } })
+          .select('name expoPushToken')
+          .lean();
+        const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+        // Timezone de respaldo: la de cualquier compromiso grupal del usuario.
+        const tzAgg = await ActivityCommitment.aggregate([
+          { $match: { userId: { $in: userIds.map((id) => new Types.ObjectId(id)) } } },
+          { $group: { _id: '$userId', timezone: { $first: '$timezone' } } },
+        ]);
+        const tzMap = new Map(tzAgg.map((t) => [String(t._id), t.timezone as string]));
+
+        for (const p of personal) {
+          const user = userMap.get(String(p.userId));
+          if (!user?.expoPushToken) continue;
+          const tz = p.timezone || tzMap.get(String(p.userId)) || 'UTC';
+          const localNow = toZonedTime(now, tz);
+          const localAdv = toZonedTime(nowPlus15, tz);
+
+          if (matchesStart(p, localNow)) {
+            await sendPushNotification(
+              user.expoPushToken,
+              `${p.emoji} ¡Hora de ${p.name}!`,
+              `Tu actividad ${p.name} comienza ahora. ¡Ánimo, ${user.name}!`
+            );
+          } else if (matchesStartAdvance(p, localAdv)) {
+            await sendPushNotification(
+              user.expoPushToken,
+              `${p.emoji} Recordatorio: ${p.name} en 15 min`,
+              `Tu actividad ${p.name} empieza en 15 minutos.`
+            );
+          }
         }
       }
     } catch (err) {

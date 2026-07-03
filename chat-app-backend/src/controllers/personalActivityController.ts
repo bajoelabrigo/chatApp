@@ -16,7 +16,7 @@ export async function getPersonalActivities(req: AuthRequest, res: Response): Pr
 export async function createPersonalActivity(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.userId!;
-    const { type, name, proposito, daysOfWeek, startHour, startMinute, endHour, endMinute, notificationsEnabled } = req.body;
+    const { type, name, proposito, daysOfWeek, startHour, startMinute, endHour, endMinute, notificationsEnabled, timezone } = req.body;
 
     if (!type || !ACTIVITY_META[type as ActivityType]) {
       res.status(400).json({ error: 'Tipo de actividad inválido' }); return;
@@ -43,6 +43,7 @@ export async function createPersonalActivity(req: AuthRequest, res: Response): P
       endHour: endHour ?? 8,
       endMinute: endMinute ?? 0,
       notificationsEnabled: notificationsEnabled !== false,
+      timezone: typeof timezone === 'string' && timezone ? timezone : undefined,
     });
 
     res.status(201).json(item);
@@ -56,7 +57,7 @@ export async function updatePersonalActivity(req: AuthRequest, res: Response): P
   try {
     const userId = req.userId!;
     const { id } = req.params;
-    const { proposito, daysOfWeek, startHour, startMinute, endHour, endMinute, notificationsEnabled } = req.body;
+    const { proposito, daysOfWeek, startHour, startMinute, endHour, endMinute, notificationsEnabled, timezone } = req.body;
 
     if (daysOfWeek !== undefined && (!Array.isArray(daysOfWeek) || daysOfWeek.length === 0)) {
       res.status(400).json({ error: 'Debes seleccionar al menos un día' }); return;
@@ -77,6 +78,7 @@ export async function updatePersonalActivity(req: AuthRequest, res: Response): P
     if (endHour !== undefined) updates.endHour = endHour;
     if (endMinute !== undefined) updates.endMinute = endMinute;
     if (notificationsEnabled !== undefined) updates.notificationsEnabled = notificationsEnabled;
+    if (typeof timezone === 'string' && timezone) updates.timezone = timezone;
 
     const updated = await PersonalCommitment.findOneAndUpdate(
       { _id: id, userId },

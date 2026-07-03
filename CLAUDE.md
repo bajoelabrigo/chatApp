@@ -52,6 +52,13 @@ El "seminario" es una `Activity` con `seminar.enabled` (`activityModel.js`). Tod
 
 ---
 
+## Biblia web (`holy_app`) — orden de libros y compartir posts
+
+- **Orden tradicional (canónico) — SIEMPRE reordenar en cliente.** El backend devuelve los libros con `distinct("book")` / `Object.keys(...)`, que salen en orden **alfabético**, NO canónico. La pestaña "Tradicional" mostraba esa lista alfabética. Fuente única de verdad: `frontend/src/lib/bibleOrder.js` → `orderBooks(books, mode)` (`"traditional" | "alpha"`), con el orden de los 66 libros en ES (RVR1960/RVA: `S. Mateo`, `S.Juan`, etc.) e inglés (KJV/WEB: `Song of Songs`, `Revelation`); normaliza tildes/espacios/puntos y tiene alias (gospels sin "S."), filtra la clave `"lang"` de los payloads offline. Aplicado en `BibleDetail.jsx` (página Biblia — además la navegación Anterior/Siguiente usa una lista `canonicalBooks`, antes saltaba al siguiente libro *alfabético*), `chat/ChatBibleModal.jsx` (chat) y `VerseSelectorModal.jsx` (posts, comentarios y responder comentarios — los tres comparten este componente). Las pestañas Tradicional/A–Z + tamaño de letra se persisten en `localStorage` (`bible_book_order`, `bible_font_size`), compartidas entre todas las superficies.
+- **Compartir posts con QR**: el botón "Compartir" de `Posts.jsx` abre `ShareModal.jsx` (mismo componente que la página de materiales) con `url` = `/post/:id` (ruta SPA humana, va en el QR) y `socialUrl` = `/api/share/post/:id` (endpoint OG para previews en WhatsApp/FB). Para mantener el contador "N veces compartido", `ShareModal` acepta un callback opcional `onShared` que dispara al copiar/compartir nativo/botón de red (`beforeOnClick`); `Posts.jsx` pasa `onShared={recordWebShare}`.
+
+---
+
 ## Commands
 
 ### Backend (`chat-app-backend/`)
