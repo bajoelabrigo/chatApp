@@ -41,16 +41,25 @@ import {
 import { uploadFile } from '../../src/services/uploadService';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 
+// Cuántos miembros se muestran en el panel antes del botón "Ver todos"
+// (idéntico a la web).
+const MEMBERS_PREVIEW = 10;
+
 const TEMP_OPTIONS: { label: string; value: number | null }[] = [
   { label: 'Desactivado', value: null },
   { label: '24 horas', value: 24 },
-  { label: '7 días', value: 168 },
-  { label: '90 días', value: 2160 },
+  { label: '7 días', value: 24 * 7 },
+  { label: '90 días', value: 24 * 90 },
 ];
 
+// Etiqueta legible para una duración en horas (misma lógica que la web: cae a
+// "N días" / "N h" si el valor no está entre las opciones fijas).
 function tempLabel(v: number | null | undefined): string {
-  const opt = TEMP_OPTIONS.find((o) => o.value === (v ?? null));
-  return opt?.label ?? 'Desactivado';
+  if (v == null) return 'Desactivado';
+  const opt = TEMP_OPTIONS.find((o) => o.value === v);
+  if (opt) return opt.label;
+  if (v % 24 === 0) return `${v / 24} días`;
+  return `${v} h`;
 }
 
 export default function GroupProfileScreen() {
@@ -73,6 +82,8 @@ export default function GroupProfileScreen() {
   const [showShare, setShowShare] = useState(false);
   const [showTempMsg, setShowTempMsg] = useState(false);
   const [showAddMembers, setShowAddMembers] = useState(false);
+  const [showAllMembers, setShowAllMembers] = useState(false);
+  const [allMembersSearch, setAllMembersSearch] = useState('');
 
   const [permEdit, setPermEdit] = useState<GroupPermissions>({
     membersCanSend: true,
@@ -372,12 +383,38 @@ export default function GroupProfileScreen() {
     }
   };
 
-  const filteredMembers = useMemo(() => {
+  // Lista de miembros ordenada alfabéticamente (locale ES), como en la web.
+  const sortedMembers = useMemo(() => {
     if (!group) return [];
-    if (!memberSearch.trim()) return group.participants;
+    return [...group.participants].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' })
+    );
+  }, [group]);
+
+  const filteredMembers = useMemo(() => {
+    if (!memberSearch.trim()) return sortedMembers;
     const q = memberSearch.toLowerCase();
-    return group.participants.filter((p) => p.name.toLowerCase().includes(q));
-  }, [group, memberSearch]);
+    return sortedMembers.filter((p) => (p.name || '').toLowerCase().includes(q));
+  }, [sortedMembers, memberSearch]);
+
+  // En el panel solo se muestran los primeros MEMBERS_PREVIEW; el resto se ve en
+  // el modal "Buscar miembros" (idéntico a la web).
+  const previewMembers = useMemo(
+    () => filteredMembers.slice(0, MEMBERS_PREVIEW),
+    [filteredMembers]
+  );
+
+  // Lista del modal "Buscar miembros": todos los miembros (ordenados) filtrados
+  // por nombre o email con su propio buscador.
+  const allMembersFiltered = useMemo(() => {
+    const q = allMembersSearch.trim().toLowerCase();
+    if (!q) return sortedMembers;
+    return sortedMembers.filter(
+      (m) =>
+        (m.name || '').toLowerCase().includes(q) ||
+        (m.email || '').toLowerCase().includes(q)
+    );
+  }, [sortedMembers, allMembersSearch]);
 
   const adminIds = new Set<string>(group?.admins?.map((a) => String(a)) ?? []);
 
@@ -590,11 +627,11 @@ export default function GroupProfileScreen() {
             )}
           </View>
 
-          {filteredMembers.map((member, idx) => {
+          {previewMembers.map((member, idx) => {
             const isAdminM = adminIds.has(member._id);
             const isMe = member._id === user?.id;
             const isLoading = actionLoadingId === member._id;
-            const isLast = idx === filteredMembers.length - 1;
+            const isLast = idx === previewMembers.length - 1 && filteredMembers.length <= MEMBERS_PREVIEW;
             return (
               <TouchableOpacity
                 key={member._id}
@@ -634,6 +671,19 @@ export default function GroupProfileScreen() {
 
           {filteredMembers.length === 0 && (
             <Text style={{ color: colors.textMuted, textAlign: 'center', paddingVertical: 16, fontSize: 14 }}>Sin resultados</Text>
+          )}
+
+          {/* Ver todos: abre el modal a pantalla completa "Buscar miembros". */}
+          {filteredMembers.length > MEMBERS_PREVIEW && (
+            <TouchableOpacity
+              onPress={() => { setAllMembersSearch(''); setShowAllMembers(true); }}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 }}
+            >
+              <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '600' }}>
+                Ver todos ({group.participants.length})
+              </Text>
+              <Text style={{ color: colors.accent, fontSize: 16 }}>›</Text>
+            </TouchableOpacity>
           )}
         </View>
 
@@ -734,7 +784,7 @@ export default function GroupProfileScreen() {
               <View style={{ paddingTop: 20, paddingBottom: 8, paddingHorizontal: 16 }}>
                 <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Mensajes temporales</Text>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 16 }}>
-                  Los mensajes se eliminarán automáticamente después del tiempo seleccionado.
+                  Los mensajes nuevos se borran automáticamente tras el tiempo elegido.
                 </Text>
                 {TEMP_OPTIONS.map((opt) => {
                   const active = tempEdit === opt.value;
@@ -854,6 +904,79 @@ export default function GroupProfileScreen() {
               }
             />
           )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Modal "Buscar miembros" (lista alfabética completa). Al tocar un
+          miembro se abre el modal de acciones del miembro encima. */}
+      <Modal visible={showAllMembers} animationType="slide" onRequestClose={() => setShowAllMembers(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+          <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={colors.bgPrimary} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <TouchableOpacity onPress={() => setShowAllMembers(false)} style={{ marginRight: 12 }}>
+              <Text style={{ color: colors.textPrimary, fontSize: 22 }}>←</Text>
+            </TouchableOpacity>
+            <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '600', flex: 1 }}>Buscar miembros</Text>
+          </View>
+
+          <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.inputBg, borderRadius: 12, paddingHorizontal: 12 }}>
+              <Ionicons name="search" size={18} color={colors.inputPlaceholder} />
+              <TextInput
+                style={{ flex: 1, color: colors.inputText, paddingVertical: 10, fontSize: 14 }}
+                placeholder="Buscar por nombre o correo…"
+                placeholderTextColor={colors.inputPlaceholder}
+                value={allMembersSearch}
+                onChangeText={setAllMembersSearch}
+                autoFocus
+              />
+            </View>
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8 }}>
+              {allMembersFiltered.length} {allMembersFiltered.length === 1 ? 'miembro' : 'miembros'}
+            </Text>
+          </View>
+
+          <FlatList
+            data={allMembersFiltered}
+            keyExtractor={(item) => item._id}
+            contentContainerStyle={{ padding: 8 }}
+            ListEmptyComponent={
+              <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40 }}>No se encontraron miembros.</Text>
+            }
+            renderItem={({ item: member }) => {
+              const isAdminM = adminIds.has(member._id);
+              const isMe = member._id === user?.id;
+              return (
+                <TouchableOpacity
+                  disabled={isMe}
+                  onPress={() => setMemberModal(member)}
+                  activeOpacity={0.7}
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 }}
+                >
+                  {member.avatar ? (
+                    <Image source={{ uri: member.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                  ) : (
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{member.name[0]?.toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={{ color: colors.textPrimary, fontWeight: '500' }}>{member.name}</Text>
+                      {isMe && <Text style={{ color: colors.textMuted, fontSize: 12 }}>(tú)</Text>}
+                    </View>
+                    {!!member.email && <Text style={{ color: colors.textMuted, fontSize: 12 }}>{member.email}</Text>}
+                  </View>
+                  {isAdminM && (
+                    <View style={{ backgroundColor: `${colors.accent}22`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, marginRight: 8 }}>
+                      <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>Admin</Text>
+                    </View>
+                  )}
+                  {!isMe && <Text style={{ color: colors.textMuted, fontSize: 18 }}>›</Text>}
+                </TouchableOpacity>
+              );
+            }}
+          />
         </SafeAreaView>
       </Modal>
 

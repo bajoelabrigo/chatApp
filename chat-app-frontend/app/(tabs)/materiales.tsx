@@ -25,7 +25,6 @@ import {
   priceLabel,
   type Material,
 } from '../../src/services/materialsService';
-import MaterialBanner from '../../src/components/MaterialBanner';
 
 const WEB_URL = 'https://holyholyholy.es';
 
@@ -283,8 +282,6 @@ export default function MaterialesScreen() {
 
   const ListHeader = (
     <View>
-      <MaterialBanner />
-
       {/* Buscador */}
       <View
         style={{

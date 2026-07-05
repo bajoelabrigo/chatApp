@@ -263,6 +263,45 @@ export async function togglePray(req: Request, res: Response) {
   }
 }
 
+// Un pedido de oración activo de algún grupo donde el usuario participa, para el
+// popup diario "notificación" (rotación materiales/oración/actividades). Elige
+// uno pseudo-aleatorio de los 12 más recientes. Devuelve null si no hay.
+export async function getPrayerFeed(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+
+    const groups = await Conversation.find({ isGroup: true, participants: userId })
+      .select('_id')
+      .lean();
+    const groupIds = groups.map((g) => g._id);
+    if (!groupIds.length) return res.json(null);
+
+    const requests = await PrayerRequest.find({
+      groupId: { $in: groupIds },
+      isAnswered: false,
+    })
+      .populate('authorId', 'name avatar')
+      .populate('groupId', 'groupName')
+      .sort({ createdAt: -1 })
+      .limit(12)
+      .lean();
+    if (!requests.length) return res.json(null);
+
+    const pick = requests[Math.floor(Math.random() * requests.length)] as any;
+    res.json({
+      _id: pick._id,
+      content: pick.content,
+      isAnonymous: pick.isAnonymous,
+      authorName: pick.isAnonymous ? 'Anónimo' : pick.authorId?.name ?? '',
+      groupId: pick.groupId?._id ?? pick.groupId,
+      groupName: pick.groupId?.groupName ?? '',
+      createdAt: pick.createdAt,
+    });
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo petición' });
+  }
+}
+
 export async function getMyActivePrayerRequests(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;

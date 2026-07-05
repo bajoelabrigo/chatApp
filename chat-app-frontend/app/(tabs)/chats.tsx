@@ -26,6 +26,7 @@ import { useChatsStore } from '../../src/store/useChatsStore';
 import { useNotificationsStore } from '../../src/store/useNotificationsStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import { ChatHeaderSection, type ChatFilterType } from '../../src/components/ChatHeaderSection';
+import DailyPopup from '../../src/components/DailyPopup';
 import { uploadFile } from '../../src/services/uploadService';
 import { getSocket } from '../../src/services/socketService';
 import {
@@ -879,6 +880,10 @@ export default function ChatsScreen() {
           }
         />
       )}
+
+      {/* Popup diario (materiales / oración / actividades) — flotante sobre la
+          lista, encima de la barra de pestañas. Oculto en modo selección. */}
+      {!isSelectMode && <DailyPopup />}
 
       {/* Modal: Acción de conversación */}
       <Modal visible={!!actionConv} transparent animationType="slide" onRequestClose={() => setActionConv(null)}>

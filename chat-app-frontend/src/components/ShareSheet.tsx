@@ -12,9 +12,11 @@ export const WEB_URL = API_URL.replace('://api.', '://');
 type Props = {
   visible: boolean;
   onClose: () => void;
-  url: string;          // enlace a compartir (p. ej. https://holyholyholy.es/u/<id>)
+  url: string;          // enlace mostrado + QR (p. ej. https://holyholyholy.es/u/<id>)
   title: string;        // encabezado del modal
   message?: string;     // texto que acompaña al enlace al compartir
+  socialUrl?: string;   // enlace usado al compartir (endpoint OG para preview en
+                        // WhatsApp/FB). Si falta, se comparte `url`.
 };
 
 /**
@@ -22,15 +24,19 @@ type Props = {
  * El QR lo genera el backend (/public/qr) porque la app no tiene librería
  * de QR nativa. El botón "Compartir enlace" usa el menú nativo del sistema.
  */
-export default function ShareSheet({ visible, onClose, url, title, message }: Props) {
+export default function ShareSheet({ visible, onClose, url, title, message, socialUrl }: Props) {
   const { colors } = useTheme();
   const [qrLoading, setQrLoading] = useState(true);
 
   const qrUrl = `${API_URL}/public/qr?size=500&data=${encodeURIComponent(url)}`;
 
+  // El QR y el enlace visible usan `url` (humano); al compartir usamos `socialUrl`
+  // si existe (endpoint OG → preview con imagen/título en WhatsApp/FB).
+  const shareLink = socialUrl || url;
+
   const handleShare = async () => {
     try {
-      await Share.share({ message: message ? `${message}\n${url}` : url, url, title });
+      await Share.share({ message: message ? `${message}\n${shareLink}` : shareLink, url: shareLink, title });
     } catch {
       /* el usuario canceló */
     }

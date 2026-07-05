@@ -3,64 +3,38 @@ import { View, Text, TouchableOpacity, Pressable, Image, Linking, Animated } fro
 import { Ionicons } from '@expo/vector-icons';
 import type { Message, MessageReplyTo, Reaction, ChatUser } from '../../services/conversationService';
 import { VoicePlayer } from './VoicePlayer';
+import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
-const YOUTUBE_REGEX =
-  /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
 const EMOJI_ONLY_REGEX = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
 
-// Light mode — dentro de burbuja (fondo blanco): oscuros saturados sin azul
-const BUBBLE_COLORS_LIGHT = [
-  '#C62828', // rojo
-  '#AD1457', // rosa
-  '#6A1B9A', // morado
-  '#2E7D32', // verde bosque
-  '#E65100', // naranja
-  '#00695C', // teal
-  '#4E342E', // marrón
-  '#F9A825', // ámbar
+// Colores de nombre por usuario, estilo WhatsApp — IDÉNTICOS a la web
+// (holy_app `messages/Message.jsx`). En claro son tonos saturados; en oscuro,
+// tonos claros que se leen sobre las burbujas/fondo oscuros. El color se asigna
+// de forma estable según el NOMBRE (misma clave y mismo hash que la web).
+const LIGHT_NAME_COLORS = [
+  '#1f7aec', '#7e3ff2', '#1fa855', '#e53935', '#8d6e63',
+  '#009688', '#d17c00', '#c2185b',
+];
+const DARK_NAME_COLORS = [
+  '#ffffff', '#ffd54f', '#81c784', '#f48fb1', '#64b5f6',
+  '#b39ddb', '#ffb74d', '#4dd0e1',
 ];
 
-// Dark mode — dentro de burbuja (fondo #ECECEC claro): saturados que se leen sobre gris claro
-const BUBBLE_COLORS_DARK = [
-  '#2E7D32', // verde medio
-  '#00838F', // celeste/teal medio
-  '#F57F17', // ámbar/naranja
-  '#6A1B9A', // morado medio
-];
-
-// Dark mode — etiqueta sobre el fondo del chat (fondo muy oscuro):
-// Exactamente lo que pide el usuario: blanco, verde claro, celeste, amarillo
-const LABEL_COLORS_DARK = [
-  '#FFFFFF', // blanco
-  '#A5D6A7', // verde claro
-  '#80DEEA', // celeste claro
-  '#FFD740', // amarillo
-];
-
-function hashStr(str: string): number {
+// Mismo hash que la web: h = (h*31 + code) >>> 0, y palette[h % len].
+function nameColor(key: string, isDark: boolean): string {
+  const palette = isDark ? DARK_NAME_COLORS : LIGHT_NAME_COLORS;
+  const s = String(key || '');
   let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xFFFFFF;
-  return Math.abs(h);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
 }
 
-// Nombre DENTRO de burbuja
-function bubbleNameColor(key: string, isDark: boolean): string {
-  const p = isDark ? BUBBLE_COLORS_DARK : BUBBLE_COLORS_LIGHT;
-  return p[hashStr(key) % p.length];
-}
-
-// Etiqueta SOBRE el fondo del chat (para media: imagen/audio/doc)
-function labelNameColor(key: string, isDark: boolean): string {
-  if (isDark) return LABEL_COLORS_DARK[hashStr(key) % LABEL_COLORS_DARK.length];
-  return BUBBLE_COLORS_LIGHT[hashStr(key) % BUBBLE_COLORS_LIGHT.length];
-}
-
-function extractYouTubeId(url: string): string | null {
-  const match = url.match(YOUTUBE_REGEX);
-  return match ? match[1] : null;
-}
+// Se conservan ambos nombres (dentro de burbuja / etiqueta sobre el fondo) pero
+// ahora resuelven al MISMO color de la web, para que web y app coincidan.
+const bubbleNameColor = nameColor;
+const labelNameColor = nameColor;
 
 function isEmojiOnly(text: string): boolean {
   return EMOJI_ONLY_REGEX.test(text.trim()) && text.trim().length > 0;
@@ -107,31 +81,15 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
   const isDark = colors.bgPrimary === '#0A0A0A';
   const isImageReply = reply.type === 'image';
 
-  let bg: string, nameTxt: string, contentTxt: string, border: string;
-
-  if (isMine) {
-    // Burbuja propia azul/índigo (en cualquier tema): el nombre y el mensaje
-    // citado SIEMPRE en colores claros para que no se pierdan contra el fondo
-    // azul de la burbuja.
-    bg = 'rgba(255,255,255,0.18)';
-    nameTxt = '#FFFFFF';
-    contentTxt = 'rgba(255,255,255,0.88)';
-    border = 'rgba(255,255,255,0.6)';
-  } else if (!isDark) {
-    // Ajena, tema claro (burbuja clara) → color de usuario + texto oscuro.
-    const c = bubbleNameColor(reply.senderName, false);
-    bg = '#EEF2FF';
-    nameTxt = c;
-    contentTxt = '#475569';
-    border = c;
-  } else {
-    // Ajena, tema oscuro (burbuja #1E2236) → color de usuario claro + texto claro.
-    const c = bubbleNameColor(reply.senderName, true);
-    bg = 'rgba(255,255,255,0.06)';
-    nameTxt = c;
-    contentTxt = 'rgba(255,255,255,0.75)';
-    border = c;
-  }
+  // Cita del mensaje respondido — IDÉNTICA a la web (holy_app Message.jsx):
+  //  - fondo: oscuro → rgba(0,0,0,0.22); claro → propia rgba(0,0,0,0.06), ajena #f5f6f6
+  //  - barra + nombre: color del autor citado (nameColor)
+  //  - contenido: oscuro → rgba(255,255,255,0.72); claro → #5e6b73
+  const c = nameColor(reply.senderName, isDark);
+  const bg = isDark ? 'rgba(0,0,0,0.22)' : isMine ? 'rgba(0,0,0,0.06)' : '#f5f6f6';
+  const nameTxt = c;
+  const contentTxt = isDark ? 'rgba(255,255,255,0.72)' : '#5e6b73';
+  const border = c;
 
   return (
     <TouchableOpacity
@@ -139,23 +97,23 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
       onPress={onPress}
       disabled={!onPress}
       style={{
-        borderLeftWidth: 3, borderLeftColor: border,
+        borderLeftWidth: 4, borderLeftColor: border,
         backgroundColor: bg, borderRadius: 8,
         paddingHorizontal: 8, paddingVertical: isImageReply ? 6 : 5,
         marginBottom: 6, marginHorizontal: 2,
-        flexDirection: 'row', alignItems: 'center',
+        flexDirection: 'row', alignItems: isImageReply ? 'center' : 'flex-start',
       }}>
       <View style={{ flex: 1, marginRight: isImageReply ? 8 : 0 }}>
         <Text style={{
           color: nameTxt,
           fontSize: isImageReply ? 13 : 12,
-          fontWeight: '800',
+          fontWeight: '700',
           marginBottom: isImageReply ? 3 : 1,
           letterSpacing: isImageReply ? 0.1 : 0,
         }}>
           {reply.senderName}
         </Text>
-        <Text style={{ color: contentTxt, fontSize: 12 }} numberOfLines={1}>
+        <Text style={{ color: contentTxt, fontSize: 12 }} numberOfLines={isImageReply ? 1 : 2}>
           {previewContent()}
         </Text>
       </View>
@@ -312,7 +270,7 @@ interface Props {
 function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
-  const senderColorKey = item.senderId._id;
+  const senderColorKey = item.senderId.name;
 
   const deletedForMe = item.deletedFor?.includes(currentUserId);
   if (deletedForMe) return null;
@@ -327,10 +285,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
 
   const emojiOnly = isText && !isDeleted && isEmojiOnly(item.content);
   const parts = isText && !isDeleted ? splitByUrls(item.content) : [];
-  const youtubeIds = parts
-    .filter((p) => p.type === 'url')
-    .map((p) => extractYouTubeId(p.value))
-    .filter(Boolean) as string[];
+  const firstUrl = parts.find((p) => p.type === 'url')?.value;
 
   const senderLabel = isMine ? 'Tú' : item.senderId.name;
 
@@ -338,20 +293,16 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const bubbleText = isMine ? colors.bubbleMineText : colors.bubbleTheirsText;
   const bubbleSubtext = isMine ? colors.bubbleMineSubtext : colors.bubbleTheirsSubtext;
 
-  const bubbleShadow = !isMine ? {
-    shadowColor: '#000',
+  // Sombra estilo web: en claro, sombra sutil en ambas burbujas (la ajena, que
+  // es blanca, además lleva un borde para separarse del fondo); en oscuro, sin
+  // sombra (las burbujas azul/morada ya contrastan con el fondo).
+  const bubbleShadow = isDark ? {} : {
+    shadowColor: '#0b141a',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.10,
-    shadowRadius: 4,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  } : {
-    shadowColor: colors.bubbleMineShadow,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.38,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOpacity: 0.13,
+    shadowRadius: 1,
+    elevation: 1,
+    ...(isMine ? {} : { borderWidth: 1, borderColor: colors.borderLight }),
   };
 
   const timestamp = (
@@ -548,33 +499,13 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             bubbleShadow,
           ]}
         >
-          {youtubeIds.map((videoId) => (
-            <TouchableOpacity
-              key={videoId}
-              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${videoId}`)}
-              activeOpacity={0.85}
-            >
-              <View style={{ position: 'relative' }}>
-                <Image
-                  source={{ uri: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` }}
-                  style={{ width: 256, height: 144 }}
-                  resizeMode="cover"
-                />
-                <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-                  <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ color: '#fff', fontSize: 20, marginLeft: 4 }}>▶</Text>
-                  </View>
-                </View>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.7)' }}>
-                  <Text style={{ color: '#fff', fontSize: 12 }} numberOfLines={1}>
-                    youtube.com/watch?v={videoId}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+          {firstUrl && !isDeleted && !emojiOnly && (
+            <View style={{ paddingHorizontal: 6, paddingTop: 6 }}>
+              <LinkPreview url={firstUrl} isMine={isMine} colors={colors} />
+            </View>
+          )}
 
-          <View style={emojiOnly ? {} : { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 }}>
+          <View style={emojiOnly ? {} : { paddingHorizontal: 12, paddingTop: firstUrl && !emojiOnly ? 0 : 8, paddingBottom: 4 }}>
             {!isMine && !emojiOnly && (
               <Text style={{
                 color: bubbleNameColor(senderColorKey, isDark),
@@ -599,7 +530,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
                   part.type === 'url' ? (
                     <Text
                       key={i}
-                      style={{ color: isMine ? 'rgba(255,255,255,0.85)' : colors.accent, textDecorationLine: 'underline' }}
+                      style={{ color: isMine && isDark ? 'rgba(255,255,255,0.9)' : colors.accent, textDecorationLine: 'underline' }}
                       onPress={() => Linking.openURL(part.value)}
                     >
                       {part.value}

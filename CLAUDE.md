@@ -285,9 +285,10 @@ useEffect(() => {
 
 **Persistencia offline**: `useChatsStore` y `useActivitiesStore` usan Zustand `persist` middleware con AsyncStorage. `partialize` excluye Sets y funciones (no serializables). La app muestra datos cacheados sin conexión al arrancar.
 
-**Theming**: `src/context/ThemeContext.tsx` — `ThemeProvider` + `useTheme()` hook. Paleta light (azul `#3B82F6`) y dark (indigo `#6366F1`). Todo el verde WhatsApp fue eliminado. Importar `useTheme()` en cualquier screen nueva y usar `colors.xxx` para todos los colores.
-- Bubble mine dark: `#4338CA` (indigo-700). Bubble theirs dark: `#1E2236`.
-- En cualquier componente que renderice texto sobre `bubbleMine` en dark, usar colores claros (e.g., `rgba(255,255,255,0.70)`) — el fondo indigo oscuro hace invisible cualquier texto oscuro.
+**Theming**: `src/context/ThemeContext.tsx` — `ThemeProvider` + `useTheme()` hook. Paleta light (azul `#3B82F6`) y dark (indigo `#6366F1`). Importar `useTheme()` en cualquier screen nueva y usar `colors.xxx` para todos los colores.
+- **Burbujas de mensaje idénticas a la web (`holy_app`)** desde 2026-07-04. Light: propia verde WhatsApp `#d9fdd3`, ajena blanca `#FFFFFF`, texto `#111b21`, meta `#667781`. Dark: propia azul `#3b82f6` (blue-500), ajena morada `#a855f7` (purple-500), texto blanco, meta `rgba(255,255,255,0.70)`. Definido en los tokens `bubbleMine/bubbleTheirs*` de ThemeContext.
+- **Ojo — la burbuja propia solo es oscura en dark (azul); en light es verde clara.** Cualquier color hardcodeado que asuma "propia = fondo oscuro → texto claro" rompe en light. Patrón usado en `MessageBubble`/`LinkPreview`/`VoicePlayer`: `const isDark = colors.bgPrimary === '#0A0A0A'; const mineDark = isMine && isDark;` y ramificar por `mineDark`, no por `isMine`.
+- **Colores de nombre de remitente idénticos a la web** (`nameColor(name, isDark)` en `MessageBubble.tsx`): mismas paletas `LIGHT_NAME_COLORS`/`DARK_NAME_COLORS`, mismo hash (`h = (h*31 + code) >>> 0`) y misma clave (el **nombre**, no el `_id`) que `holy_app/.../messages/Message.jsx`. Al tocar el color, editar ambos lados.
 
 **Styling**: NativeWind v4 (Tailwind para React Native). `global.css` es el entry de Tailwind; `tailwind.config.js` configura los content paths.
 

@@ -43,10 +43,16 @@ export function VoicePlayer({ uri, isMine, onLongPress }: Props) {
     } catch {}
   };
 
+  // La burbuja propia solo es oscura (azul) en tema oscuro; en claro es verde
+  // clara, así que los blancos serían invisibles → usamos tonos oscuros.
+  const isDark = colors.bgPrimary === '#0A0A0A';
+  const mineDark = isMine && isDark;
+
   const iconColor = isMine ? colors.bubbleMineText : colors.bubbleTheirsText;
-  const trackBg = isMine ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)';
-  const progressBar = isMine ? 'rgba(255,255,255,0.85)' : colors.accent;
+  const trackBg = mineDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)';
+  const progressBar = mineDark ? 'rgba(255,255,255,0.85)' : colors.accent;
   const timeColor = isMine ? colors.bubbleMineSubtext : colors.bubbleTheirsSubtext;
+  const buttonBg = mineDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)';
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, paddingHorizontal: 4, minWidth: 160 }}>
@@ -54,7 +60,7 @@ export function VoicePlayer({ uri, isMine, onLongPress }: Props) {
         onPress={togglePlay}
         onLongPress={onLongPress}
         delayLongPress={400}
-        style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: isMine ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.08)', alignItems: 'center', justifyContent: 'center' }}
+        style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: buttonBg, alignItems: 'center', justifyContent: 'center' }}
       >
         {status.isBuffering && !isPlaying ? (
           <ActivityIndicator size="small" color={iconColor} />

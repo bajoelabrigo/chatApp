@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ import { useActivitiesStore } from '../../src/store/useActivitiesStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import { uploadFile } from '../../src/services/uploadService';
 import { DatePickerModal } from '../../src/components/DatePickerModal';
+import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 import {
   getPrayerRequests,
   createPrayerRequest,
@@ -80,7 +81,9 @@ function RequestCard({
   onMarkAnswered,
   onDelete,
   onEdit,
+  onShare,
   onViewPrayer,
+  highlight,
   colors,
 }: {
   request: PrayerRequest;
@@ -90,7 +93,9 @@ function RequestCard({
   onMarkAnswered: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (request: PrayerRequest) => void;
+  onShare: (request: PrayerRequest) => void;
   onViewPrayer: (pu: PrayingUser) => void;
+  highlight?: boolean;
   colors: any;
 }) {
   const authorName = request.isAnonymous
@@ -100,7 +105,7 @@ function RequestCard({
   const prayingUsers = request.prayingUsers ?? [];
 
   return (
-    <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, padding: 16, marginBottom: 12 }}>
+    <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: highlight ? 2 : 0, borderColor: highlight ? colors.accent : 'transparent' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={{ color: colors.textSecondary, fontSize: 14 }}>{authorName}</Text>
         <Text style={{ color: colors.textMuted, fontSize: 12 }}>{formatDate(request.createdAt)}</Text>
@@ -151,18 +156,22 @@ function RequestCard({
           </TouchableOpacity>
         )}
 
-        {(request.isMyRequest || isAdmin) && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginLeft: 'auto' }}>
-            {!request.isAnswered && (
-              <TouchableOpacity onPress={() => onEdit(request)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <FontAwesome5 name="pencil-alt" size={13} color={colors.textMuted} />
-              </TouchableOpacity>
-            )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, marginLeft: 'auto' }}>
+          {/* Compartir: disponible para todos */}
+          <TouchableOpacity onPress={() => onShare(request)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="share-social-outline" size={16} color={colors.textMuted} />
+          </TouchableOpacity>
+          {(request.isMyRequest || isAdmin) && !request.isAnswered && (
+            <TouchableOpacity onPress={() => onEdit(request)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <FontAwesome5 name="pencil-alt" size={13} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+          {(request.isMyRequest || isAdmin) && (
             <TouchableOpacity onPress={() => onDelete(request._id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <FontAwesome5 name="trash" size={13} color={colors.danger} />
             </TouchableOpacity>
-          </View>
-        )}
+          )}
+        </View>
       </View>
 
       {prayingUsers.length > 0 && (
@@ -183,7 +192,7 @@ function RequestCard({
 
 export default function GroupPrayerScreen() {
   const { colors, isDark } = useTheme();
-  const { id: groupId } = useLocalSearchParams<{ id: string }>();
+  const { id: groupId, highlight: highlightParam } = useLocalSearchParams<{ id: string; highlight?: string }>();
   const { token, user } = useAuthStore();
   const userId = user?.id;
   const { prayerRequests, setPrayerRequests, bindPrayerEvents, unbindPrayerEvents } = useActivitiesStore();
@@ -207,6 +216,16 @@ export default function GroupPrayerScreen() {
   const [prayPosting, setPrayPosting] = useState(false);
   const [selectedPrayer, setSelectedPrayer] = useState<PrayingUser | null>(null);
   const [editModalFor, setEditModalFor] = useState<{ id: string } | null>(null);
+  const [shareReq, setShareReq] = useState<PrayerRequest | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // Resaltar la petición abierta desde el popup (?highlight=<id>) durante 3s.
+  useEffect(() => {
+    if (!highlightParam) return;
+    setHighlightId(highlightParam);
+    const t = setTimeout(() => setHighlightId(null), 3000);
+    return () => clearTimeout(t);
+  }, [highlightParam]);
   const [editContent, setEditContent] = useState('');
   const [editDeadline, setEditDeadline] = useState<string | undefined>(undefined);
   const [showEditDeadlinePicker, setShowEditDeadlinePicker] = useState(false);
@@ -582,7 +601,9 @@ export default function GroupPrayerScreen() {
             onMarkAnswered={handleMarkAnswered}
             onDelete={handleDelete}
             onEdit={handleEditRequest}
+            onShare={setShareReq}
             onViewPrayer={setSelectedPrayer}
+            highlight={highlightId === item._id}
             colors={colors}
           />
         )}
@@ -595,6 +616,19 @@ export default function GroupPrayerScreen() {
       >
         <Text style={{ color: '#fff', fontSize: 24 }}>+</Text>
       </TouchableOpacity>
+
+      {/* Compartir petición (enlace + QR del grupo) */}
+      <ShareSheet
+        visible={!!shareReq}
+        onClose={() => setShareReq(null)}
+        url={shareReq ? `${WEB_URL}/api/share/prayer/${shareReq._id}` : ''}
+        title="Compartir petición"
+        message={
+          shareReq
+            ? `🙏 Petición de oración:\n"${(shareReq.content || '').slice(0, 160)}${(shareReq.content || '').length > 160 ? '…' : ''}"`
+            : ''
+        }
+      />
 
       {/* ── Add Prayer Request Modal ── */}
       <Modal visible={showAdd} animationType="slide" transparent statusBarTranslucent>

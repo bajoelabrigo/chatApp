@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount, getMyConnections } from '../controllers/userController';
 import { getPersonalActivities, createPersonalActivity, updatePersonalActivity, deletePersonalActivity } from '../controllers/personalActivityController';
-import { getMyActivePrayerRequests } from '../controllers/prayerController';
+import { getMyActivePrayerRequests, getPrayerFeed } from '../controllers/prayerController';
+import { getActivityFeed } from '../controllers/activityController';
 
 const router = Router();
 
@@ -19,6 +20,8 @@ router.get('/me/settings', getMySettings);
 router.patch('/me/settings', updateSettings);
 router.get('/me/activities', getPersonalActivities);
 router.get('/me/prayer-requests', getMyActivePrayerRequests);
+router.get('/me/prayer-feed', getPrayerFeed);
+router.get('/me/activity-feed', getActivityFeed);
 router.get('/me/connections', getMyConnections);
 router.post('/me/activities', createPersonalActivity);
 router.patch('/me/activities/:id', updatePersonalActivity);

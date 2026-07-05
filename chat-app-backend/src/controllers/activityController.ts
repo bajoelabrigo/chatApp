@@ -22,6 +22,36 @@ async function resolveGroup(groupId: string, userId: string) {
   return { conv, globalAdmin };
 }
 
+// Una actividad espiritual creada por el usuario, para el popup diario
+// "notificación" (rotación materiales/oración/actividades). Elige una
+// pseudo-aleatoria de las 12 más recientes. Devuelve null si no hay.
+export async function getActivityFeed(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+
+    const activities = await GroupActivity.find({ createdBy: userId, isActive: true })
+      .populate('groupId', 'groupName')
+      .sort({ createdAt: -1 })
+      .limit(12)
+      .lean();
+    if (!activities.length) return res.json(null);
+
+    const pick = activities[Math.floor(Math.random() * activities.length)] as any;
+    res.json({
+      _id: pick._id,
+      name: pick.name,
+      type: pick.type,
+      emoji: pick.emoji,
+      description: pick.description ?? '',
+      groupId: pick.groupId?._id ?? pick.groupId,
+      groupName: pick.groupId?.groupName ?? '',
+      startDate: pick.startDate ?? null,
+    });
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo actividad' });
+  }
+}
+
 export async function getActivities(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;

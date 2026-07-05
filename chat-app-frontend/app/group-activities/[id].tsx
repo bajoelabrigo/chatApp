@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ import {
 } from '../../src/services/activityService';
 import { getGroupInfo } from '../../src/services/conversationService';
 import { DatePickerModal } from '../../src/components/DatePickerModal';
+import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
@@ -54,7 +55,7 @@ function fmt(h: number | undefined, m: number | undefined): string {
 
 export default function GroupActivitiesScreen() {
   const { colors, isDark } = useTheme();
-  const { id: groupId } = useLocalSearchParams<{ id: string }>();
+  const { id: groupId, highlight: highlightParam } = useLocalSearchParams<{ id: string; highlight?: string }>();
   const { token, user } = useAuthStore();
   const userId = user?.id;
   const { activities, setActivities, myCommitments, setMyCommitments } = useActivitiesStore();
@@ -71,6 +72,17 @@ export default function GroupActivitiesScreen() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const [shareActivity, setShareActivity] = useState<GroupActivity | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // Resaltar la actividad abierta desde el popup (?highlight=<id>) durante 3s.
+  useEffect(() => {
+    if (!highlightParam) return;
+    setHighlightId(highlightParam);
+    const t = setTimeout(() => setHighlightId(null), 3000);
+    return () => clearTimeout(t);
+  }, [highlightParam]);
 
   // Detail modal
   const [detailActivity, setDetailActivity] = useState<GroupActivity | null>(null);
@@ -297,7 +309,7 @@ export default function GroupActivitiesScreen() {
           <TouchableOpacity
             onPress={() => openDetail(item)}
             onLongPress={() => handleLongPress(item)}
-            style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, padding: 16, opacity: item.isActive ? 1 : 0.5 }}
+            style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, padding: 16, opacity: item.isActive ? 1 : 0.5, borderWidth: highlightId === item._id ? 2 : 0, borderColor: highlightId === item._id ? colors.accent : 'transparent' }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <ActivityIcon type={item.type} size={28} color={colors.accent} />
@@ -318,10 +330,26 @@ export default function GroupActivitiesScreen() {
                   </Text>
                 )}
               </View>
+              <TouchableOpacity onPress={() => setShareActivity(item)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} style={{ padding: 2 }}>
+                <Ionicons name="share-social-outline" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
               <Text style={{ color: colors.textMuted, fontSize: 18 }}>›</Text>
             </View>
           </TouchableOpacity>
         )}
+      />
+
+      {/* Compartir actividad (enlace + QR del grupo) */}
+      <ShareSheet
+        visible={!!shareActivity}
+        onClose={() => setShareActivity(null)}
+        url={shareActivity ? `${WEB_URL}/api/share/activity/${shareActivity._id}` : ''}
+        title="Compartir actividad"
+        message={
+          shareActivity
+            ? `${shareActivity.emoji || '🔥'} Actividad espiritual: ${shareActivity.name}`
+            : ''
+        }
       />
 
       {/* ── Detail Modal ── */}

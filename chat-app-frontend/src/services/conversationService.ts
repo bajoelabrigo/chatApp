@@ -278,6 +278,41 @@ export async function getGroupInfo(token: string, groupId: string): Promise<Grou
   return data;
 }
 
+// Media compartida del grupo para el panel "Archivos, enlaces y docs".
+// El backend (`GET /groups/:id/media`) devuelve tres listas ya separadas:
+//  - files: fotos/videos/audios (type image|audio)
+//  - links: URLs encontradas en mensajes de texto
+//  - docs:  documentos (type document)
+export interface GroupMediaFile {
+  _id: string;
+  url: string;
+  type: 'image' | 'audio' | 'document';
+  fileName?: string;
+  fileSize?: number;
+  createdAt: string;
+}
+export interface GroupMediaLink {
+  _id: string;
+  url: string;
+  createdAt: string;
+}
+export interface GroupMedia {
+  files: GroupMediaFile[];
+  links: GroupMediaLink[];
+  docs: GroupMediaFile[];
+}
+
+export async function getGroupMedia(token: string, groupId: string): Promise<GroupMedia> {
+  const { data } = await api.get<GroupMedia>(`/groups/${groupId}/media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return {
+    files: data.files ?? [],
+    links: data.links ?? [],
+    docs: data.docs ?? [],
+  };
+}
+
 export async function toggleGroupAdmin(token: string, groupId: string, memberId: string): Promise<{ isAdmin: boolean }> {
   const { data } = await api.patch(`/groups/${groupId}/members/${memberId}/admin`, {}, {
     headers: { Authorization: `Bearer ${token}` },

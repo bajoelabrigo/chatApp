@@ -594,16 +594,16 @@ export default function ActividadesScreen() {
                     style={{
                       flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
                       gap: 6, paddingVertical: 8, borderRadius: 10,
-                      backgroundColor: 'rgba(34,197,94,0.15)',
+                      backgroundColor: '#16a34a',
                       borderWidth: 1, borderColor: '#16a34a',
                     }}
                   >
                     {leavingPrayerId === req._id ? (
-                      <ActivityIndicator size="small" color="#16a34a" />
+                      <ActivityIndicator size="small" color="#fff" />
                     ) : (
                       <>
-                        <FontAwesome5 name="praying-hands" size={12} color="#16a34a" />
-                        <Text style={{ color: '#16a34a', fontWeight: '600', fontSize: 13 }}>Estoy orando</Text>
+                        <FontAwesome5 name="praying-hands" size={12} color="#fff" />
+                        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Estoy orando</Text>
                       </>
                     )}
                   </TouchableOpacity>
