@@ -1,4 +1,4 @@
-import { useRef, useEffect, memo } from 'react';
+import { useRef, useEffect, useState, memo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, Image, Linking, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message, MessageReplyTo, Reaction, ChatUser } from '../../services/conversationService';
@@ -272,6 +272,11 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId.name;
 
+  // "Ver más": los mensajes de texto largos se recortan (igual que en la web,
+  // holy_app Message.jsx) mostrando los primeros MAX_LENGTH caracteres con un
+  // botón para expandir. Evita burbujas gigantescas en la lista.
+  const [expanded, setExpanded] = useState(false);
+
   const deletedForMe = item.deletedFor?.includes(currentUserId);
   if (deletedForMe) return null;
 
@@ -284,7 +289,13 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isMedia = isImage || isAudio || isDocument;
 
   const emojiOnly = isText && !isDeleted && isEmojiOnly(item.content);
-  const parts = isText && !isDeleted ? splitByUrls(item.content) : [];
+  // Recorte de texto largo (igual que la web): si supera MAX_LENGTH y no está
+  // expandido, se muestra solo el inicio + botón "Ver más".
+  const MAX_LENGTH = 250;
+  const fullText = isText && !isDeleted ? item.content : '';
+  const shouldTruncate = isText && !isDeleted && !emojiOnly && fullText.length > MAX_LENGTH;
+  const displayText = shouldTruncate && !expanded ? fullText.slice(0, MAX_LENGTH) : fullText;
+  const parts = isText && !isDeleted ? splitByUrls(displayText) : [];
   const firstUrl = parts.find((p) => p.type === 'url')?.value;
 
   const senderLabel = isMine ? 'Tú' : item.senderId.name;
@@ -539,6 +550,19 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
                     <Text key={i}>{part.value}</Text>
                   )
                 )}
+              </Text>
+            )}
+            {shouldTruncate && !expanded && !isDeleted && (
+              <Text
+                onPress={() => setExpanded(true)}
+                style={{
+                  color: isDark ? '#fde68a' : '#2563eb',
+                  fontSize: 13,
+                  textDecorationLine: 'underline',
+                  marginTop: 4,
+                }}
+              >
+                Ver más
               </Text>
             )}
             {!emojiOnly && <View style={{ marginTop: 2 }}>{timestamp}</View>}

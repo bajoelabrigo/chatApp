@@ -88,9 +88,11 @@ const DARK: ThemeColors = {
   border: '#2A2A2A',
   borderLight: '#252B45',
   // Bubbles (idénticas a la web / holy_app): en tema oscuro → burbuja propia
-  // azul (blue-500), ajena morada (purple-500), texto blanco.
-  bubbleMine: '#3b82f6',
-  bubbleTheirs: '#a855f7',
+  // azul oscuro (blue-800), ajena morada oscura (purple-800), texto blanco.
+  // Se oscurecieron respecto a blue-500/purple-500 para que el texto claro
+  // destaque más sobre la burbuja.
+  bubbleMine: '#1e40af',
+  bubbleTheirs: '#6b21a8',
   bubbleMineText: '#FFFFFF',
   bubbleTheirsText: '#FFFFFF',
   bubbleMineSubtext: 'rgba(255,255,255,0.70)',
