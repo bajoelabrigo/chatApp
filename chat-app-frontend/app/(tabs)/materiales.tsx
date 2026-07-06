@@ -135,35 +135,43 @@ export default function MaterialesScreen() {
   const onPressMaterial = async (m: Material) => {
     if (!token) return;
     markMaterialViewed(token, m._id).catch(() => {});
-    if (!m.price || m.price <= 0) {
-      // Gratis → descarga/abre los archivos dentro de la app (uno o varios).
-      try {
-        setBusyId(m._id);
-        const data = await downloadMaterial(token, m._id);
-        const urls = data.files?.length
-          ? data.files.map((f) => f.url).filter(Boolean)
-          : data.fileUrl
-          ? [data.fileUrl]
-          : [];
-        // Abrir cada archivo en secuencia (el usuario cierra y se abre el siguiente).
-        for (const url of urls) {
-          await WebBrowser.openBrowserAsync(url);
-        }
-        load();
-      } catch {
-        Alert.alert('Error', 'No se pudo abrir el material.');
-      } finally {
-        setBusyId(null);
-      }
-    } else {
-      // De pago → abrir la compra en el navegador EXTERNO (apto para Google Play).
+
+    const isFree = !m.price || m.price <= 0;
+
+    // De pago, o gratis con aporte voluntario ("$0+"): abrir la página web para
+    // que el usuario pueda descargar y, si lo desea, dejar una donación voluntaria
+    // por el material. (Navegador EXTERNO, apto para políticas de Google Play.)
+    if (!isFree || m.payWhatYouWant) {
       Linking.openURL(`${WEB_URL}/materiales/${m.slug}`);
+      return;
+    }
+
+    // Gratis sin aporte voluntario → descarga/abre los archivos dentro de la app.
+    try {
+      setBusyId(m._id);
+      const data = await downloadMaterial(token, m._id);
+      const urls = data.files?.length
+        ? data.files.map((f) => f.url).filter(Boolean)
+        : data.fileUrl
+        ? [data.fileUrl]
+        : [];
+      // Abrir cada archivo en secuencia (el usuario cierra y se abre el siguiente).
+      for (const url of urls) {
+        await WebBrowser.openBrowserAsync(url);
+      }
+      load();
+    } catch {
+      Alert.alert('Error', 'No se pudo abrir el material.');
+    } finally {
+      setBusyId(null);
     }
   };
 
   const renderItem = ({ item }: { item: Material }) => {
     const img = item.coverImage || item.thumbnail;
     const free = !item.price || item.price <= 0;
+    // Abre la web si es de pago o si es gratis con aporte voluntario ($0+).
+    const opensWeb = !free || item.payWhatYouWant;
     return (
       <TouchableOpacity
         activeOpacity={0.85}
@@ -255,12 +263,12 @@ export default function MaterialesScreen() {
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <Ionicons
-                name={free ? 'download-outline' : 'open-outline'}
+                name={opensWeb ? 'open-outline' : 'download-outline'}
                 size={16}
                 color={colors.textSecondary}
               />
               <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                {free ? 'Descargar' : 'Ver en la web'}
+                {opensWeb ? 'Ver en la web' : 'Descargar'}
               </Text>
               {busyId === item._id && (
                 <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 4 }} />

@@ -87,6 +87,28 @@ export async function createOrder(
   return { orderId: order.id, approvalUrl };
 }
 
+// Orden "simple" para el flujo INLINE (PayPal Buttons en la página, sin redirect).
+// No fija `payment_source`, así el pago con PayPal Y con tarjeta quedan elegibles.
+export async function createInlineOrder(
+  amountUSD: string,
+  userId: string
+): Promise<{ orderId: string }> {
+  const order = await paypalFetch('/v2/checkout/orders', {
+    method: 'POST',
+    body: JSON.stringify({
+      intent: 'CAPTURE',
+      purchase_units: [
+        {
+          amount: { currency_code: 'USD', value: amountUSD },
+          custom_id: userId,
+        },
+      ],
+    }),
+  });
+  if (!order?.id) throw new Error('No se obtuvo la orden de PayPal');
+  return { orderId: order.id };
+}
+
 export async function captureOrder(orderId: string): Promise<any> {
   return paypalFetch(`/v2/checkout/orders/${orderId}/capture`, {
     method: 'POST',

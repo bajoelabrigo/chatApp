@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
 import {
   createOrderCheckout,
+  createInlineOrderCheckout,
+  captureInlineOrder,
   captureOrderReturn,
   cancelReturn,
   createSubscriptionCheckout,
@@ -25,6 +27,8 @@ router.post('/webhook', handleWebhook);
 
 router.use(authMiddleware);
 router.post('/order', createOrderCheckout);
+router.post('/order/inline', createInlineOrderCheckout);
+router.post('/capture/inline', captureInlineOrder);
 router.post('/subscription', createSubscriptionCheckout);
 router.get('/history', getOfferingHistory);
 router.get('/status', getMyOfferingStatus);

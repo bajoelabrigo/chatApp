@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import {
   createOrder,
+  createInlineOrder,
   captureOrder,
   createSubscription,
   verifyWebhook,
@@ -66,6 +67,71 @@ export async function createOrderCheckout(req: Request, res: Response) {
   } catch (err) {
     console.error('Error creando orden PayPal:', err);
     res.status(500).json({ error: 'Error al iniciar el pago' });
+  }
+}
+
+// ── One-time order (INLINE: PayPal Buttons en la página, sin redirect) ──
+// La web usa este par de endpoints para ofrendar sin salir del sitio
+// (el usuario paga con PayPal o tarjeta ahí mismo).
+
+export async function createInlineOrderCheckout(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const rawAmount = parseFloat(req.body.amount);
+
+    if (isNaN(rawAmount) || rawAmount < 1) {
+      return res.status(400).json({ error: 'Monto inválido (mínimo $1)' });
+    }
+
+    const amountUSD = rawAmount.toFixed(2);
+    const { orderId } = await createInlineOrder(amountUSD, userId);
+
+    await Offering.create({
+      userId,
+      paypalOrderId: orderId,
+      type: 'one_time',
+      amount: Math.round(rawAmount * 100),
+      status: 'pending',
+    });
+
+    res.json({ orderId });
+  } catch (err) {
+    console.error('Error creando orden inline PayPal:', err);
+    res.status(500).json({ error: 'Error al iniciar el pago' });
+  }
+}
+
+export async function captureInlineOrder(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const orderId = req.body.orderId as string;
+
+    if (!orderId) {
+      return res.status(400).json({ error: 'Falta el identificador de la orden' });
+    }
+
+    const capture = await captureOrder(orderId);
+
+    if (capture?.status === 'COMPLETED') {
+      const unit = capture.purchase_units?.[0];
+      const captureData = unit?.payments?.captures?.[0];
+      const amountCents = Math.round(parseFloat(captureData?.amount?.value ?? '0') * 100);
+
+      // Solo confirma la ofrenda si pertenece a este usuario (evita capturar
+      // una orden ajena). El webhook PAYMENT.CAPTURE.COMPLETED es idempotente.
+      await Offering.findOneAndUpdate(
+        { paypalOrderId: orderId, userId },
+        { $set: { status: 'paid', amount: amountCents } }
+      );
+      await User.findByIdAndUpdate(userId, { $set: { lastOfferingAt: new Date() } });
+
+      return res.json({ status: 'COMPLETED', amountCents });
+    }
+
+    return res.json({ status: capture?.status ?? 'PENDING' });
+  } catch (err) {
+    console.error('Error capturando orden inline PayPal:', err);
+    res.status(500).json({ error: 'Error al procesar el pago' });
   }
 }
 
