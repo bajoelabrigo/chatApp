@@ -124,11 +124,18 @@ export default function ContactInfoScreen() {
 
   const handleToggleBlock = () => {
     const isBlocked = profile?.isBlocked ?? false;
+
+    // No se puede bloquear al administrador de la página.
+    if (!isBlocked && profile?.role === 'admin') {
+      Alert.alert('No permitido', 'No puedes bloquear a un administrador de la página.');
+      return;
+    }
+
     Alert.alert(
       isBlocked ? 'Desbloquear' : `Bloquear a ${displayName}`,
       isBlocked
-        ? `¿Desbloquear a ${displayName}? Podrá volver a enviarte mensajes.`
-        : `¿Bloquear a ${displayName}? No podrá enviarte mensajes.`,
+        ? `¿Desbloquear a ${displayName}? Podrán volver a enviarse mensajes y a interactuar entre ustedes.`
+        : `Si bloqueas a ${displayName}:\n\n• Ya no podrán enviarse mensajes ni llamadas.\n• No verá tus publicaciones ni comentarios, ni tú los suyos.\n• No aparecerá en tus chats, búsquedas, contactos frecuentes, conexiones ni sugerencias.\n• Se eliminará la conexión entre ustedes y cualquier solicitud pendiente.\n• No recibirás sus notificaciones ni solicitudes.\n\nEs una acción que puedes revertir: podrás desbloquearlo cuando quieras.`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -141,8 +148,10 @@ export default function ContactInfoScreen() {
               setProfile((p) => p ? { ...p, isBlocked: blocked } : p);
               if (blocked) blockConversation(conversationId);
               else unblockConversation(conversationId);
-            } catch {
-              Alert.alert('Error', 'No se pudo completar la operación');
+            } catch (err: any) {
+              // El backend rechaza bloquear a un admin (403) con su propio mensaje.
+              const msg = err?.response?.data?.error || 'No se pudo completar la operación';
+              Alert.alert('Error', msg);
             }
           },
         },

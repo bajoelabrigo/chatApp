@@ -262,8 +262,13 @@ export async function searchUsers(req: Request, res: Response) {
       return res.status(400).json({ error: 'Búsqueda mínima de 2 caracteres' });
     }
 
+    // Excluir usuarios bloqueados: los que yo bloqueé y los que me bloquearon a mí.
+    const me = await User.findById(userId).select('blockedUsers').lean();
+    const myBlocked = (me?.blockedUsers ?? []).map((b: any) => b.toString());
+
     const users = await User.find({
-      _id: { $ne: userId },
+      _id: { $ne: userId, $nin: myBlocked },
+      blockedUsers: { $ne: userId },
       $or: [
         { name: { $regex: q, $options: 'i' } },
         { email: { $regex: q, $options: 'i' } },
@@ -294,10 +299,18 @@ export async function getSuggestedUsers(req: Request, res: Response) {
       }
     }
 
-    const users = await User.find({ _id: { $nin: Array.from(knownIds) } })
+    // Excluir usuarios que yo bloqueé (se suman a los ya conocidos) y los que me
+    // bloquearon a mí (filtro `blockedUsers`).
+    const me = await User.findById(userId).select('blockedUsers').lean();
+    for (const b of me?.blockedUsers ?? []) knownIds.add((b as any).toString());
+
+    const users = await User.find({
+      _id: { $nin: Array.from(knownIds) },
+      blockedUsers: { $ne: userId },
+    })
       .select('name avatar email')
       .sort({ createdAt: -1 })
-      .limit(15);
+      .limit(20);
 
     res.json(users);
   } catch {
@@ -310,7 +323,13 @@ export async function getAllUsersSearch(req: Request, res: Response) {
     const userId = (req as any).userId;
     const { q } = req.query;
 
-    const filter: any = { _id: { $ne: userId } };
+    const me = await User.findById(userId).select('blockedUsers').lean();
+    const myBlocked = (me?.blockedUsers ?? []).map((b: any) => b.toString());
+
+    const filter: any = {
+      _id: { $ne: userId, $nin: myBlocked },
+      blockedUsers: { $ne: userId },
+    };
     if (q && (q as string).trim().length >= 2) {
       filter.$or = [
         { name: { $regex: q, $options: 'i' } },

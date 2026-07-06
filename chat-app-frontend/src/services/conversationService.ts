@@ -388,6 +388,8 @@ export interface ContactProfile {
   name: string;
   email: string;
   avatar?: string;
+  bio?: string;
+  role?: string;
   sharedGroups: {
     _id: string;
     groupName?: string;

@@ -177,9 +177,16 @@ export async function getMyConnections(req: AuthRequest, res: Response): Promise
       }
     }
 
+    // Quitar los usuarios que yo bloqueé.
+    for (const b of me.blockedUsers ?? []) ids.delete(b?.toString());
+
     if (ids.size === 0) { res.json([]); return; }
 
-    const users = await User.find({ _id: { $in: Array.from(ids) } })
+    // Excluir además a los que me bloquearon a mí (filtro `blockedUsers`).
+    const users = await User.find({
+      _id: { $in: Array.from(ids) },
+      blockedUsers: { $ne: myId },
+    })
       .select('name avatar email')
       .sort({ name: 1 })
       .limit(100)
@@ -196,7 +203,7 @@ export async function getUserProfile(req: AuthRequest, res: Response): Promise<v
     const myId = req.userId!;
     const { userId } = req.params;
 
-    const targetUser = await User.findById(userId).select('name email avatar bio').lean();
+    const targetUser = await User.findById(userId).select('name email avatar bio role').lean();
     if (!targetUser) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
 
     const sharedGroups = await Conversation.find({
@@ -213,6 +220,7 @@ export async function getUserProfile(req: AuthRequest, res: Response): Promise<v
       email: targetUser.email,
       avatar: targetUser.avatar,
       bio: targetUser.bio ?? '',
+      role: (targetUser as any).role ?? 'user',
       sharedGroups: sharedGroups.map((g) => ({
         _id: g._id,
         groupName: g.groupName,
@@ -393,6 +401,15 @@ export async function toggleBlock(req: Request, res: Response) {
     const isBlocked = currentUser.blockedUsers.some(
       (id) => id.toString() === targetUserId
     );
+
+    // No se puede bloquear al administrador de la página (solo al bloquear, no al
+    // desbloquear). La base es compartida con la web: el admin tiene role:'admin'.
+    if (!isBlocked) {
+      const targetUser = await User.findById(targetUserId).select('role').lean();
+      if ((targetUser as any)?.role === 'admin') {
+        return res.status(403).json({ error: 'No puedes bloquear a un administrador de la página.' });
+      }
+    }
 
     await User.findByIdAndUpdate(
       userId,

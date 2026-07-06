@@ -34,6 +34,9 @@ import {
   leaveGroup,
   reportGroup,
   searchUsers,
+  getMyConnections,
+  getSuggestedUsers,
+  getBlockedUsers,
   type GroupInfo,
   type ChatUser,
   type GroupPermissions,
@@ -66,7 +69,7 @@ export default function GroupProfileScreen() {
   const { colors, isDark } = useTheme();
   const { id: groupId } = useLocalSearchParams<{ id: string }>();
   const { token, user } = useAuthStore();
-  const { conversations, upsertConversation, archiveConversation } = useChatsStore();
+  const { upsertConversation, archiveConversation } = useChatsStore();
   const { callState, startCall } = useCallStore();
   const { isActive: groupCallActive, startGroupCall } = useGroupCallStore();
 
@@ -107,20 +110,12 @@ export default function GroupProfileScreen() {
   const [addSelected, setAddSelected] = useState<ChatUser[]>([]);
   const [addingMembers, setAddingMembers] = useState(false);
 
-  const contacts = useMemo(() => {
-    const seen = new Set<string>();
-    const users: ChatUser[] = [];
-    for (const conv of conversations) {
-      if (!conv.isGroup) {
-        const other = conv.participants.find((p) => p._id !== user?.id);
-        if (other && !seen.has(other._id)) {
-          seen.add(other._id);
-          users.push(other);
-        }
-      }
-    }
-    return users.sort((a, b) => a.name.localeCompare(b.name));
-  }, [conversations, user?.id]);
+  // "Contactos frecuentes": a quienes sigo, me siguen, conexiones + sugerencias.
+  // Se cargan al abrir el modal de añadir miembros. Los usuarios bloqueados por mí
+  // se excluyen de TODAS las listas (frecuentes + resultados de búsqueda).
+  const [frequentContacts, setFrequentContacts] = useState<ChatUser[]>([]);
+  const [loadingFrequent, setLoadingFrequent] = useState(false);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
 
   const fetchGroup = useCallback(async () => {
     if (!token) return;
@@ -294,9 +289,42 @@ export default function GroupProfileScreen() {
     try {
       const results = await searchUsers(token!, q);
       const existing = new Set(group?.participants.map((p) => p._id) ?? []);
-      setAddResults(results.filter((u) => !existing.has(u._id)));
+      setAddResults(results.filter((u) => !existing.has(u._id) && !blockedIds.has(u._id)));
     } finally {
       setAddSearching(false);
+    }
+  }, [token, group, blockedIds]);
+
+  // Abre el modal de añadir miembros y carga "Contactos frecuentes": la unión de
+  // conexiones/seguidores/seguidos + hasta 20 sugerencias, ordenada alfabética,
+  // sin usuarios bloqueados por mí ni miembros que ya están en el grupo.
+  const openAddMembers = useCallback(async () => {
+    if (!token) return;
+    setAddSearch('');
+    setAddResults([]);
+    setAddSelected([]);
+    setShowAddMembers(true);
+    setLoadingFrequent(true);
+    try {
+      const [connections, suggested, blocked] = await Promise.all([
+        getMyConnections(token).catch(() => [] as ChatUser[]),
+        getSuggestedUsers(token).catch(() => [] as ChatUser[]),
+        getBlockedUsers(token).catch(() => []),
+      ]);
+      const blockedSet = new Set(blocked.map((b) => b._id));
+      setBlockedIds(blockedSet);
+
+      const existing = new Set(group?.participants.map((p) => p._id) ?? []);
+      const map = new Map<string, ChatUser>();
+      for (const u of connections) map.set(u._id, u);
+      for (const u of suggested.slice(0, 20)) if (!map.has(u._id)) map.set(u._id, u);
+
+      const merged = Array.from(map.values())
+        .filter((u) => !existing.has(u._id) && !blockedSet.has(u._id))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'es', { sensitivity: 'base' }));
+      setFrequentContacts(merged);
+    } finally {
+      setLoadingFrequent(false);
     }
   }, [token, group]);
 
@@ -418,12 +446,7 @@ export default function GroupProfileScreen() {
 
   const adminIds = new Set<string>(group?.admins?.map((a) => String(a)) ?? []);
 
-  const availableContacts = useMemo(() => {
-    const existing = new Set(group?.participants.map((p) => p._id) ?? []);
-    return contacts.filter((c) => !existing.has(c._id));
-  }, [contacts, group]);
-
-  const addListData = addSearch.length >= 2 ? addResults : availableContacts;
+  const addListData = addSearch.length >= 2 ? addResults : frequentContacts;
 
   const s = {
     card: { marginHorizontal: 16, borderRadius: 16, overflow: 'hidden' as const, backgroundColor: colors.bgSecondary, marginBottom: 16 },
@@ -602,30 +625,43 @@ export default function GroupProfileScreen() {
         </View>
 
         {/* Members */}
-        <View style={{ marginHorizontal: 16, marginBottom: 4 }}>
-          <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingBottom: 8 }}>
+        <View style={{ marginHorizontal: 16, marginBottom: 4, flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ flex: 1, color: colors.textSecondary, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingBottom: 8 }}>
             {group.participants.length} miembro{group.participants.length !== 1 ? 's' : ''}
           </Text>
+          {/* Buscar miembros: abre el modal "Buscar miembros" (lista completa). */}
+          <TouchableOpacity
+            onPress={() => { setAllMembersSearch(''); setShowAllMembers(true); }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={{ paddingBottom: 8, paddingLeft: 8 }}
+          >
+            <Ionicons name="search" size={20} color={colors.accent} />
+          </TouchableOpacity>
         </View>
         <View style={s.card}>
-          {/* Search + Add button */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 8 }}>
-            <TextInput
-              style={{ flex: 1, backgroundColor: colors.bgTertiary, color: colors.inputText, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14 }}
-              placeholder="Buscar miembro..."
-              placeholderTextColor={colors.inputPlaceholder}
-              value={memberSearch}
-              onChangeText={setMemberSearch}
-            />
-            {(group.isAdmin || group.permissions?.membersCanAddMembers) && (
-              <TouchableOpacity
-                onPress={() => { setAddSearch(''); setAddSelected([]); setAddResults([]); setShowAddMembers(true); }}
-                style={{ backgroundColor: colors.accent, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }}
-              >
-                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>+ Añadir</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          {/* Añadir miembro (abre modal con búsqueda + contactos frecuentes) */}
+          {(group.isAdmin || group.permissions?.membersCanAddMembers) && (
+            <TouchableOpacity
+              onPress={openAddMembers}
+              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                <Ionicons name="person-add" size={20} color="#fff" />
+              </View>
+              <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 15 }}>Añadir miembro</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Compartir grupo (enlace + QR) */}
+          <TouchableOpacity
+            onPress={() => setShowShare(true)}
+            style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}
+          >
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgTertiary, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: colors.border }}>
+              <Ionicons name="share-social-outline" size={20} color={colors.accent} />
+            </View>
+            <Text style={{ color: colors.textPrimary, fontWeight: '500', fontSize: 15 }}>Compartir grupo</Text>
+          </TouchableOpacity>
 
           {previewMembers.map((member, idx) => {
             const isAdminM = adminIds.has(member._id);
@@ -689,10 +725,6 @@ export default function GroupProfileScreen() {
 
         {/* Action buttons */}
         <View style={s.card}>
-          <TouchableOpacity style={s.row} onPress={() => setShowShare(true)}>
-            <Ionicons name="share-social-outline" size={20} color={colors.textSecondary} style={{ marginRight: 16 }} />
-            <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Compartir grupo</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={s.row} onPress={handleReport}>
             <Text style={{ fontSize: 20, marginRight: 16 }}>🚩</Text>
             <Text style={{ color: '#f59e0b', fontSize: 16 }}>Reportar grupo</Text>
@@ -854,23 +886,49 @@ export default function GroupProfileScreen() {
             </View>
           )}
 
+          {/* Primera fila: buscar por nombre */}
           <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
-            <TextInput
-              style={{ backgroundColor: colors.inputBg, color: colors.inputText, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 14 }}
-              placeholder="Buscar por nombre o email..."
-              placeholderTextColor={colors.inputPlaceholder}
-              value={addSearch}
-              onChangeText={handleAddSearch}
-              autoFocus
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.inputBg, borderRadius: 12, paddingHorizontal: 12 }}>
+              <Ionicons name="search" size={18} color={colors.inputPlaceholder} />
+              <TextInput
+                style={{ flex: 1, color: colors.inputText, paddingVertical: 12, fontSize: 14 }}
+                placeholder="Buscar por nombre o email..."
+                placeholderTextColor={colors.inputPlaceholder}
+                value={addSearch}
+                onChangeText={handleAddSearch}
+                autoFocus
+              />
+            </View>
           </View>
 
+          {/* Invitar con enlace o código QR (solo cuando no se está buscando) */}
+          {addSearch.length < 2 && (group.isAdmin || group.permissions?.membersCanInvite) && (
+            <TouchableOpacity
+              onPress={() => setShowShare(true)}
+              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.accent}22`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                <Ionicons name="link" size={20} color={colors.accent} />
+              </View>
+              <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 15 }}>Invitar con enlace o código QR</Text>
+            </TouchableOpacity>
+          )}
+
           {addSearch.length >= 2 && addSearching ? (
+            <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
+          ) : addSearch.length < 2 && loadingFrequent ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
           ) : (
             <FlatList
               data={addListData}
               keyExtractor={(item) => item._id}
+              ListHeaderComponent={
+                addSearch.length < 2 ? (
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 }}>
+                    Contactos frecuentes
+                  </Text>
+                ) : null
+              }
               renderItem={({ item }) => {
                 const sel = addSelected.some((s) => s._id === item._id);
                 return (
@@ -899,7 +957,7 @@ export default function GroupProfileScreen() {
                 <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 32, paddingHorizontal: 32 }}>
                   {addSearch.length >= 2
                     ? 'Sin resultados'
-                    : 'Contactos con los que has conversado'}
+                    : 'Aún no tienes contactos frecuentes. Busca por nombre o invita con un enlace.'}
                 </Text>
               }
             />
