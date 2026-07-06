@@ -5,6 +5,7 @@ import type { Message, MessageReplyTo, Reaction, ChatUser } from '../../services
 import { VoicePlayer } from './VoicePlayer';
 import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
+import { parseFormatting } from '../../utils/chatFormat';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 const EMOJI_ONLY_REGEX = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
@@ -547,7 +548,19 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
                       {part.value}
                     </Text>
                   ) : (
-                    <Text key={i}>{part.value}</Text>
+                    // Formato tipo WhatsApp (*negrita*, _cursiva_, ~tachado~)
+                    parseFormatting(part.value).map((seg, j) => (
+                      <Text
+                        key={`${i}-${j}`}
+                        style={{
+                          fontWeight: seg.bold ? '700' : undefined,
+                          fontStyle: seg.italic ? 'italic' : undefined,
+                          textDecorationLine: seg.strike ? 'line-through' : undefined,
+                        }}
+                      >
+                        {seg.text}
+                      </Text>
+                    ))
                   )
                 )}
               </Text>
