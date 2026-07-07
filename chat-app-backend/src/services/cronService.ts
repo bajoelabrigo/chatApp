@@ -4,6 +4,7 @@ import { toZonedTime } from 'date-fns-tz';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PersonalCommitment } from '../models/PersonalCommitment';
 import { sendPushNotification } from './pushService';
+import { sendWebPushToUser } from './webPushService';
 import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
 import { User } from '../models/User';
 
@@ -35,7 +36,6 @@ export function startCronJobs(): void {
         .populate('userId', 'name');
 
       for (const c of commitments) {
-        if (!c.expoPushToken) continue;
         const activity = c.activityId as any;
         const user = c.userId as any;
         if (!activity || !user) continue;
@@ -43,19 +43,20 @@ export function startCronJobs(): void {
         const localNow = toZonedTime(now, c.timezone);
         const localAdv = toZonedTime(nowPlus15, c.timezone);
 
-        if (matchesStart(c, localNow)) {
-          await sendPushNotification(
-            c.expoPushToken,
-            `${activity.emoji} ¡Hora de ${activity.name}!`,
-            `Tu sesión de ${activity.name} comienza ahora. ¡Ánimo, ${user.name}!`
-          );
-        } else if (matchesStartAdvance(c, localAdv)) {
-          await sendPushNotification(
-            c.expoPushToken,
-            `${activity.emoji} Recordatorio: ${activity.name} en 15 min`,
-            `Tu sesión de ${activity.name} empieza en 15 minutos.`
-          );
-        }
+        const isStart = matchesStart(c, localNow);
+        const isAdvance = !isStart && matchesStartAdvance(c, localAdv);
+        if (!isStart && !isAdvance) continue;
+
+        const title = isStart
+          ? `${activity.emoji} ¡Hora de ${activity.name}!`
+          : `${activity.emoji} Recordatorio: ${activity.name} en 15 min`;
+        const body = isStart
+          ? `Tu sesión de ${activity.name} comienza ahora. ¡Ánimo, ${user.name}!`
+          : `Tu sesión de ${activity.name} empieza en 15 minutos.`;
+
+        // Push nativo (si tiene token Expo) + web (PWA), independientes.
+        if (c.expoPushToken) await sendPushNotification(c.expoPushToken, title, body);
+        sendWebPushToUser(user._id, { title, body, url: '/notifications', tag: `reminder-${String(activity._id ?? activity)}`, badge: 'activity' }, 'activityReminders');
       }
 
       // ── Compromisos PERSONALES (sin grupo) ──────────────────────────────
@@ -78,24 +79,24 @@ export function startCronJobs(): void {
 
         for (const p of personal) {
           const user = userMap.get(String(p.userId));
-          if (!user?.expoPushToken) continue;
+          if (!user) continue;
           const tz = p.timezone || tzMap.get(String(p.userId)) || 'UTC';
           const localNow = toZonedTime(now, tz);
           const localAdv = toZonedTime(nowPlus15, tz);
 
-          if (matchesStart(p, localNow)) {
-            await sendPushNotification(
-              user.expoPushToken,
-              `${p.emoji} ¡Hora de ${p.name}!`,
-              `Tu actividad ${p.name} comienza ahora. ¡Ánimo, ${user.name}!`
-            );
-          } else if (matchesStartAdvance(p, localAdv)) {
-            await sendPushNotification(
-              user.expoPushToken,
-              `${p.emoji} Recordatorio: ${p.name} en 15 min`,
-              `Tu actividad ${p.name} empieza en 15 minutos.`
-            );
-          }
+          const isStart = matchesStart(p, localNow);
+          const isAdvance = !isStart && matchesStartAdvance(p, localAdv);
+          if (!isStart && !isAdvance) continue;
+
+          const title = isStart
+            ? `${p.emoji} ¡Hora de ${p.name}!`
+            : `${p.emoji} Recordatorio: ${p.name} en 15 min`;
+          const body = isStart
+            ? `Tu actividad ${p.name} comienza ahora. ¡Ánimo, ${user.name}!`
+            : `Tu actividad ${p.name} empieza en 15 minutos.`;
+
+          if (user.expoPushToken) await sendPushNotification(user.expoPushToken, title, body);
+          sendWebPushToUser(p.userId, { title, body, url: '/notifications', tag: `reminder-personal-${String(p._id)}`, badge: 'activity' }, 'activityReminders');
         }
       }
     } catch (err) {

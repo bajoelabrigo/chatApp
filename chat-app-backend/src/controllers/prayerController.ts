@@ -5,6 +5,7 @@ import { PrayerRequest } from '../models/PrayerRequest';
 import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendPushNotifications } from '../services/pushService';
+import { sendWebPushToUsers } from '../services/webPushService';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { isGlobalAdmin } from '../services/adminService';
 import { deleteCloudinaryAssets } from '../services/cloudinaryService';
@@ -96,6 +97,19 @@ export async function createPrayerRequest(req: Request, res: Response) {
       '📿 Nueva petición de oración',
       `${author}: ${content.trim().slice(0, 80)}`,
       { groupId, screen: 'prayer' }
+    );
+
+    // 🔔 Web Push (PWA) a los miembros del grupo (ya tenemos sus userIds).
+    sendWebPushToUsers(
+      memberIds,
+      {
+        title: '📿 Nueva petición de oración',
+        body: `${author}: ${content.trim().slice(0, 80)}`,
+        url: '/notifications',
+        tag: `prayer-${groupId}`,
+        badge: 'prayer',
+      },
+      'prayerRequests'
     );
 
     res.status(201).json({ ...populated, prayingCount: 0, isPraying: false, isMyRequest: true, prayingUsers: [] });

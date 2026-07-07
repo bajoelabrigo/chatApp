@@ -494,3 +494,28 @@ export async function dismissNotification(req: Request, res: Response) {
     res.status(500).json({ error: 'Error eliminando notificación' });
   }
 }
+
+// Descarta varios items derivados de golpe ("borrar todas"). Recibe los ids
+// visibles en el cliente y los marca todos como dismissed.
+export async function dismissAllNotifications(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { ids } = req.body ?? {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids requeridos' });
+    }
+    const clean = [...new Set(ids.filter((x) => typeof x === 'string'))];
+    const now = new Date();
+    await User.updateOne(
+      { _id: userId },
+      { $pull: { dismissedNotifications: { id: { $in: clean } } } } as any
+    );
+    await User.updateOne(
+      { _id: userId },
+      { $push: { dismissedNotifications: { $each: clean.map((id) => ({ id, at: now })) } } } as any
+    );
+    res.json({ ok: true, count: clean.length });
+  } catch {
+    res.status(500).json({ error: 'Error eliminando notificaciones' });
+  }
+}

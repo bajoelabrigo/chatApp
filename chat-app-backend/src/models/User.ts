@@ -4,6 +4,9 @@ export interface INotificationSettings {
   messages: boolean;
   prayerRequests: boolean;
   activityReminders: boolean;
+  // Preferencias por categoría de push web (PWA). Gestionadas desde la web.
+  posts?: boolean;
+  materials?: boolean;
 }
 
 export interface IPrivacySettings {
@@ -27,6 +30,14 @@ export interface IUser extends Document {
   resetCodeExpiry?: Date;
   blockedUsers: Types.ObjectId[];
   expoPushToken?: string;
+  // Suscripciones Web Push (PWA de holyholyholy.es). Colección compartida: la web
+  // las crea; este backend las lee para notificar chat/actividades/oración de grupo.
+  webPushSubscriptions?: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    ua?: string;
+    createdAt?: Date;
+  }[];
   notificationSettings: INotificationSettings;
   privacySettings: IPrivacySettings;
   lastSeen?: Date;
@@ -62,10 +73,21 @@ const UserSchema = new Schema<IUser>(
     lastLogin:             { type: Date, default: Date.now },
     blockedUsers:          [{ type: Schema.Types.ObjectId, ref: 'User' }],
     expoPushToken:         { type: String },
+    webPushSubscriptions: [
+      {
+        _id: false,
+        endpoint: { type: String },
+        keys: { p256dh: String, auth: String },
+        ua: { type: String, default: '' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     notificationSettings: {
       messages:           { type: Boolean, default: true },
       prayerRequests:     { type: Boolean, default: true },
       activityReminders:  { type: Boolean, default: true },
+      posts:              { type: Boolean, default: true },
+      materials:          { type: Boolean, default: true },
     },
     privacySettings: {
       showOnlineStatus:   { type: Boolean, default: true },

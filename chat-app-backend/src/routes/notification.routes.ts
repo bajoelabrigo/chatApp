@@ -5,6 +5,7 @@ import {
   markNotificationsSeen,
   markNotificationRead,
   dismissNotification,
+  dismissAllNotifications,
 } from '../controllers/notificationController';
 
 const router = Router();
@@ -14,5 +15,6 @@ router.get('/', getNotifications);
 router.post('/seen', markNotificationsSeen);
 router.post('/read', markNotificationRead);
 router.post('/dismiss', dismissNotification);
+router.post('/dismiss-all', dismissAllNotifications);
 
 export default router;

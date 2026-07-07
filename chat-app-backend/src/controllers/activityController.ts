@@ -6,6 +6,7 @@ import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendCommitmentConfirmation, sendActivityNotification } from '../services/emailService';
 import { sendPushNotification, sendPushNotifications } from '../services/pushService';
+import { sendWebPushToUsers } from '../services/webPushService';
 import { isGlobalAdmin } from '../services/adminService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
@@ -141,6 +142,23 @@ export async function createActivity(req: Request, res: Response) {
       pushTokens,
       `${activityEmoji} Nueva actividad: ${activityNameStr}`,
       `En el grupo ${groupName}${startStr ? ` · ${startStr}` : ''}`,
+    );
+
+    // 🔔 Web Push (PWA) a los miembros del grupo (menos el creador).
+    const creatorId = String((req as any).userId ?? '');
+    const memberIds = members
+      .map((m: any) => String(m._id))
+      .filter((id) => id !== creatorId);
+    sendWebPushToUsers(
+      memberIds,
+      {
+        title: `${activityEmoji} Nueva actividad: ${activityNameStr}`,
+        body: `En el grupo ${groupName}${startStr ? ` · ${startStr}` : ''}`,
+        url: '/notifications',
+        tag: `activity-${String(activity._id)}`,
+        badge: 'activity',
+      },
+      'activityReminders'
     );
 
     members.forEach((m: any) => {
