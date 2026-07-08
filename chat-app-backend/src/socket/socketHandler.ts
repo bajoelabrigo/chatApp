@@ -6,6 +6,7 @@ import { User } from '../models/User';
 import { deleteCloudinaryAsset } from '../services/cloudinaryService';
 import { isGlobalAdmin } from '../services/adminService';
 import { sendWebPushToUsers } from '../services/webPushService';
+import { sendExpoPushToUsers } from '../services/pushService';
 
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
@@ -239,15 +240,31 @@ export function setupSocketHandlers(io: Server) {
                 ? '🎤 Mensaje de voz'
                 : '📎 Archivo'
               : (content || '').trim().slice(0, 80) || 'Nuevo mensaje';
+          const title = conversation.isGroup
+            ? (conversation as any).groupName || 'Nuevo mensaje'
+            : senderName;
+          const pushBody = conversation.isGroup ? `${senderName}: ${preview}` : preview;
+
           sendWebPushToUsers(
             offline,
             {
-              title: conversation.isGroup ? (conversation as any).groupName || 'Nuevo mensaje' : senderName,
-              body: conversation.isGroup ? `${senderName}: ${preview}` : preview,
+              title,
+              body: pushBody,
               url: '/chat',
               tag: `chat-${conversationId}`,
               icon: sender?.avatar,
               badge: 'chat',
+            },
+            'messages'
+          );
+
+          // 🔔 Push nativo (Expo) a la app móvil de los participantes offline.
+          sendExpoPushToUsers(
+            offline,
+            {
+              title,
+              body: pushBody,
+              data: { type: 'chat', conversationId },
             },
             'messages'
           );

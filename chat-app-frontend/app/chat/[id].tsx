@@ -332,12 +332,15 @@ export default function ChatScreen() {
   const [memberModal, setMemberModal] = useState<ChatUser | null>(null);
   const [memberActionLoading, setMemberActionLoading] = useState(false);
 
-  // Grabación de voz
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // Grabación de voz (con metering para el medidor de volumen en vivo, como en web)
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const [isRecording, setIsRecording] = useState(false);
   const isRecordingRef = useRef(false); // ref para leer el estado sincrónico en onPressOut
   const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  // Medidor de volumen en vivo (ondas estilo WhatsApp): niveles recientes 0..1.
+  const [recordBars, setRecordBars] = useState<number[]>([]);
+  const meterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const flatListRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -803,6 +806,31 @@ export default function ChatScreen() {
       setIsRecording(true);
       setRecordSeconds(0);
       recordingTimer.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+
+      // Medidor de volumen en vivo: leemos `metering` (dBFS) y lo mapeamos a 0..1,
+      // empujando el nivel a un histórico de barras que se desplaza (nuevas a la
+      // derecha), igual que el waveform del chat web.
+      const BAR_COUNT = 28;
+      setRecordBars(new Array(BAR_COUNT).fill(0));
+      meterTimer.current = setInterval(() => {
+        let level: number;
+        try {
+          const m = recorder.getStatus?.()?.metering;
+          if (typeof m === 'number' && isFinite(m)) {
+            level = Math.max(0.03, Math.min(1, (m + 50) / 50)); // -50dB→0, 0dB→1
+          } else {
+            level = 0.15 + Math.random() * 0.5; // sin metering: onda suave
+          }
+        } catch {
+          level = 0.15 + Math.random() * 0.5;
+        }
+        setRecordBars((prev) => {
+          const base = prev.length ? prev : new Array(BAR_COUNT).fill(0);
+          const next = base.slice(1);
+          next.push(level);
+          return next;
+        });
+      }, 80);
     } catch {
       Alert.alert('Error', 'No se pudo iniciar la grabación');
     }
@@ -811,10 +839,12 @@ export default function ChatScreen() {
   const stopRecording = async (cancel = false) => {
     if (!isRecordingRef.current) return;
     if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
+    if (meterTimer.current) { clearInterval(meterTimer.current); meterTimer.current = null; }
 
     isRecordingRef.current = false;
     setIsRecording(false);
     setRecordSeconds(0);
+    setRecordBars([]);
 
     try {
       await recorder.stop();
@@ -1346,16 +1376,24 @@ export default function ChatScreen() {
       {/* Input bar */}
       <View style={{ paddingBottom: insets.bottom, backgroundColor: colors.bgSecondary, borderTopWidth: 1, borderTopColor: colors.border }}>
         {isRecording ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12, gap: 10 }}>
             <TouchableOpacity onPress={() => stopRecording(true)} style={{ padding: 8 }}>
               <Text style={{ color: colors.danger, fontSize: 20 }}>✕</Text>
             </TouchableOpacity>
-            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger }} />
               <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>
                 {String(Math.floor(recordSeconds / 60)).padStart(2, '0')}:{String(recordSeconds % 60).padStart(2, '0')}
               </Text>
-              <Text style={{ color: colors.textMuted, fontSize: 13 }}>Grabando...</Text>
+            </View>
+            {/* Medidor de volumen en vivo (las más nuevas a la derecha) */}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2, height: 32, overflow: 'hidden' }}>
+              {recordBars.map((lvl, i) => (
+                <View
+                  key={i}
+                  style={{ width: 2, borderRadius: 1, height: Math.max(3, lvl * 26), backgroundColor: colors.textMuted }}
+                />
+              ))}
             </View>
             <TouchableOpacity
               onPress={() => stopRecording(false)}
@@ -1365,36 +1403,39 @@ export default function ChatScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 8, gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingVertical: 8, gap: 6 }}>
+            {/* + Adjuntar (fotos, documentos, biblia…) — igual que el botón "+" de la web */}
             <TouchableOpacity
-              onPress={() => { setBibleOpen(true); setEmojiOpen(false); Keyboard.dismiss(); }}
-              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgTertiary, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border }}
+              onPress={() => { setAttachOpen(true); Keyboard.dismiss(); setEmojiOpen(false); }}
+              style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
             >
-              <FontAwesome5 name="bible" size={24} color={colors.accent} />
+              <Ionicons name="add" size={28} color={colors.accent} />
             </TouchableOpacity>
 
-            {/* Input con emoji integrado */}
+            {/* Emoji */}
+            <TouchableOpacity
+              onPress={toggleEmojiPicker}
+              style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' }}
+            >
+              {emojiOpen
+                ? <Ionicons name="text" size={22} color={colors.accent} />
+                : <Ionicons name="happy" size={24} color={colors.accent} />}
+            </TouchableOpacity>
+
+            {/* Input */}
             <View style={{
-              flex: 1, flexDirection: 'row', alignItems: 'flex-end',
+              flex: 1, justifyContent: 'center',
               backgroundColor: colors.inputBg, borderRadius: 22,
               borderWidth: 1, borderColor: colors.border,
             }}>
-              <TouchableOpacity
-                onPress={toggleEmojiPicker}
-                style={{ paddingHorizontal: 10, paddingBottom: 11 }}
-              >
-                {emojiOpen
-                  ? <Ionicons name="text" size={22} color={colors.accent} />
-                  : <Ionicons name="happy" size={26} color={colors.accent} />}
-              </TouchableOpacity>
               <TextInput
                 ref={inputRef}
                 style={{
-                  flex: 1, color: colors.inputText,
-                  paddingRight: 14, paddingVertical: 10,
+                  color: colors.inputText,
+                  paddingHorizontal: 14, paddingVertical: 10,
                   fontSize: 16, maxHeight: 112,
                 }}
-                placeholder="Mensaje"
+                placeholder="Escribe un mensaje"
                 placeholderTextColor={colors.inputPlaceholder}
                 value={text}
                 onChangeText={handleChangeText}
@@ -1403,15 +1444,7 @@ export default function ChatScreen() {
               />
             </View>
 
-            {showMicOrSend && (
-              <TouchableOpacity
-                onPress={() => { setAttachOpen(true); Keyboard.dismiss(); setEmojiOpen(false); }}
-                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgTertiary, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border }}
-              >
-                <Ionicons name="add" size={22} color={colors.accent} />
-              </TouchableOpacity>
-            )}
-
+            {/* A la derecha: micrófono cuando está vacío, enviar cuando hay texto */}
             {showMicOrSend ? (
               <TouchableOpacity
                 onPress={startRecording}
@@ -1493,9 +1526,16 @@ export default function ChatScreen() {
                 <Text style={{ fontSize: 24, marginRight: 16 }}>🖼️</Text>
                 <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Galería</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={pickDocument} style={{ ...sheetRowStyle, borderBottomWidth: 0 }}>
+              <TouchableOpacity onPress={pickDocument} style={sheetRowStyle}>
                 <Text style={{ fontSize: 24, marginRight: 16 }}>📄</Text>
                 <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Documento</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => { setAttachOpen(false); setBibleOpen(true); setEmojiOpen(false); Keyboard.dismiss(); }}
+                style={{ ...sheetRowStyle, borderBottomWidth: 0 }}
+              >
+                <Text style={{ fontSize: 24, marginRight: 16 }}>📖</Text>
+                <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Biblia</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setAttachOpen(false)}

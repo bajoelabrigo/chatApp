@@ -9,6 +9,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -17,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useOfferingStore } from '../../src/store/useOfferingStore';
 import { createOrderApi, createSubscriptionApi, type SubscriptionTier } from '../../src/services/offeringService';
+import { WEB_URL } from '../../src/components/ShareSheet';
 
 const PRESET_AMOUNTS = [5, 10, 25, 50];
 
@@ -24,6 +26,31 @@ const SUBSCRIPTION_TIERS: { tier: SubscriptionTier; label: string; price: string
   { tier: 'sub_5',  label: 'Semilla',    price: '$5/mes',  desc: 'Ofrenda mensual básica' },
   { tier: 'sub_10', label: 'Cosecha',    price: '$10/mes', desc: 'Ofrenda mensual regular' },
   { tier: 'sub_20', label: 'Abundancia', price: '$20/mes', desc: 'Ofrenda mensual especial' },
+];
+
+// "Otras formas de ofrendar" (agencias/transferencias) — mismos datos y logos que
+// la web (holy_app/frontend/src/pages/Donate.jsx). Los logos se sirven desde la
+// raíz del sitio web (WEB_URL), así no hay que empaquetarlos en la app.
+type DonateMethod = {
+  img: string;
+  agencia: string;
+  nombreAgencia: string;
+  cuenta?: string;
+  interbancaria?: string;
+  banco?: string;
+  nombre: string;
+  ciudad: string;
+  pais: string;
+};
+
+const OTHER_METHODS: DonateMethod[] = [
+  { img: 'ria.png', agencia: 'Agencia Ria', nombreAgencia: 'Ria', cuenta: 'cuenta número 612-3094217431', banco: 'del banco Interbank', nombre: 'Jorge Luis Aguilar Goyoneche', pais: 'Perú', ciudad: 'Lima' },
+  { img: 'moneygram.png', agencia: 'Money Gram', nombreAgencia: 'Money Gram', nombre: 'Jorge Luis Aguilar Goyoneche', pais: 'Perú', ciudad: 'Lima' },
+  { img: 'westernunion.png', agencia: 'Western Union', nombreAgencia: 'Western Union', nombre: 'Frida Carol Valle Trujillo de Aguilar', pais: 'Perú', ciudad: 'Lima' },
+  { img: 'zelle.png', agencia: 'Zelle', nombreAgencia: 'Zelle', cuenta: 'el teléfono es 5616603321', banco: 'PNC Bank', nombre: 'Jorge Luis Aguilar Goyoneche', ciudad: 'Florida', pais: 'EEUU' },
+  { img: 'yapeplin.jpg', agencia: 'por Yape ó Plin', nombreAgencia: 'Yape ó Plin', cuenta: '949767887', nombre: 'Jorge Luis Aguilar Goyoneche', pais: 'Perú', ciudad: 'Lima' },
+  { img: 'interbank.png', agencia: 'Transferencia al Banco Interbank', nombreAgencia: 'Interbank (SWIFT/BIC es BINPPEPL)', cuenta: 'Cuenta número 612-3094217431', interbancaria: 'ó interbancaria 00361201309421743194', nombre: 'Jorge Luis Aguilar Goyoneche', pais: 'Perú', ciudad: 'Lima' },
+  { img: 'bcp.jpg', agencia: 'Transferencia al Banco de Crédito (BCP)', nombreAgencia: 'BCP (SWIFT/BIC es BCPLPEPL)', cuenta: 'Cuenta número 57091002355024', interbancaria: 'ó interbancaria 00257019100235502406', nombre: 'Jorge Luis Aguilar Goyoneche', pais: 'Perú', ciudad: 'Lima' },
 ];
 
 function formatCents(cents: number): string {
@@ -232,6 +259,22 @@ export default function OfrendasScreen() {
             ))}
           </View>
 
+          {/* Otras formas de ofrendar (agencias / transferencias) — igual que la web */}
+          <SectionTitle title="Otras formas de ofrendar" colors={colors} />
+          <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
+            También puedes ofrendar por agencia de envío o transferencia bancaria.
+            Mantén presionado un dato para copiarlo.
+          </Text>
+          <View style={{ gap: 14, marginBottom: 28 }}>
+            {OTHER_METHODS.map((m) => (
+              <DonateMethodCard key={m.img} method={m} colors={colors} />
+            ))}
+            <Image
+              source={{ uri: `${WEB_URL}/gracias.png` }}
+              style={{ width: '100%', height: 140, resizeMode: 'contain', marginTop: 4 }}
+            />
+          </View>
+
           {/* History */}
           {history.length > 0 && (
             <>
@@ -337,6 +380,44 @@ function SubscriptionCard({ tier, loading, disabled, onPress, colors }: {
           : <Ionicons name="arrow-forward-circle" size={22} color={colors.accent} />}
       </View>
     </TouchableOpacity>
+  );
+}
+
+function DonateMethodCard({ method, colors }: { method: DonateMethod; colors: any }) {
+  return (
+    <View style={{
+      backgroundColor: colors.bgSecondary, borderRadius: 16,
+      padding: 16, borderWidth: 1, borderColor: colors.border,
+    }}>
+      {/* Logo sobre fondo blanco (los logos suelen venir con fondo claro) */}
+      <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+        <Image
+          source={{ uri: `${WEB_URL}/${method.img}` }}
+          style={{ width: '100%', height: 110, resizeMode: 'contain' }}
+        />
+      </View>
+      <Text style={{
+        fontSize: 15, fontWeight: '700', color: colors.textPrimary,
+        textAlign: 'center', marginBottom: 6,
+      }}>
+        Donación mediante {method.agencia}
+      </Text>
+      <Text selectable style={{
+        fontSize: 13, color: colors.textMuted, lineHeight: 20, textAlign: 'center',
+      }}>
+        Para hacer una donación mediante{' '}
+        <Text style={{ fontWeight: '700', color: colors.textPrimary }}>“{method.nombreAgencia}”</Text>
+        {method.cuenta ? <>, <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.cuenta}</Text></> : null}
+        {method.interbancaria ? <> <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.interbancaria}</Text></> : null}
+        {method.banco ? <> <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.banco}</Text></> : null}
+        {' '}a nombre de{' '}
+        <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.nombre}</Text>
+        , ciudad de{' '}
+        <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.ciudad}</Text>
+        {' - '}
+        <Text style={{ fontWeight: '700', color: colors.textPrimary }}>{method.pais}</Text>
+      </Text>
+    </View>
   );
 }
 

@@ -93,6 +93,8 @@ function RootLayoutInner() {
       const Notifications = require('expo-notifications');
       const route = (data: any) => {
         if (data?.type === 'material') router.push('/(tabs)/materiales' as any);
+        else if (data?.type === 'chat' && data?.conversationId)
+          router.push(`/chat/${data.conversationId}` as any);
       };
       // App abierta desde una notificación (estaba cerrada).
       Notifications.getLastNotificationResponseAsync?.().then((resp: any) => {
