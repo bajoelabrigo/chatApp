@@ -204,12 +204,22 @@ export const useChatsStore = create<ChatsState>()(
   pinConversation: (id, pinned) =>
     set((s) => ({
       conversations: s.conversations.map((c) => c._id === id ? { ...c, isPinned: pinned } : c),
+      archivedConversations: s.archivedConversations.map((c) => c._id === id ? { ...c, isPinned: pinned } : c),
     })),
 
+  // Mueve la conversación a la lista de archivados (espejo de unarchiveConversation).
+  // Antes solo la quitaba de `conversations`, así que hasta el siguiente fetch no
+  // aparecía en Ajustes → Archivados ni se podía desarchivar desde otra pantalla.
   archiveConversation: (id) =>
-    set((s) => ({
-      conversations: s.conversations.filter((c) => c._id !== id),
-    })),
+    set((s) => {
+      const conv = s.conversations.find((c) => c._id === id);
+      const conversations = s.conversations.filter((c) => c._id !== id);
+      if (!conv || s.archivedConversations.some((c) => c._id === id)) return { conversations };
+      return {
+        conversations,
+        archivedConversations: [{ ...conv, isArchived: true }, ...s.archivedConversations],
+      };
+    }),
 
   unarchiveConversation: (id) =>
     set((s) => {

@@ -56,6 +56,7 @@ function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   if (lm.type === 'image') content = '📷 Imagen';
   else if (lm.type === 'audio') content = '🎤 Nota de voz';
   else if (lm.type === 'document') content = `📎 ${lm.fileName ?? 'Documento'}`;
+  else if (lm.type === 'contact') content = `👤 ${lm.contact?.name ?? lm.content}`;
   else content = lm.content;
   if (conv.isGroup && lm.senderId && typeof lm.senderId === 'object') {
     const isMe = lm.senderId._id === currentUserId;
@@ -122,7 +123,7 @@ export default function ChatsScreen() {
   const { token, user } = useAuthStore();
   const { colors } = useTheme();
   const {
-    conversations, onlineUsers,
+    conversations, onlineUsers, typingUsers,
     setConversations, upsertConversation,
     pinConversation, archiveConversation, unarchiveConversation,
     favoriteConversation, blockConversation, unblockConversation, muteConversation,
@@ -598,6 +599,15 @@ export default function ChatsScreen() {
     const displayAvatar = isGroup ? item.groupAvatar : other?.avatar;
     const isSelected = selectedIds.has(item._id);
 
+    // Alguien escribiendo en este chat: sustituye la vista previa del último
+    // mensaje. En grupos se nombra a quién escribe; en 1:1 el nombre sobra.
+    const typingIds = typingUsers[item._id] ?? [];
+    const typingLabel = typingIds.length === 0
+      ? null
+      : isGroup
+        ? `${item.participants.find((p) => p._id === typingIds[0])?.name ?? 'Alguien'} está escribiendo…`
+        : 'escribiendo…';
+
     return (
       <TouchableOpacity
         onPress={() => isSelectMode ? toggleSelect(item._id) : openChat(item)}
@@ -656,9 +666,15 @@ export default function ChatsScreen() {
             <Text style={{ color: colors.textMuted, fontSize: 12 }}>{lastMsgTime(item)}</Text>
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-            <Text style={{ color: colors.textSecondary, fontSize: 14, flex: 1, marginRight: 8 }} numberOfLines={1}>
-              {lastMsgPreview(item, user?.id) || (isGroup ? `${item.participants.length} miembros` : 'Iniciar conversación')}
-            </Text>
+            {typingLabel ? (
+              <Text style={{ color: colors.onlineDot, fontSize: 14, fontStyle: 'italic', flex: 1, marginRight: 8 }} numberOfLines={1}>
+                {typingLabel}
+              </Text>
+            ) : (
+              <Text style={{ color: colors.textSecondary, fontSize: 14, flex: 1, marginRight: 8 }} numberOfLines={1}>
+                {lastMsgPreview(item, user?.id) || (isGroup ? `${item.participants.length} miembros` : 'Iniciar conversación')}
+              </Text>
+            )}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               {item.isMuted && (
                 <Ionicons name="volume-mute-outline" size={15} color={colors.textMuted} />

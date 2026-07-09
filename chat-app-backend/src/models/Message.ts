@@ -1,7 +1,18 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
-export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call';
+export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact';
+
+/**
+ * Contacto compartido (tipo `contact`). Se guarda un snapshot del nombre y el
+ * avatar para que la tarjeta siga siendo legible si el usuario cambia su perfil
+ * o borra su cuenta; `userId` es lo que usa el botón "Mensaje" para abrir el chat.
+ */
+export interface ISharedContact {
+  userId: Types.ObjectId;
+  name: string;
+  avatar?: string;
+}
 
 export interface IReplyTo {
   messageId: Types.ObjectId;
@@ -33,6 +44,7 @@ export interface IMessage extends Document {
   callStatus?: 'missed' | 'answered';
   callType?: 'audio' | 'video';
   callDuration?: number;
+  contact?: ISharedContact;
   replyTo?: IReplyTo;
   reactions?: IReactionEntry[];
   expiresAt?: Date;
@@ -45,7 +57,7 @@ const MessageSchema = new Schema<IMessage>(
     conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true },
-    type: { type: String, enum: ['text', 'image', 'audio', 'document', 'call'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'audio', 'document', 'call', 'contact'], default: 'text' },
     fileName: { type: String },
     fileSize: { type: Number },
     cloudinaryPublicId: { type: String },
@@ -57,6 +69,11 @@ const MessageSchema = new Schema<IMessage>(
     callStatus: { type: String, enum: ['missed', 'answered'] },
     callType: { type: String, enum: ['audio', 'video'] },
     callDuration: { type: Number },
+    contact: {
+      userId: { type: Schema.Types.ObjectId, ref: 'User' },
+      name: { type: String },
+      avatar: { type: String },
+    },
     replyTo: {
       messageId: { type: Schema.Types.ObjectId, ref: 'Message' },
       senderName: { type: String },

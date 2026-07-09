@@ -118,15 +118,26 @@ export function setupSocketHandlers(io: Server) {
       fileSize?: number;
       cloudinaryPublicId?: string;
       replyToMessageId?: string;
+      contactUserId?: string;
     }) => {
       try {
-        const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId, replyToMessageId } = data;
+        const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId, replyToMessageId, contactUserId } = data;
 
         const conversation = await Conversation.findOne({
           _id: conversationId,
           participants: userId,
         });
         if (!conversation) return;
+
+        // Contacto compartido: el cliente solo manda el id; el nombre y el avatar
+        // se leen de la base para no confiar en un snapshot manipulable.
+        let contact: { userId: string; name: string; avatar?: string } | undefined;
+        if (type === 'contact') {
+          if (!contactUserId) return;
+          const shared = await User.findById(contactUserId).select('name avatar').lean();
+          if (!shared) return;
+          contact = { userId: contactUserId, name: shared.name, avatar: shared.avatar };
+        }
 
         const otherParticipants = conversation.participants
           .map((p) => p.toString())
@@ -165,11 +176,14 @@ export function setupSocketHandlers(io: Server) {
         const message = await Message.create({
           conversationId,
           senderId: userId,
-          content,
+          // En un contacto compartido el `content` es el nombre: así las vistas
+          // previas (lista de chats, citas) tienen algo que mostrar sin leer `contact`.
+          content: contact ? contact.name : content,
           type,
           fileName,
           fileSize,
           cloudinaryPublicId: cloudinaryPublicId ?? undefined,
+          contact,
           status: 'sent',
           readBy: [userId],
           replyTo,
@@ -238,6 +252,8 @@ export function setupSocketHandlers(io: Server) {
                 ? '📷 Foto'
                 : type === 'audio'
                 ? '🎤 Mensaje de voz'
+                : type === 'contact'
+                ? `👤 ${contact?.name ?? 'Contacto'}`
                 : '📎 Archivo'
               : (content || '').trim().slice(0, 80) || 'Nuevo mensaje';
           const title = conversation.isGroup

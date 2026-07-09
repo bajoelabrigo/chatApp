@@ -50,6 +50,7 @@ function previewOf(msg: any, isGroup: boolean, currentUserId: string): string {
   else if (msg.type === 'audio') content = '🎤 Nota de voz';
   else if (msg.type === 'document') content = `📎 ${msg.fileName ?? 'Documento'}`;
   else if (msg.type === 'call') content = '📞 Llamada';
+  else if (msg.type === 'contact') content = `👤 ${msg.contact?.name ?? 'Contacto'}`;
   else content = msg.content ?? '';
   if (isGroup && msg.senderId && typeof msg.senderId === 'object') {
     const isMe = msg.senderId._id?.toString() === currentUserId;
@@ -117,6 +118,10 @@ export async function getNotifications(req: Request, res: Response) {
     for (const u of unreadAgg) {
       const conv = convMap.get(u._id.toString());
       if (!conv) continue;
+      // Chat silenciado (`mutedBy`): sus mensajes sin leer no llegan a la
+      // campana. Las llamadas perdidas del mismo chat sí siguen apareciendo.
+      const isMuted = (conv.mutedBy ?? []).some((id: any) => id.toString() === userId);
+      if (isMuted) continue;
       const other = conv.isGroup
         ? null
         : (conv.participants as any[]).find((p) => p._id.toString() !== userId);

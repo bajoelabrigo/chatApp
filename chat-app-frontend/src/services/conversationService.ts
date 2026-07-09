@@ -7,13 +7,22 @@ export interface ChatUser {
   avatar?: string;
 }
 
+export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact';
+
 export interface MessageReplyTo {
   messageId: string;
   senderName: string;
   senderAvatar?: string;
   content: string;
-  type: 'text' | 'image' | 'audio' | 'document' | 'call';
+  type: MessageType;
   fileName?: string;
+}
+
+/** Contacto compartido (mensaje `type: 'contact'`): snapshot + id para abrir el chat. */
+export interface SharedContact {
+  userId: string;
+  name: string;
+  avatar?: string;
 }
 
 export interface Reaction {
@@ -26,7 +35,7 @@ export interface Message {
   conversationId: string;
   senderId: ChatUser;
   content: string;
-  type: 'text' | 'image' | 'audio' | 'document' | 'call';
+  type: MessageType;
   fileName?: string;
   fileSize?: number;
   status: 'sent' | 'delivered' | 'read';
@@ -36,6 +45,7 @@ export interface Message {
   callStatus?: 'missed' | 'answered';
   callType?: 'audio' | 'video';
   callDuration?: number;
+  contact?: SharedContact;
   replyTo?: MessageReplyTo;
   reactions?: Reaction[];
   createdAt: string;

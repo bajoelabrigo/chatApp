@@ -47,7 +47,7 @@ import {
 import { uploadFile } from '../../src/services/uploadService';
 import { MessageBubble, docIcon } from '../../src/components/chat/MessageBubble';
 import BibleModal from '../../src/components/chat/BibleModal';
-import type { Message, ChatUser } from '../../src/services/conversationService';
+import type { Message, ChatUser, SharedContact } from '../../src/services/conversationService';
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🙏'];
 
@@ -937,6 +937,29 @@ export default function ChatScreen() {
   // Callbacks estables para las burbujas (memoizadas): evitan recrear funciones
   // en cada render del chat, lo que anularía el React.memo de MessageBubble.
   const handleAvatarPress = useCallback((sender: ChatUser) => setMemberModal(sender), []);
+
+  // Botón "Mensaje" de una tarjeta de contacto compartido: abre (o crea) el chat
+  // 1:1 con esa persona, igual que el deep link chatapp://u/<id>.
+  const handleContactPress = useCallback(
+    async (contact: SharedContact) => {
+      if (!token) return;
+      if (contact.userId === user?.id) {
+        Alert.alert('Eres tú', 'Este es tu propio contacto.');
+        return;
+      }
+      try {
+        const conv = await createOrGetConversation(token, contact.userId);
+        upsertConversation(conv);
+        router.push({
+          pathname: '/chat/[id]' as any,
+          params: { id: conv._id, name: contact.name, avatar: contact.avatar ?? '' },
+        });
+      } catch {
+        Alert.alert('Error', 'No se pudo abrir la conversación');
+      }
+    },
+    [token, user?.id, upsertConversation]
+  );
   const handleCallBack = useCallback((msg: Message) => {
     if (!otherParticipant || callState !== 'idle') return;
     startCall({
@@ -1219,6 +1242,7 @@ export default function ChatScreen() {
                   onReactDetail={handleOpenReactionDetail}
                   onAvatarPress={isGroupChat ? handleAvatarPress : undefined}
                   onCallBack={handleCallBack}
+                  onContactPress={handleContactPress}
                   onReplyPress={jumpToMessage}
                 />
               );

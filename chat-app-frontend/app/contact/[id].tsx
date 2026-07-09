@@ -11,9 +11,10 @@ import { useAuthStore } from '../../src/store/useAuthStore';
 import { useChatsStore } from '../../src/store/useChatsStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
+import ShareContactSheet from '../../src/components/ShareContactSheet';
 import {
   getUserProfile, reportUser, apiToggleFavorite, apiToggleBlock,
-  apiToggleArchive, addGroupMembers, type ContactProfile,
+  apiToggleArchive, apiTogglePin, apiToggleMute, addGroupMembers, type ContactProfile,
 } from '../../src/services/conversationService';
 
 const nicknameKey = (uid: string) => `nickname_${uid}`;
@@ -26,7 +27,11 @@ export default function ContactInfoScreen() {
     conversationId: string;
   }>();
   const { token } = useAuthStore();
-  const { conversations, favoriteConversation, archiveConversation, blockConversation, unblockConversation } = useChatsStore();
+  const {
+    conversations, archivedConversations, favoriteConversation, pinConversation,
+    archiveConversation, unarchiveConversation, muteConversation,
+    blockConversation, unblockConversation,
+  } = useChatsStore();
 
   const [profile, setProfile] = useState<ContactProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,9 +48,17 @@ export default function ContactInfoScreen() {
   const [showAddToGroup, setShowAddToGroup] = useState(false);
   const [addingToGroupId, setAddingToGroupId] = useState<string | null>(null);
   const [showShare, setShowShare] = useState(false);
+  const [showShareToChat, setShowShareToChat] = useState(false);
 
-  const conv = conversations.find((c) => c._id === conversationId);
+  // Al archivar, la conversación pasa a `archivedConversations`: hay que buscarla
+  // en ambas listas o los interruptores se quedarían con el estado por defecto.
+  const conv =
+    conversations.find((c) => c._id === conversationId) ??
+    archivedConversations.find((c) => c._id === conversationId);
   const isFavorite = conv?.isFavorite ?? false;
+  const isPinned = conv?.isPinned ?? false;
+  const isArchived = conv?.isArchived ?? false;
+  const isMuted = conv?.isMuted ?? false;
 
   const myGroups = conversations.filter(
     (c) => c.isGroup && c.participants.some((p) => p._id === userId) === false
@@ -100,8 +113,12 @@ export default function ContactInfoScreen() {
           onPress: async () => {
             if (!token) return;
             try {
-              await apiToggleArchive(token, conversationId);
-              archiveConversation(conversationId);
+              // `/archive` es un toggle: si ya está archivado, llamarlo lo
+              // desarchivaría — justo lo contrario de lo que se pide aquí.
+              if (!isArchived) {
+                await apiToggleArchive(token, conversationId);
+                archiveConversation(conversationId);
+              }
               router.replace('/(tabs)/chats' as any);
             } catch {
               Alert.alert('Error', 'No se pudo eliminar el contacto');
@@ -119,6 +136,37 @@ export default function ContactInfoScreen() {
       favoriteConversation(conversationId, favorited);
     } catch {
       Alert.alert('Error', 'No se pudo actualizar favoritos');
+    }
+  };
+
+  const handleTogglePin = async () => {
+    if (!token) return;
+    try {
+      const { pinned } = await apiTogglePin(token, conversationId);
+      pinConversation(conversationId, pinned);
+    } catch {
+      Alert.alert('Error', 'No se pudo fijar el chat');
+    }
+  };
+
+  const handleToggleArchive = async () => {
+    if (!token) return;
+    try {
+      const { archived } = await apiToggleArchive(token, conversationId);
+      if (archived) archiveConversation(conversationId);
+      else unarchiveConversation(conversationId);
+    } catch {
+      Alert.alert('Error', 'No se pudo archivar el chat');
+    }
+  };
+
+  const handleToggleMute = async () => {
+    if (!token) return;
+    try {
+      const { muted } = await apiToggleMute(token, conversationId);
+      muteConversation(conversationId, muted);
+    } catch {
+      Alert.alert('Error', 'No se pudieron actualizar las notificaciones');
     }
   };
 
@@ -185,6 +233,11 @@ export default function ContactInfoScreen() {
   const handleShare = () => {
     if (!profile) return;
     setShowShare(true);
+  };
+
+  const handleShareToChat = () => {
+    if (!profile) return;
+    setShowShareToChat(true);
   };
 
   const handleAddToGroup = async (groupId: string) => {
@@ -383,9 +436,50 @@ export default function ContactInfoScreen() {
 
         {/* Options */}
         <View style={card}>
-          <TouchableOpacity onPress={handleShare} style={row}>
-            <Ionicons name="share-outline" size={20} color={colors.textSecondary} style={{ marginRight: 12 }} />
+          <TouchableOpacity onPress={handleShareToChat} style={row}>
+            <Ionicons name="person-outline" size={20} color={colors.textSecondary} style={{ marginRight: 12 }} />
             <Text style={{ color: colors.textPrimary, fontSize: 14 }}>Compartir contacto</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleShare} style={row}>
+            <Ionicons name="link-outline" size={20} color={colors.textSecondary} style={{ marginRight: 12 }} />
+            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>Compartir enlace y QR</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleTogglePin} style={row}>
+            <Ionicons
+              name={isPinned ? 'pin' : 'pin-outline'}
+              size={20}
+              color={isPinned ? colors.accent : colors.textSecondary}
+              style={{ marginRight: 12 }}
+            />
+            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>
+              {isPinned ? 'Desfijar chat' : 'Fijar chat'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleToggleArchive} style={row}>
+            <Ionicons
+              name={isArchived ? 'archive' : 'archive-outline'}
+              size={20}
+              color={isArchived ? colors.accent : colors.textSecondary}
+              style={{ marginRight: 12 }}
+            />
+            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>
+              {isArchived ? 'Desarchivar chat' : 'Archivar chat'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleToggleMute} style={row}>
+            <Ionicons
+              name={isMuted ? 'notifications-off' : 'notifications-outline'}
+              size={20}
+              color={isMuted ? colors.accent : colors.textSecondary}
+              style={{ marginRight: 12 }}
+            />
+            <Text style={{ color: colors.textPrimary, fontSize: 14 }}>
+              {isMuted ? 'Activar notificaciones' : 'Silenciar notificaciones'}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity onPress={handleToggleFavorite} style={row}>
@@ -502,6 +596,16 @@ export default function ContactInfoScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Compartir contacto: enviar la tarjeta a uno o varios chats */}
+      <ShareContactSheet
+        visible={showShareToChat}
+        onClose={() => setShowShareToChat(false)}
+        contact={{ _id: userId, name: profile.name, avatar: profile.avatar }}
+        onSent={(count) =>
+          Alert.alert('Contacto compartido', `Se envió a ${count} chat${count !== 1 ? 's' : ''}.`)
+        }
+      />
 
       {/* Compartir contacto (enlace + QR) */}
       <ShareSheet

@@ -377,6 +377,28 @@ Compartir con enlace + QR (añadido 2026-06-23). Tres superficies: materiales, l
 - **nginx** (`/etc/nginx/sites-available/holyholyholy`; copia versionada en `holy_app/deploy/nginx-holyholyholy.conf`): un `map $http_user_agent $holy_is_bot` (contexto http) + `location ~ ^/materiales/(?<mslug>[^/]+)/?$` que enruta SOLO bots a `/api/share/material/<slug>` (humanos → SPA). Patrón seguro `error_page 418 = @og_material` (evita el combo problemático `if + proxy_pass`). Deploy nginx: backup → `scp` el archivo → `nginx -t && systemctl reload nginx`.
 - WhatsApp **cachea** las previews por URL y no tiene "scrape again" público (Facebook sí: developers.facebook.com/tools/debug). Para forzar refresco al probar: añadir `?v=2` al final de la URL.
 
+## Tipos de mensaje nuevos (leer antes de añadir uno)
+
+Al estrenar `type: 'contact'` (2026-07-09) el mensaje se guardaba bien pero **no se veía en ningún cliente**. Tres trampas, todas vuelven a morder con el próximo tipo:
+
+1. **Desplegar el backend ANTES que los clientes.** Con el enum viejo de `Message.type`, `Message.create` lanza `ValidationError`, el `try/catch` de `message:send` se lo traga y el envío se descarta en silencio. La app entretanto dice "enviado": la confirmación es optimista, no espera al servidor (no hay `ack`).
+2. **Móvil — burbuja invisible**: `MessageBubble` renderiza por rama (`isImage`/`isAudio`/…). Un tipo sin rama produce una burbuja de altura cero, indistinguible de "el mensaje no llegó". Hay una rama de respaldo `isUnknownType` → "Actualiza la aplicación"; mantenerla.
+3. **Web — el mensaje ni se monta**: `Messages.jsx` solo renderiza `<Message>` si hay `files` o `message` (texto). Los mensajes de llamada se salvan por casualidad (su `content` es `"audio"`/`"video"`). El guardia acepta ahora cualquier `type !== "text"`; **no vaciar `message` en `adaptMessage`** para un tipo nuevo (es lo que hizo desaparecer los contactos).
+
+Sitios a actualizar al añadir un tipo: `Message.ts` (enum + campos), `message:send`, `previewOf` (`notificationController.ts`), preview push en `socketHandler.ts`, `lastMsgPreview` (`chats.tsx`), `lastMessagePreview` (`Conversation.jsx` web), `ReplyPreview` en ambos clientes.
+
+**Compartir contacto**: `contact: { userId, name, avatar }` embebido; el backend re-lee nombre/avatar de la BD a partir del `contactUserId` del cliente (nunca confiar en el snapshot que manda el cliente). `content` = nombre, para que las vistas previas funcionen sin leer `contact`.
+
+**"Silenciar notificaciones"** = `Conversation.mutedBy`. Lo respeta la sección de chats de `getNotifications`; las llamadas perdidas siguen apareciendo a propósito. El push nativo/web NO lo consulta todavía.
+
+---
+
+## Posts (`holy_app`) — el editor vacío no es una cadena vacía
+
+El contenido de un post es HTML de Quill: un editor vacío devuelve `<p><br></p>`, así que `content.trim()` **nunca** detecta un post en blanco (así se colaban posts vacíos). Usar `hasVisibleText()` — espejo en `frontend/src/lib/postContent.js` y `backend/utils/postContent.js` — que quita etiquetas y `&nbsp;`. Validar en cliente (deshabilitar el botón) **y** en servidor (`createPost`/`updatePost` → 400). Quitar etiquetas es seguro mientras el editor no admita `<img>`/`<iframe>` (ver formatos de `PostEditor.jsx`).
+
+---
+
 ## Environment variables
 
 ### Backend (`chat-app-backend/.env`)

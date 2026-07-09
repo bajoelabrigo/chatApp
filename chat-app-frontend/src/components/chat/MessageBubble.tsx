@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, memo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, Image, Linking, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { Message, MessageReplyTo, Reaction, ChatUser } from '../../services/conversationService';
+import type { Message, MessageReplyTo, Reaction, ChatUser, SharedContact } from '../../services/conversationService';
 import { VoicePlayer } from './VoicePlayer';
 import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
@@ -76,6 +76,7 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
     if (reply.type === 'audio') return '🎤 Nota de voz';
     if (reply.type === 'document') return `📄 ${reply.fileName ?? 'Documento'}`;
     if (reply.type === 'call') return '📞 Llamada';
+    if (reply.type === 'contact') return `👤 ${reply.content}`;
     return reply.content;
   };
 
@@ -265,10 +266,12 @@ interface Props {
   onReactDetail?: (msg: Message, emoji: string) => void;
   onAvatarPress?: (sender: ChatUser) => void;
   onReplyPress?: (messageId?: string) => void;
+  /** Botón "Mensaje" de una tarjeta de contacto compartido. */
+  onContactPress?: (contact: SharedContact) => void;
   highlighted?: boolean;
 }
 
-function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId.name;
@@ -287,7 +290,15 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isDocument = item.type === 'document';
   const isText = item.type === 'text';
   const isCall = item.type === 'call';
+  const isContact = item.type === 'contact';
   const isMedia = isImage || isAudio || isDocument;
+  // El nombre del remitente va encima de la burbuja (no dentro) en todo lo que
+  // no es texto plano, porque esas burbujas no dejan hueco para la cabecera.
+  const showSenderLabel = isMedia || isContact;
+  // Tipo que esta versión de la app no sabe pintar (el backend ya lo envía pero
+  // el bundle es viejo). Sin esto la burbuja saldría vacía y el mensaje parecería
+  // no haber llegado nunca; pasó al estrenar `contact`.
+  const isUnknownType = !isMedia && !isText && !isCall && !isContact;
 
   const emojiOnly = isText && !isDeleted && isEmojiOnly(item.content);
   // Recorte de texto largo (igual que la web): si supera MAX_LENGTH y no está
@@ -475,7 +486,87 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
           <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>{timestamp}</View>
         </Pressable>
       )}
-      {isCall && isDeleted && (
+      {/* CONTACT — tarjeta de contacto compartido (foto + nombre + "Mensaje") */}
+      {isContact && !isDeleted && (
+        <Pressable
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={400}
+          style={[{
+            borderRadius: 18, overflow: 'hidden',
+            borderTopRightRadius: isMine ? 4 : 18,
+            borderTopLeftRadius: isMine ? 18 : 4,
+            backgroundColor: bubbleBg, width: 260,
+          }, bubbleShadow]}
+        >
+          {item.replyTo && (
+            <View style={{ paddingHorizontal: 8, paddingTop: 8 }}>
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 10, gap: 12 }}>
+            {item.contact?.avatar ? (
+              <Image source={{ uri: item.contact.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+            ) : (
+              <View style={{
+                width: 48, height: 48, borderRadius: 24,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.18)' : colors.avatarBg,
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Text style={{ color: bubbleText, fontSize: 20, fontWeight: 'bold' }}>
+                  {(item.contact?.name ?? item.content)[0]?.toUpperCase() ?? '?'}
+                </Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: bubbleText, fontSize: 15, fontWeight: '600' }} numberOfLines={2}>
+                {item.contact?.name ?? item.content}
+              </Text>
+              <Text style={{ color: bubbleSubtext, fontSize: 12, marginTop: 2 }}>Contacto</Text>
+            </View>
+          </View>
+
+          <View style={{ paddingHorizontal: 12, paddingBottom: 4 }}>{timestamp}</View>
+
+          <TouchableOpacity
+            onPress={() => item.contact && onContactPress?.(item.contact)}
+            disabled={!item.contact || !onContactPress}
+            style={{
+              paddingVertical: 11, alignItems: 'center',
+              borderTopWidth: 1,
+              borderTopColor: isMine && !isDark ? 'rgba(0,0,0,0.06)' : isDark ? 'rgba(255,255,255,0.18)' : colors.borderLight,
+            }}
+          >
+            {/* En dark la burbuja ya es azul/morada: el acento índigo no contrasta. */}
+            <Text style={{ color: isDark ? '#fff' : colors.accent, fontSize: 14, fontWeight: '600' }}>
+              Mensaje
+            </Text>
+          </TouchableOpacity>
+        </Pressable>
+      )}
+
+      {/* Tipo desconocido: mejor un aviso que una burbuja invisible. */}
+      {isUnknownType && !isDeleted && (
+        <Pressable
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={400}
+          style={[{
+            borderRadius: 18, overflow: 'hidden',
+            borderTopRightRadius: isMine ? 4 : 18,
+            borderTopLeftRadius: isMine ? 18 : 4,
+            backgroundColor: bubbleBg, maxWidth: 280,
+          }, bubbleShadow]}
+        >
+          <View style={{ paddingHorizontal: 14, paddingVertical: 12 }}>
+            <Text style={{ color: bubbleSubtext, fontStyle: 'italic', fontSize: 14 }}>
+              Este mensaje no se puede mostrar. Actualiza la aplicación para verlo.
+            </Text>
+          </View>
+          <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>{timestamp}</View>
+        </Pressable>
+      )}
+
+      {(isCall || isContact || isUnknownType) && isDeleted && (
         <Pressable
           onLongPress={() => onLongPress(item)}
           delayLongPress={400}
@@ -606,7 +697,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   if (isMine) {
     return (
       <View style={[{ marginBottom: 4, paddingHorizontal: 12, alignItems: 'flex-end' }, highlightStyle]}>
-        {isMedia && !isDeleted && (
+        {showSenderLabel && !isDeleted && (
           <Text style={{ fontSize: 11, fontWeight: '700', marginBottom: 2, paddingHorizontal: 4, color: colors.textMuted }}>
             Tú
           </Text>
@@ -620,7 +711,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   // Received message: avatar on the left
   return (
     <View style={[{ marginBottom: 6, paddingHorizontal: 12 }, highlightStyle]}>
-      {isMedia && !isDeleted && (
+      {showSenderLabel && !isDeleted && (
         <Text style={{
           fontSize: 12,
           fontWeight: '800',
