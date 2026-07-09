@@ -78,7 +78,7 @@ function youtubeId(u: URL): string | null {
   if (host === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null;
   if (host.endsWith('youtube.com')) {
     if (u.pathname === '/watch') return u.searchParams.get('v');
-    const m = u.pathname.match(/^\/(?:shorts|embed)\/([a-zA-Z0-9_-]{11})/);
+    const m = u.pathname.match(/^\/(?:shorts|embed|live|v)\/([a-zA-Z0-9_-]{11})/);
     if (m) return m[1];
   }
   return null;
