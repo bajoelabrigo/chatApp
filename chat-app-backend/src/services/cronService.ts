@@ -3,6 +3,8 @@ import { Types } from 'mongoose';
 import { toZonedTime } from 'date-fns-tz';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PersonalCommitment } from '../models/PersonalCommitment';
+import { ReadingPlanSubscription } from '../models/ReadingPlanSubscription';
+import { getPlan, computeCurrentDay, generateCustomPlan } from '../lib/readingPlans';
 import { sendPushNotification } from './pushService';
 import { sendWebPushToUser } from './webPushService';
 import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
@@ -97,6 +99,48 @@ export function startCronJobs(): void {
 
           if (user.expoPushToken) await sendPushNotification(user.expoPushToken, title, body);
           sendWebPushToUser(p.userId, { title, body, url: '/notifications', tag: `reminder-personal-${String(p._id)}`, badge: 'activity' }, 'activityReminders');
+        }
+      }
+
+      // ── Recordatorios de PLANES DE LECTURA (#2) ─────────────────────────
+      // Un push diario a la hora local elegida con la lectura del día, salvo que
+      // ya la haya marcado como leída o el plan haya terminado. `lastRemindedOn`
+      // (fecha local) evita duplicados ante reinicios del proceso.
+      const planSubs = await ReadingPlanSubscription.find({ reminderEnabled: true });
+      if (planSubs.length > 0) {
+        const uids = [...new Set(planSubs.map((s) => String(s.user)))];
+        const planUsers = await User.find({ _id: { $in: uids } })
+          .select('name expoPushToken')
+          .lean();
+        const planUserMap = new Map(planUsers.map((u) => [String(u._id), u]));
+
+        for (const sub of planSubs) {
+          const tz = sub.timezone || 'UTC';
+          const local = toZonedTime(now, tz);
+          if (local.getHours() !== sub.reminderHour || local.getMinutes() !== sub.reminderMinute) continue;
+
+          const plan = sub.custom ? generateCustomPlan(sub.custom) : getPlan(sub.planKey);
+          if (!plan) continue;
+          if (sub.completedDays.length >= plan.totalDays) continue; // plan terminado
+
+          const currentDay = computeCurrentDay(sub.startDate, tz, plan.totalDays, now);
+          if (sub.completedDays.includes(currentDay)) continue; // ya leyó hoy
+
+          const localDateStr = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+          if (sub.lastRemindedOn === localDateStr) continue; // ya avisado hoy
+
+          const dayObj = plan.days[currentDay - 1];
+          const user = planUserMap.get(String(sub.user));
+          if (!dayObj || !user) continue;
+
+          const title = `📖 Lectura de hoy — ${plan.title}`;
+          const body = `Día ${currentDay}: ${dayObj.label}`;
+
+          if (user.expoPushToken) await sendPushNotification(user.expoPushToken, title, body);
+          sendWebPushToUser(sub.user, { title, body, url: '/bible', tag: `reading-plan-${sub.planKey}`, badge: 'activity' }, 'activityReminders');
+
+          sub.lastRemindedOn = localDateStr;
+          await sub.save();
         }
       }
     } catch (err) {

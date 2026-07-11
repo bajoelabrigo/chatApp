@@ -279,6 +279,84 @@ export async function getPublicGroup(req: Request, res: Response): Promise<void>
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fotos de fondo (Pexels) para "compartir versículo como imagen"
+// ---------------------------------------------------------------------------
+// La clave de Pexels vive en el servidor (PEXELS_API_KEY). El cliente busca por
+// /public/photos y usa /public/photo?url= como proxy con CORS, para que
+// html2canvas pueda capturar la foto sin "manchar" el canvas (cross-origin).
+
+const PHOTO_HOST_ALLOW = /(^|\.)pexels\.com$|(^|\.)pixabay\.com$/i;
+
+/** GET /public/photos?q=&page= — busca fotos en Pexels. */
+export async function searchPhotos(req: Request, res: Response): Promise<void> {
+  const key = process.env.PEXELS_API_KEY;
+  if (!key) {
+    res.status(503).json({ error: 'Búsqueda de fotos no configurada' });
+    return;
+  }
+  const q = String(req.query.q ?? '').trim();
+  const page = Math.min(Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1), 50);
+  const per = 24;
+  const endpoint = q
+    ? `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=${per}&page=${page}`
+    : `https://api.pexels.com/v1/curated?per_page=${per}&page=${page}`;
+  try {
+    const r = await fetchWithTimeout(endpoint, 8000, { Authorization: key });
+    if (!r.ok) {
+      res.status(502).json({ error: 'Error consultando Pexels' });
+      return;
+    }
+    const j: any = await r.json();
+    const photos = (j.photos || []).map((p: any) => ({
+      id: p.id,
+      thumb: p.src?.tiny || p.src?.small,
+      full: p.src?.large2x || p.src?.large || p.src?.original,
+      photographer: p.photographer,
+      alt: p.alt || '',
+    }));
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json({ photos, page });
+  } catch {
+    res.status(500).json({ error: 'Error buscando fotos' });
+  }
+}
+
+/** GET /public/photo?url=<imagen> — proxy con CORS para html2canvas. */
+export async function proxyPhoto(req: Request, res: Response): Promise<void> {
+  const raw = String(req.query.url ?? '').trim();
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    res.status(400).json({ error: 'URL inválida' });
+    return;
+  }
+  if (!isSafePublicUrl(u) || !PHOTO_HOST_ALLOW.test(u.hostname)) {
+    res.status(400).json({ error: 'Host no permitido' });
+    return;
+  }
+  try {
+    const r = await fetchWithTimeout(u.toString(), 10000, { 'User-Agent': 'HolyChat/1.0' });
+    if (!r.ok) {
+      res.status(502).end();
+      return;
+    }
+    const ct = r.headers.get('content-type') || 'image/jpeg';
+    if (!ct.startsWith('image/')) {
+      res.status(415).end();
+      return;
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch {
+    res.status(500).end();
+  }
+}
+
 /**
  * Genera un código QR (PNG) para cualquier texto/URL.
  * Uso: GET /public/qr?data=<url>&size=300

@@ -175,7 +175,8 @@ PWA con Service Worker: tras subir puede requerir recarga forzada (Ctrl+Shift+R)
 ## Web móvil (`holy_app`) — patrones
 
 La mayoría de usuarios entran a `holyholyholy.es` desde el móvil. Patrones aplicados (2026-06-28):
-- **Scroll horizontal**: NO usar `min-w-screen` (= 100vw, incluye el scrollbar → desbordamiento); el root del Layout usa `w-full overflow-x-hidden`. Tooltips de hover (`HoverUserList`) ocultos en móvil (`hidden md:group-hover:block`) porque ocupan espacio aunque estén invisibles.
+- **Scroll horizontal**: NO usar `min-w-screen` (= 100vw, incluye el scrollbar → desbordamiento); el root del Layout usa `w-full overflow-x-clip`. Tooltips de hover (`HoverUserList`) ocultos en móvil (`hidden md:group-hover:block`) porque ocupan espacio aunque estén invisibles.
+- **`overflow-x-clip`, NO `overflow-x-hidden`, en el root del Layout** (gotcha sutil, corregido 2026-07-10): `overflow-x: hidden` fuerza `overflow-y` a `auto` (regla CSS) → el div `min-h-screen` se vuelve un contenedor de scroll con altura = contenido, que **nunca scrollea internamente** (scrollea el viewport). Eso **rompe `position: sticky` de TODOS sus descendientes** — incluido el navbar `sticky top-0` (se iba con el scroll) y cualquier cabecera `sticky top-16` (seminario, Biblia). `overflow-x: clip` recorta igual el desbordamiento horizontal pero NO crea contenedor de scroll ni toca `overflow-y`, así que el sticky vuelve a funcionar. Verificado en vivo con DevTools.
 - **Videos de YouTube**: `LiteYouTube.jsx` (facade) muestra solo la miniatura (`i.ytimg.com/vi/<id>/hqdefault.jpg`) + botón play y monta el iframe solo al tocar. Usado en `Posts.jsx` y `PostDetailModal.jsx` — evita cargar N reproductores a la vez en el feed.
 - **Editor de post estilo Facebook**: en móvil el feed muestra una fila (avatar + "¿Qué estás pensando?") que abre `PostCreation` en un modal a pantalla completa (`Home.jsx`, `lg:hidden`). El editor inline solo en escritorio (`hidden lg:block`). `PostCreation` acepta `onPosted` para cerrar el modal al publicar. Su emoji picker va en `fixed` centrado (`z-[91]`) para que no lo recorte el `overflow` del modal. NO usar FAB en la esquina inferior derecha: choca con `MaterialPopup` (banner de materiales, `fixed bottom-4 right-4 z-[90]`).
 - **Targets táctiles**: botones de acción del post (`PostAction` + "Me gusta") con `min-w-0` (para que encojan y quepan los 5) y `min-h-[44px]`; el menú de 3 puntos a 44×44.
@@ -427,7 +428,10 @@ PAYPAL_PLAN_SUB_5_ID=
 PAYPAL_PLAN_SUB_10_ID=
 PAYPAL_PLAN_SUB_20_ID=
 BACKEND_URL=https://api.holyholyholy.es
+PEXELS_API_KEY=
 ```
+
+`PEXELS_API_KEY` (opcional): clave gratuita de https://www.pexels.com/api/ para los fondos de foto de "compartir versículo como imagen". Solo el backend la usa (`/public/photos` busca, `/public/photo?url=` hace de proxy CORS para que html2canvas capture la foto sin manchar el canvas; el host se valida contra pexels/pixabay para evitar SSRF). Sin la clave, `/public/photos` devuelve 503 y la pestaña "Foto" del modal muestra un aviso; los temas de color siguen funcionando.
 
 ### Frontend (`chat-app-frontend/.env` — solo para desarrollo local)
 ```

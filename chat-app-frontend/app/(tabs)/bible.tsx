@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,10 +31,18 @@ import {
   downloadBible,
   deleteBibleDownload,
   cancelBibleDownload,
+  fetchReadingPlans,
+  fetchMyReadingPlans,
+  subscribeReadingPlan,
+  createCustomReadingPlan,
+  updateReadingPlan,
+  toggleReadingPlanDay,
+  unsubscribeReadingPlan,
 } from '../../src/services/bibleService';
 import type { BibleVerse, BibleSearchResult, BibleVersion } from '../../src/services/bibleService';
+import VerseImageSheet from '../../src/components/bible/VerseImageSheet';
 
-type ScreenView = 'books' | 'chapters' | 'reading' | 'search' | 'favorites';
+type ScreenView = 'books' | 'chapters' | 'reading' | 'search' | 'favorites' | 'plans';
 
 const HIGHLIGHT_COLORS = ['#FEF08A', '#86EFAC', '#93C5FD', '#F9A8D4'];
 const MIN_FONT = 13;
@@ -132,7 +141,8 @@ export default function BibleScreen() {
     addFavorite, removeFavorite, isFavorite,
     setHighlight, removeHighlight, getHighlight,
     saveAnnotation, deleteAnnotation, getAnnotation,
-    setFontSize, setSelectedVersion,
+    setFontSize, setSelectedVersion, syncWithServer,
+    lastRead, loadLastRead, setLastRead, clearLastRead,
   } = useBibleStore();
 
   const [view, setView] = useState<ScreenView>('books');
@@ -148,6 +158,7 @@ export default function BibleScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [highlightTarget, setHighlightTarget] = useState<VerseItem | null>(null);
+  const [imageVerse, setImageVerse] = useState<VerseItem | null>(null);
 
   // Download state — keyed by version
   const [downloadedVersions, setDownloadedVersions] = useState<Set<string>>(new Set());
@@ -165,6 +176,21 @@ export default function BibleScreen() {
   // Dots menu
   const [dotsMenuOpen, setDotsMenuOpen] = useState(false);
 
+  // Planes de lectura (#2)
+  const [myPlans, setMyPlans] = useState<any[]>([]);
+  const [planCatalog, setPlanCatalog] = useState<any[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [planBusy, setPlanBusy] = useState<string | null>(null);
+
+  // Crear mi plan (#D)
+  const [createPlanOpen, setCreatePlanOpen] = useState(false);
+  const [cTitle, setCTitle] = useState('');
+  const [cStart, setCStart] = useState(0);
+  const [cEnd, setCEnd] = useState(65);
+  const [cDays, setCDays] = useState('30');
+  const [bookPickerFor, setBookPickerFor] = useState<null | 'start' | 'end'>(null);
+  const [creatingPlan, setCreatingPlan] = useState(false);
+
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useFocusEffect(
@@ -174,6 +200,9 @@ export default function BibleScreen() {
       loadAnnotations();
       loadFontSize();
       loadSelectedVersion();
+      loadLastRead();
+      // Sincroniza favoritos/resaltados/notas con la cuenta (merge). Best-effort.
+      if (token) syncWithServer(token);
       if (books.length === 0) doLoadBooks();
       checkAllDownloads();
       if (availableVersions.length === 0 && token) {
@@ -218,7 +247,11 @@ export default function BibleScreen() {
     setSelectedChapter(chapter);
     setSelectedVerses(new Map());
     setLoading(true);
-    try { setVerses(await fetchVerses(token, selectedBook, chapter, selectedVersion)); setView('reading'); }
+    try {
+      setVerses(await fetchVerses(token, selectedBook, chapter, selectedVersion));
+      setView('reading');
+      setLastRead({ version: selectedVersion, book: selectedBook, chapter });
+    }
     finally { setLoading(false); }
   };
 
@@ -239,11 +272,170 @@ export default function BibleScreen() {
   const openSearch = () => { setPrevView(view); setView('search'); setSearchQuery(''); setSearchResults([]); };
   const openFavorites = () => { setPrevView(view); setView('favorites'); };
 
+  // ── Planes de lectura (#2) ──────────────────────────────────
+  const loadPlans = async () => {
+    if (!token) return;
+    setPlansLoading(true);
+    try {
+      const [cat, mine] = await Promise.all([
+        fetchReadingPlans(token).catch(() => []),
+        fetchMyReadingPlans(token).catch(() => []),
+      ]);
+      setPlanCatalog(cat);
+      setMyPlans(mine);
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
+  const openPlans = () => { setPrevView(view); setView('plans'); loadPlans(); };
+
+  const submitCustomPlan = async () => {
+    if (!token) return;
+    if (cEnd < cStart) {
+      Alert.alert('Revisa el rango', 'El libro final debe ir después (o igual) del inicial.');
+      return;
+    }
+    setCreatingPlan(true);
+    try {
+      const sub = await createCustomReadingPlan(token, {
+        title: cTitle.trim() || 'Mi plan',
+        bookStart: cStart,
+        bookEnd: cEnd,
+        days: Math.max(1, parseInt(cDays, 10) || 1),
+      });
+      setMyPlans((prev) => [...prev, sub]);
+      setCreatePlanOpen(false);
+      setCTitle('');
+    } catch {
+      Alert.alert('Error', 'No se pudo crear el plan.');
+    } finally {
+      setCreatingPlan(false);
+    }
+  };
+
+  const startPlan = async (planKey: string) => {
+    if (!token) return;
+    setPlanBusy(planKey);
+    try {
+      const sub = await subscribeReadingPlan(token, planKey);
+      setMyPlans((prev) => [...prev.filter((p) => p.planKey !== planKey), sub]);
+    } catch { /* ignora */ }
+    finally { setPlanBusy(null); }
+  };
+
+  const togglePlanDay = async (plan: any) => {
+    if (!token) return;
+    setPlanBusy(plan.planKey);
+    try {
+      const updated = await toggleReadingPlanDay(token, plan.planKey, plan.currentDay);
+      setMyPlans((prev) => prev.map((p) => (p.planKey === plan.planKey ? updated : p)));
+    } catch { /* ignora */ }
+    finally { setPlanBusy(null); }
+  };
+
+  const togglePlanReminder = async (plan: any) => {
+    if (!token) return;
+    try {
+      const updated = await updateReadingPlan(token, plan.planKey, { reminderEnabled: !plan.reminderEnabled });
+      setMyPlans((prev) => prev.map((p) => (p.planKey === plan.planKey ? updated : p)));
+    } catch { /* ignora */ }
+  };
+
+  // Menú del botón de recordatorio: permite activarlo o eliminarlo.
+  const reminderMenu = (plan: any) => {
+    const hhmm = `${String(plan.reminderHour).padStart(2, '0')}:${String(plan.reminderMinute).padStart(2, '0')}`;
+    Alert.alert(
+      'Recordatorio diario',
+      plan.reminderEnabled
+        ? `Aviso de lectura activo a las ${hhmm}.`
+        : 'No tienes un recordatorio para este plan.',
+      plan.reminderEnabled
+        ? [
+            { text: 'Eliminar recordatorio', style: 'destructive', onPress: () => togglePlanReminder(plan) },
+            { text: 'Cancelar', style: 'cancel' },
+          ]
+        : [
+            { text: 'Activar recordatorio', onPress: () => togglePlanReminder(plan) },
+            { text: 'Cancelar', style: 'cancel' },
+          ]
+    );
+  };
+
+  const abandonPlan = async (planKey: string) => {
+    if (!token) return;
+    try {
+      await unsubscribeReadingPlan(token, planKey);
+      setMyPlans((prev) => prev.filter((p) => p.planKey !== planKey));
+    } catch { /* ignora */ }
+  };
+
+  const restartPlan = (plan: any) => {
+    if (!token) return;
+    Alert.alert(
+      'Volver a empezar',
+      '¿Empezar este plan de nuevo desde hoy? Se borrará tu progreso.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Reiniciar',
+          style: 'destructive',
+          onPress: async () => {
+            setPlanBusy(plan.planKey);
+            try {
+              const updated = await updateReadingPlan(token, plan.planKey, {
+                startDate: new Date().toISOString(),
+                resetProgress: true,
+              });
+              setMyPlans((prev) => prev.map((p) => (p.planKey === plan.planKey ? updated : p)));
+            } catch { /* ignora */ }
+            finally { setPlanBusy(null); }
+          },
+        },
+      ]
+    );
+  };
+
+  const openPlanPassage = async (bookIndex: number, chapter: number) => {
+    if (!token) return;
+    const name = getCanonicalOrder(selectedVersion)[bookIndex];
+    if (!name) return;
+    setSelectedBook(name);
+    setLoading(true);
+    try {
+      setChapters(await fetchChapters(token, name, selectedVersion));
+      setSelectedChapter(String(chapter));
+      setSelectedVerses(new Map());
+      setVerses(await fetchVerses(token, name, String(chapter), selectedVersion));
+      setView('reading');
+      setLastRead({ version: selectedVersion, book: name, chapter: String(chapter) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Continuar leyendo (#3) ──────────────────────────────────
+  const resumeReading = async () => {
+    if (!lastRead || !token) return;
+    if (lastRead.version !== selectedVersion) await setSelectedVersion(lastRead.version);
+    setSelectedBook(lastRead.book);
+    setLoading(true);
+    try {
+      setChapters(await fetchChapters(token, lastRead.book, lastRead.version));
+      setSelectedChapter(lastRead.chapter);
+      setSelectedVerses(new Map());
+      setVerses(await fetchVerses(token, lastRead.book, lastRead.chapter, lastRead.version));
+      setView('reading');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const goBack = () => {
     if (view === 'reading') setView('chapters');
     else if (view === 'chapters') setView('books');
-    else if (view === 'search' || view === 'favorites')
-      setView(prevView === 'search' || prevView === 'favorites' ? 'books' : prevView);
+    else if (view === 'search' || view === 'favorites' || view === 'plans')
+      setView(prevView === 'search' || prevView === 'favorites' || prevView === 'plans' ? 'books' : prevView);
   };
 
   const toggleVerse = (v: VerseItem) => {
@@ -393,6 +585,7 @@ export default function BibleScreen() {
     if (view === 'chapters') title = selectedBook ?? '';
     if (view === 'reading') title = `${selectedBook} ${selectedChapter}`;
     if (view === 'favorites') title = 'Favoritos';
+    if (view === 'plans') title = 'Planes de lectura';
     const showBack = view !== 'books';
 
     return (
@@ -439,7 +632,7 @@ export default function BibleScreen() {
 
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
 
-          {view !== 'favorites' && (
+          {view !== 'favorites' && view !== 'plans' && (
             <TouchableOpacity onPress={openSearch} style={iconBtn}>
               <Ionicons name="search" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -582,6 +775,13 @@ export default function BibleScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Compartir como imagen — solo con 1 versículo seleccionado */}
+        {selectedCount === 1 && firstSelected && (
+          <TouchableOpacity onPress={() => setImageVerse(firstSelected)} style={{ padding: 8 }}>
+            <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity onPress={handleFavoriteToggle} style={{ padding: 8 }}>
           <FontAwesome5 name="star" solid={allFav} size={18} color={allFav ? '#FBBF24' : colors.textMuted} />
         </TouchableOpacity>
@@ -662,11 +862,47 @@ export default function BibleScreen() {
     );
   };
 
+  const renderContinueCard = () => {
+    if (!lastRead) return null;
+    const vShort = VERSION_META[lastRead.version]?.short ?? lastRead.version;
+    return (
+      <View style={{
+        marginHorizontal: 16, marginTop: 16, borderRadius: 16,
+        backgroundColor: colors.accent, flexDirection: 'row', alignItems: 'center',
+      }}>
+        <TouchableOpacity
+          onPress={resumeReading}
+          activeOpacity={0.85}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}
+        >
+          <Ionicons name="book" size={22} color="#fff" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Continuar leyendo</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>
+              {lastRead.book} {lastRead.chapter} · {vShort}
+            </Text>
+          </View>
+          <Ionicons name="play" size={18} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => clearLastRead()} style={{ padding: 14 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Ionicons name="close" size={18} color="rgba(255,255,255,0.9)" />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderBooksHeader = () => (
+    <>
+      {renderContinueCard()}
+      {renderDownloadBanner()}
+    </>
+  );
+
   const renderBooks = () => (
     <FlatList
       data={sortedBooks}
       keyExtractor={(item) => item}
-      ListHeaderComponent={renderDownloadBanner}
+      ListHeaderComponent={renderBooksHeader}
       ListEmptyComponent={
         loading
           ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}><ActivityIndicator color={colors.accent} size="large" /></View>
@@ -816,6 +1052,223 @@ export default function BibleScreen() {
     />
   );
 
+  // ── Planes de lectura (#2) ─────────────────────────────────
+  const renderPlanCard = (plan: any) => {
+    const pct = plan.totalDays ? Math.round((plan.completedCount / plan.totalDays) * 100) : 0;
+    return (
+      <View key={plan.planKey} style={{
+        margin: 16, marginBottom: 0, borderRadius: 16, padding: 16,
+        backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
+      }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16 }}>{plan.title}</Text>
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+              Día {plan.currentDay} de {plan.totalDays} · {plan.completedCount} leídos
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => reminderMenu(plan)} style={{ padding: 4 }}>
+            <Ionicons name={plan.reminderEnabled ? 'notifications' : 'notifications-off-outline'} size={20} color={plan.reminderEnabled ? colors.accent : colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Barra de progreso */}
+        <View style={{ height: 6, backgroundColor: colors.bgTertiary, borderRadius: 3, overflow: 'hidden', marginTop: 12 }}>
+          <View style={{ height: '100%', width: `${pct}%`, backgroundColor: colors.accent, borderRadius: 3 }} />
+        </View>
+
+        {plan.isFinished ? (
+          <View style={{ marginTop: 12 }}>
+            <Text style={{ color: '#22c55e', fontWeight: '600', marginBottom: 10 }}>¡Plan completado! 🎉</Text>
+            <TouchableOpacity
+              onPress={() => restartPlan(plan)}
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 20, backgroundColor: colors.accent }}
+            >
+              <Ionicons name="refresh" size={16} color="#fff" />
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Volver a empezar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : plan.today ? (
+          <View style={{ marginTop: 12, backgroundColor: colors.bgTertiary, borderRadius: 12, padding: 12 }}>
+            <Text style={{ color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Hoy · Día {plan.today.day}
+            </Text>
+            <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15, marginTop: 3 }}>{plan.today.label}</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+              <TouchableOpacity
+                onPress={() => { const r = plan.today.references?.[0]; if (r) openPlanPassage(r.book, r.startChapter); }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.accent }}
+              >
+                <Ionicons name="play" size={14} color="#fff" />
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Leer</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => togglePlanDay(plan)}
+                disabled={planBusy === plan.planKey}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: plan.isTodayDone ? '#22c55e' : colors.border, backgroundColor: plan.isTodayDone ? '#22c55e22' : 'transparent' }}
+              >
+                <Ionicons name="checkmark" size={14} color={plan.isTodayDone ? '#22c55e' : colors.textSecondary} />
+                <Text style={{ color: plan.isTodayDone ? '#22c55e' : colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
+                  {plan.isTodayDone ? 'Leído' : 'Marcar leído'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', gap: 20, marginTop: 12 }}>
+          <TouchableOpacity onPress={() => restartPlan(plan)}>
+            <Text style={{ color: colors.accent, fontSize: 12 }}>Volver a empezar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => abandonPlan(plan.planKey)}>
+            <Text style={{ color: colors.danger, fontSize: 12 }}>Abandonar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  const renderCatalogCard = (plan: any) => (
+    <View key={plan.key} style={{
+      margin: 16, marginBottom: 0, borderRadius: 16, padding: 16,
+      backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    }}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15 }}>{plan.title}</Text>
+        <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{plan.description}</Text>
+        <Text style={{ color: colors.accent, fontSize: 11, marginTop: 4 }}>{plan.totalDays} días · {plan.category}</Text>
+      </View>
+      <TouchableOpacity
+        onPress={() => startPlan(plan.key)}
+        disabled={planBusy === plan.key}
+        style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.accent }}
+      >
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Empezar</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderPlans = () => {
+    if (plansLoading) {
+      return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color={colors.accent} /></View>;
+    }
+    const subscribedKeys = new Set(myPlans.map((p) => p.planKey));
+    const available = planCatalog.filter((p) => !subscribedKeys.has(p.key));
+    return (
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+        {myPlans.length > 0 && (
+          <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 16 }}>
+            Mis planes
+          </Text>
+        )}
+        {myPlans.map(renderPlanCard)}
+
+        {/* Crear mi plan (#D) */}
+        <TouchableOpacity
+          onPress={() => setCreatePlanOpen(true)}
+          style={{
+            marginHorizontal: 16, marginTop: 16, borderRadius: 16, padding: 14,
+            borderWidth: 1, borderColor: colors.accent, borderStyle: 'dashed',
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
+          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 14 }}>Crear mi plan</Text>
+        </TouchableOpacity>
+
+        {available.length > 0 && (
+          <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 24 }}>
+            {myPlans.length > 0 ? 'Otros planes' : 'Empieza un plan de lectura'}
+          </Text>
+        )}
+        {available.map(renderCatalogCard)}
+      </ScrollView>
+    );
+  };
+
+  // ── Modal: crear mi plan (#D) ───────────────────────────────
+  const canonicalForPicker = getCanonicalOrder(selectedVersion);
+
+  const renderCreatePlanModal = () => (
+    <Modal visible={createPlanOpen} transparent animationType="slide" onRequestClose={() => setCreatePlanOpen(false)}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+        <Pressable style={{ flex: 1 }} onPress={() => setCreatePlanOpen(false)} />
+        <View style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: insets.bottom + 16, paddingHorizontal: 20 }}>
+          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 16 }} />
+          <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 14 }}>Crear mi plan</Text>
+
+          <TextInput
+            value={cTitle}
+            onChangeText={setCTitle}
+            placeholder="Nombre del plan"
+            placeholderTextColor={colors.inputPlaceholder}
+            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.inputText, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, marginBottom: 12 }}
+          />
+
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Desde</Text>
+              <TouchableOpacity onPress={() => setBookPickerFor('start')} style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 11 }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 14 }} numberOfLines={1}>{canonicalForPicker[cStart] ?? '—'}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Hasta</Text>
+              <TouchableOpacity onPress={() => setBookPickerFor('end')} style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 11 }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 14 }} numberOfLines={1}>{canonicalForPicker[cEnd] ?? '—'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Días</Text>
+          <TextInput
+            value={cDays}
+            onChangeText={setCDays}
+            keyboardType="number-pad"
+            placeholder="30"
+            placeholderTextColor={colors.inputPlaceholder}
+            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.inputText, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, marginBottom: 16 }}
+          />
+
+          <TouchableOpacity
+            onPress={submitCustomPlan}
+            disabled={creatingPlan}
+            style={{ paddingVertical: 14, borderRadius: 14, backgroundColor: colors.accent, alignItems: 'center', marginBottom: 8, opacity: creatingPlan ? 0.6 : 1 }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Crear plan</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setCreatePlanOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}>
+            <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 15 }}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* Selector de libro */}
+      <Modal visible={bookPickerFor !== null} transparent animationType="fade" onRequestClose={() => setBookPickerFor(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }} onPress={() => setBookPickerFor(null)}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, maxHeight: '70%', overflow: 'hidden' }}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15, padding: 16 }}>
+              {bookPickerFor === 'start' ? 'Libro inicial' : 'Libro final'}
+            </Text>
+            <FlatList
+              data={canonicalForPicker}
+              keyExtractor={(_, i) => String(i)}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity
+                  onPress={() => { if (bookPickerFor === 'start') setCStart(index); else setCEnd(index); setBookPickerFor(null); }}
+                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.borderLight }}
+                >
+                  <Text style={{ color: colors.textPrimary, fontSize: 15 }}>{item}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </Modal>
+  );
+
   const renderContent = () => {
     switch (view) {
       case 'books': return renderBooks();
@@ -823,6 +1276,7 @@ export default function BibleScreen() {
       case 'reading': return renderReading();
       case 'search': return renderSearch();
       case 'favorites': return renderFavorites();
+      case 'plans': return renderPlans();
     }
   };
 
@@ -1138,6 +1592,18 @@ export default function BibleScreen() {
               <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </TouchableOpacity>
 
+            {/* Reading plans */}
+            <TouchableOpacity
+              onPress={() => { setDotsMenuOpen(false); openPlans(); }}
+              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 14 }}
+            >
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="calendar" size={20} color={colors.accent} />
+              </View>
+              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Planes de lectura</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+
             <TouchableOpacity
               onPress={() => setDotsMenuOpen(false)}
               style={{ marginHorizontal: 20, marginTop: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
@@ -1257,6 +1723,14 @@ export default function BibleScreen() {
       {renderAnnotationModal()}
       {renderDotsMenu()}
       {renderVersionPicker()}
+      {renderCreatePlanModal()}
+      {imageVerse && (
+        <VerseImageSheet
+          verse={imageVerse}
+          versionLabel={VERSION_META[selectedVersion]?.short ?? selectedVersion}
+          onClose={() => setImageVerse(null)}
+        />
+      )}
     </View>
   );
 }

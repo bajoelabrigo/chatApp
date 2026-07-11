@@ -168,3 +168,120 @@ export async function searchBible(
   });
   return data;
 }
+
+// ── Datos personales sincronizados con la cuenta ───────────
+// Favoritos/resaltados/notas viven en AsyncStorage (offline) y se sincronizan
+// con la cuenta para verlos en todos los dispositivos (web incluida).
+
+export interface BibleUserData {
+  favorites: any[];
+  highlights: any[];
+  annotations: any[];
+}
+
+const authHeader = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
+
+export async function fetchBibleUserData(token: string): Promise<BibleUserData> {
+  const { data } = await api.get<BibleUserData>('/bible/me/data', authHeader(token));
+  return data;
+}
+
+// Fusiona lo local con la cuenta (importar al iniciar sesión) y devuelve lo combinado.
+export async function syncBibleUserData(
+  token: string,
+  payload: BibleUserData
+): Promise<BibleUserData> {
+  const { data } = await api.post<BibleUserData>('/bible/me/sync', payload, authHeader(token));
+  return data;
+}
+
+export const pushFavorite = (token: string, fav: any) =>
+  api.post('/bible/me/favorites', fav, authHeader(token));
+export const deleteFavoriteRemote = (token: string, id: string) =>
+  api.delete(`/bible/me/favorites/${encodeURIComponent(id)}`, authHeader(token));
+
+export const pushHighlight = (token: string, h: any) =>
+  api.put('/bible/me/highlights', h, authHeader(token));
+export const deleteHighlightRemote = (token: string, id: string) =>
+  api.delete(`/bible/me/highlights/${encodeURIComponent(id)}`, authHeader(token));
+
+export const pushAnnotation = (token: string, a: any) =>
+  api.put('/bible/me/annotations', a, authHeader(token));
+export const deleteAnnotationRemote = (token: string, id: string) =>
+  api.delete(`/bible/me/annotations/${encodeURIComponent(id)}`, authHeader(token));
+
+// ── Planes de lectura (#2) ─────────────────────────────────
+
+const myTimezone = () => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+};
+
+export async function fetchReadingPlans(token: string): Promise<any[]> {
+  const { data } = await api.get('/bible/plans', authHeader(token));
+  return data;
+}
+
+export async function fetchMyReadingPlans(token: string): Promise<any[]> {
+  const { data } = await api.get('/bible/me/plans', authHeader(token));
+  return data;
+}
+
+export async function subscribeReadingPlan(token: string, planKey: string, extra: any = {}): Promise<any> {
+  const { data } = await api.post(
+    '/bible/me/plans',
+    { planKey, timezone: myTimezone(), ...extra },
+    authHeader(token)
+  );
+  return data;
+}
+
+export async function createCustomReadingPlan(token: string, custom: any): Promise<any> {
+  const { data } = await api.post(
+    '/bible/me/plans',
+    { custom, timezone: myTimezone() },
+    authHeader(token)
+  );
+  return data;
+}
+
+// ── Fotos de fondo (Pexels vía backend) para compartir como imagen (#4 móvil) ──
+export interface BackgroundPhoto {
+  id: number;
+  thumb: string;
+  full: string;
+  photographer?: string;
+  alt?: string;
+}
+
+// El endpoint /public/photos es público (no requiere token).
+export async function searchBackgroundPhotos(q = '', page = 1): Promise<BackgroundPhoto[]> {
+  const { data } = await api.get('/public/photos', { params: { q, page } });
+  return data?.photos || [];
+}
+
+export async function updateReadingPlan(token: string, key: string, body: any): Promise<any> {
+  const { data } = await api.patch(
+    `/bible/me/plans/${encodeURIComponent(key)}`,
+    { timezone: myTimezone(), ...body },
+    authHeader(token)
+  );
+  return data;
+}
+
+export async function toggleReadingPlanDay(token: string, key: string, day: number): Promise<any> {
+  const { data } = await api.post(
+    `/bible/me/plans/${encodeURIComponent(key)}/toggle-day`,
+    { day },
+    authHeader(token)
+  );
+  return data;
+}
+
+export async function unsubscribeReadingPlan(token: string, key: string): Promise<any> {
+  const { data } = await api.delete(`/bible/me/plans/${encodeURIComponent(key)}`, authHeader(token));
+  return data;
+}
