@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { DownloadResumable } from 'expo-file-system/legacy';
 import api from './authService';
+import { fold } from '../utils/textFold';
 
 export interface BibleVerse {
   verse: string;
@@ -24,6 +25,18 @@ export interface BibleVersion {
 type LocalBible = Record<string, Record<string, Record<string, string>>>;
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/+$/, '');
+
+// Versiones retiradas (2026-07-11): la RVR1960 tiene copyright de Sociedades
+// Bíblicas Unidas y no se puede distribuir completa. El backend ya no la sirve.
+// Aquí importa por dos motivos: (1) migrar a quien la tuviera seleccionada, y
+// (2) BORRAR la copia que se quedó descargada en su dispositivo.
+export const RETIRED_VERSIONS = ['RVR1960'];
+export const DEFAULT_VERSION = 'RV1909';
+
+// Si la versión guardada ya no existe, cae a la por defecto (RV1909: dominio
+// público y con un lenguaje casi idéntico a la RVR1960).
+export const safeVersion = (v?: string | null): string =>
+  !v || RETIRED_VERSIONS.includes(v) ? DEFAULT_VERSION : v;
 
 const getBibleFile = (version: string) =>
   (FileSystem.documentDirectory ?? '') + `bible_${version}.json`;
@@ -57,6 +70,15 @@ export async function isBibleDownloaded(version: string): Promise<boolean> {
 export async function deleteBibleDownload(version: string): Promise<void> {
   await FileSystem.deleteAsync(getBibleFile(version), { idempotent: true });
   bibleCache.delete(version);
+}
+
+// Borra del dispositivo las Biblias retiradas. Se llama al abrir la pantalla de
+// Biblia: quien tuviera la RVR1960 descargada la seguiría leyendo offline (y la
+// app seguiría distribuyendo ese texto) si no se elimina explícitamente.
+export async function purgeRetiredBibles(): Promise<void> {
+  await Promise.all(
+    RETIRED_VERSIONS.map((v) => deleteBibleDownload(v).catch(() => {}))
+  );
 }
 
 export async function downloadBible(
@@ -99,7 +121,7 @@ export async function fetchVersions(token: string): Promise<BibleVersion[]> {
   return data;
 }
 
-export async function fetchBooks(token: string, version = 'RVR1960'): Promise<string[]> {
+export async function fetchBooks(token: string, version = DEFAULT_VERSION): Promise<string[]> {
   const bible = await getLocalBible(version);
   if (bible) return Object.keys(bible);
   const { data } = await api.get<string[]>('/bible/books', {
@@ -109,7 +131,7 @@ export async function fetchBooks(token: string, version = 'RVR1960'): Promise<st
   return data;
 }
 
-export async function fetchChapters(token: string, book: string, version = 'RVR1960'): Promise<string[]> {
+export async function fetchChapters(token: string, book: string, version = DEFAULT_VERSION): Promise<string[]> {
   const bible = await getLocalBible(version);
   if (bible) {
     const bookData = bible[book];
@@ -126,7 +148,7 @@ export async function fetchVerses(
   token: string,
   book: string,
   chapter: string,
-  version = 'RVR1960'
+  version = DEFAULT_VERSION
 ): Promise<BibleVerse[]> {
   const bible = await getLocalBible(version);
   if (bible) {
@@ -141,30 +163,87 @@ export async function fetchVerses(
   return data;
 }
 
+// Búsqueda paginada: devuelve { results, total, offset }.
+//
+// - `testament` y `book` acotan el ámbito, y se aplican DENTRO de la búsqueda:
+//   como se corta por páginas, filtrar a posteriori dejaba el Nuevo Testamento
+//   vacío (los primeros aciertos se agotan en el Antiguo).
+// - `total` dice cuántos resultados hay de verdad; antes se cortaba a 100 en
+//   silencio y no había forma de ver el resto.
+// - `bookOrder` es el orden canónico de la versión (lo sabe la pantalla, no el
+//   servicio): sirve para el filtro por testamento y para devolver los
+//   resultados en orden bíblico, que no es el orden de las claves del JSON.
+export const SEARCH_PAGE = 50;
+
+export interface BibleSearchPage {
+  results: BibleSearchResult[];
+  total: number;
+  offset: number;
+}
+
 export async function searchBible(
   token: string,
   q: string,
-  version = 'RVR1960'
-): Promise<BibleSearchResult[]> {
+  version = DEFAULT_VERSION,
+  opts: {
+    testament?: 'ot' | 'nt';
+    book?: string;
+    offset?: number;
+    bookOrder?: string[];
+  } = {}
+): Promise<BibleSearchPage> {
+  const { testament, book, offset = 0, bookOrder = [] } = opts;
+  const scoped = testament === 'ot' || testament === 'nt';
+
+  const inScope = (b: string): boolean => {
+    if (book && b !== book) return false;
+    if (!scoped) return true;
+    const i = bookOrder.indexOf(b);
+    if (i < 0) return true; // libro que no reconocemos: no lo escondemos
+    return testament === 'ot' ? i < 39 : i >= 39; // Mateo (39) abre el Nuevo
+  };
+
   const bible = await getLocalBible(version);
   if (bible) {
-    const query = q.trim().toLowerCase();
+    // Insensible a tildes, igual que el backend: si solo se arregla allí, quien
+    // tenga la Biblia descargada se queda con el defecto ("corazon" no
+    // encontraría "corazón").
+    const query = fold(q.trim());
+
+    // Orden canónico: las claves del JSON no vienen en orden bíblico en todas
+    // las versiones.
+    const books = Object.keys(bible).sort(
+      (a, b) => bookOrder.indexOf(a) - bookOrder.indexOf(b)
+    );
+
     const results: BibleSearchResult[] = [];
-    outer: for (const book of Object.keys(bible)) {
-      for (const chapter of Object.keys(bible[book])) {
-        for (const [verse, text] of Object.entries(bible[book][chapter])) {
-          if (text.toLowerCase().includes(query)) {
-            results.push({ book, chapter, verse, text: text.trim() });
-            if (results.length >= 100) break outer;
+    let total = 0;
+    for (const b of books) {
+      if (!inScope(b)) continue;
+      for (const chapter of Object.keys(bible[b])) {
+        for (const [verse, text] of Object.entries(bible[b][chapter])) {
+          if (!fold(text).includes(query)) continue;
+          total++;
+          if (total > offset && results.length < SEARCH_PAGE) {
+            results.push({ book: b, chapter, verse, text: text.trim() });
           }
         }
       }
     }
-    return results;
+    return { results, total, offset };
   }
-  const { data } = await api.get<BibleSearchResult[]>('/bible/search', {
+
+  const { data } = await api.get<BibleSearchPage>('/bible/search', {
     headers: { Authorization: `Bearer ${token}` },
-    params: { q, version },
+    params: {
+      q,
+      version,
+      paged: 1,
+      limit: SEARCH_PAGE,
+      offset,
+      ...(scoped ? { testament } : {}),
+      ...(book ? { book } : {}),
+    },
   });
   return data;
 }
@@ -177,6 +256,9 @@ export interface BibleUserData {
   favorites: any[];
   highlights: any[];
   annotations: any[];
+  // Lápidas de borrado: con ellas el cliente borra de su copia local lo que se
+  // eliminó en otro dispositivo, y el servidor sabe qué NO resucitar.
+  deletions?: { id: string; kind: 'favorite' | 'highlight' | 'annotation'; at: string }[];
 }
 
 const authHeader = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
@@ -255,6 +337,26 @@ export interface BackgroundPhoto {
   full: string;
   photographer?: string;
   alt?: string;
+}
+
+// ── Versículo del día (#8) ─────────────────────────────────
+// El mismo para toda la comunidad cada día (lo decide el backend con la fecha).
+// `tz` define de qué día hablamos: el día no cambia a la vez en Madrid y Lima.
+export interface DailyVerse {
+  date: string;
+  version: string;
+  versionName: string;
+  book: string;
+  chapter: string;
+  verse: string;
+  text: string;
+}
+
+export async function fetchDailyVerse(version = DEFAULT_VERSION): Promise<DailyVerse> {
+  const { data } = await api.get<DailyVerse>('/bible/daily', {
+    params: { version, tz: myTimezone() },
+  });
+  return data;
 }
 
 // El endpoint /public/photos es público (no requiere token).

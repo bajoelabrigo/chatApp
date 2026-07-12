@@ -49,7 +49,7 @@ const THEMES: ThemeDef[] = [
   { id: 'crema', colors: ['#f7f1e3', '#f7f1e3'], text: '#2d2a26', accent: '#b3701f', sub: '#8a8172' },
 ];
 
-const PHOTO_THEME = { text: '#ffffff', accent: '#ffffff', sub: 'rgba(255,255,255,0.85)' };
+const PHOTO_THEME = { text: '#ffffff', accent: '#ffffff', sub: 'rgba(255,255,255,0.92)' };
 
 const SERIF = Platform.select({ ios: 'Georgia', android: 'serif', default: 'serif' });
 
@@ -176,7 +176,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                   onLoad={() => setPhotoReady(true)}
                   onError={() => setPhotoReady(false)}
                 />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+                {/* Velo: más cargado en el centro (donde cae el versículo) y abajo.
+                    Con un velo plano el texto se perdía en las fotos claras. */}
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.62)', 'rgba(0,0,0,0.72)']}
+                  style={StyleSheet.absoluteFill}
+                />
               </>
             ) : (
               <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
@@ -191,10 +196,10 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               }}>“</Text>
 
               <Text style={{
-                color: t.text, fontSize: verseSize, lineHeight: verseSize * 1.42, textAlign: 'center',
-                fontWeight: '500', fontFamily: SERIF,
-                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.5)' : 'transparent',
-                textShadowRadius: usingPhoto ? 6 : 0, textShadowOffset: { width: 0, height: 1 },
+                color: t.text, fontSize: verseSize, lineHeight: verseSize * 1.55, textAlign: 'center',
+                fontWeight: '400', fontFamily: SERIF,
+                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.85)' : 'transparent',
+                textShadowRadius: usingPhoto ? 12 : 0, textShadowOffset: { width: 0, height: 2 },
               }}>
                 {verse.text}
               </Text>
@@ -204,15 +209,21 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               <Text style={{
                 color: t.accent, fontSize: s(42), fontWeight: '800', letterSpacing: s(3),
                 textAlign: 'center', textTransform: 'uppercase',
-                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.5)' : 'transparent',
-                textShadowRadius: usingPhoto ? 6 : 0, textShadowOffset: { width: 0, height: 1 },
+                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.85)' : 'transparent',
+                textShadowRadius: usingPhoto ? 12 : 0, textShadowOffset: { width: 0, height: 2 },
               }}>
                 {reference}
               </Text>
-              <Text style={{ color: t.sub, fontSize: s(27), marginTop: s(12), letterSpacing: s(1) }}>{versionLabel}</Text>
+              <Text style={{
+                color: t.sub, fontSize: s(27), fontWeight: '600', marginTop: s(12), letterSpacing: s(1),
+                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.8)' : 'transparent',
+                textShadowRadius: usingPhoto ? 10 : 0, textShadowOffset: { width: 0, height: 2 },
+              }}>{versionLabel}</Text>
 
               <Text style={{
-                position: 'absolute', bottom: s(56), color: t.sub, fontSize: s(26), letterSpacing: s(1),
+                position: 'absolute', bottom: s(56), color: t.sub, fontSize: s(26), fontWeight: '600', letterSpacing: s(1),
+                textShadowColor: usingPhoto ? 'rgba(0,0,0,0.8)' : 'transparent',
+                textShadowRadius: usingPhoto ? 10 : 0, textShadowOffset: { width: 0, height: 2 },
               }}>holyholyholy.es</Text>
             </View>
           </View>

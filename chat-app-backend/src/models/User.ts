@@ -7,6 +7,12 @@ export interface INotificationSettings {
   // Preferencias por categoría de push web (PWA). Gestionadas desde la web.
   posts?: boolean;
   materials?: boolean;
+  // Versículo del día (#8): push diario a las 8:00 hora local. Activo por
+  // defecto; se apaga desde la propia tarjeta o los ajustes.
+  dailyVerse?: boolean;
+  // Directos ("Fulano está en vivo 🔴"). Los manda el backend de la web, pero la
+  // preferencia vive aquí, con el resto: activa por defecto.
+  live?: boolean;
 }
 
 export interface IPrivacySettings {
@@ -40,6 +46,13 @@ export interface IUser extends Document {
   }[];
   notificationSettings: INotificationSettings;
   privacySettings: IPrivacySettings;
+  // Zona horaria IANA del usuario ("Europe/Madrid"). La mandan los clientes al
+  // pedir el versículo del día; el cron la usa para enviar el push a las 8:00
+  // LOCALES de cada uno. Sin ella se asume UTC.
+  timezone?: string;
+  // Último día (YYYY-MM-DD local) en que se le envió el versículo: evita
+  // duplicados si el proceso se reinicia dentro del mismo minuto.
+  lastDailyVerseOn?: string;
   lastSeen?: Date;
   lastNotificationsSeen?: Date;
   // Notificaciones derivadas (chat unificado) marcadas como leídas / eliminadas.
@@ -88,7 +101,11 @@ const UserSchema = new Schema<IUser>(
       activityReminders:  { type: Boolean, default: true },
       posts:              { type: Boolean, default: true },
       materials:          { type: Boolean, default: true },
+      dailyVerse:         { type: Boolean, default: true },
+      live:               { type: Boolean, default: true },
     },
+    timezone:              { type: String },
+    lastDailyVerseOn:      { type: String },
     privacySettings: {
       showOnlineStatus:   { type: Boolean, default: true },
       showReadReceipts:   { type: Boolean, default: true },

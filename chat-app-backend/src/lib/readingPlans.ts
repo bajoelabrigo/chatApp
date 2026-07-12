@@ -2,8 +2,8 @@
 //
 // Las lecturas se referencian por ÍNDICE DE LIBRO (0–65 en orden canónico
 // protestante), NO por nombre, para ser agnósticas de versión: cada cliente
-// resuelve el índice al nombre de su versión (RVR1960/RVA/KJV/WEB). El backend
-// usa nombres en español solo para el texto de los recordatorios push.
+// resuelve el índice al nombre de su versión (RV1909/RVA/SSE/KJV/WEB/ASV/BBE).
+// El backend usa nombres en español solo para el texto de los recordatorios push.
 
 // Nº de capítulos por libro (canon protestante, 66 libros, mismo en toda versión).
 const CHAPTERS: number[] = [

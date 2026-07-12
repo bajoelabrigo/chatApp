@@ -45,6 +45,9 @@ export async function updateSettingsApi(
   updates: {
     notificationSettings?: Partial<NotificationSettings>;
     privacySettings?: Partial<PrivacySettings>;
+    // Zona horaria IANA: el backend la necesita para mandar el versículo del día
+    // a las 8:00 LOCALES del usuario (#8).
+    timezone?: string;
   }
 ): Promise<UserSettings> {
   const { data } = await api.patch<UserSettings>('/users/me/settings', updates, {

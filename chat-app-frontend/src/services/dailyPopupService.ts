@@ -49,6 +49,14 @@ async function fetchKind(token: string, kind: DailyKind): Promise<DailyPopup | n
   return data ? { kind, activity: data } : null;
 }
 
+// Una petición de oración al azar de mis grupos (la elige el backend). null si
+// el usuario no tiene grupos o no hay peticiones abiertas. La usa también la
+// tarjeta del Explorar de la Biblia.
+export async function getPrayerFeed(token: string): Promise<PrayerFeed | null> {
+  const { data } = await api.get<PrayerFeed | null>('/users/me/prayer-feed', h(token));
+  return data ?? null;
+}
+
 export async function getDailyPopup(token: string): Promise<DailyPopup | null> {
   // Día absoluto → categoría de hoy (misma fórmula en web y app para que roten
   // igual): día par de rotación de 3.

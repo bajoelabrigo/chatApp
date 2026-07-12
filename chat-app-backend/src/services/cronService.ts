@@ -9,6 +9,11 @@ import { sendPushNotification } from './pushService';
 import { sendWebPushToUser } from './webPushService';
 import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
 import { User } from '../models/User';
+import { localDateKey } from '../lib/dailyVerses';
+import { dailyVerseFor } from '../controllers/bibleController';
+
+// Hora local a la que sale el versículo del día (#8).
+const DAILY_VERSE_HOUR = 8;
 
 function matchesStart(c: { daysOfWeek: number[]; startHour: number; startMinute: number }, localDate: Date): boolean {
   return (
@@ -110,7 +115,7 @@ export function startCronJobs(): void {
       if (planSubs.length > 0) {
         const uids = [...new Set(planSubs.map((s) => String(s.user)))];
         const planUsers = await User.find({ _id: { $in: uids } })
-          .select('name expoPushToken')
+          .select('name expoPushToken notificationSettings')
           .lean();
         const planUserMap = new Map(planUsers.map((u) => [String(u._id), u]));
 
@@ -132,6 +137,10 @@ export function startCronJobs(): void {
           const dayObj = plan.days[currentDay - 1];
           const user = planUserMap.get(String(sub.user));
           if (!dayObj || !user) continue;
+          // El interruptor general de recordatorios manda sobre el del plan: si
+          // está apagado, tampoco llega el push nativo (antes solo lo respetaba
+          // el push web).
+          if (user.notificationSettings?.activityReminders === false) continue;
 
           const title = `📖 Lectura de hoy — ${plan.title}`;
           const body = `Día ${currentDay}: ${dayObj.label}`;
@@ -142,6 +151,50 @@ export function startCronJobs(): void {
           sub.lastRemindedOn = localDateStr;
           await sub.save();
         }
+      }
+
+      // ── VERSÍCULO DEL DÍA (#8) ──────────────────────────────────────────
+      // Un push a las 8:00 LOCALES de cada usuario (su `timezone`, que mandan
+      // los clientes; sin ella, UTC). Solo a quien tenga push y no lo haya
+      // desactivado. `lastDailyVerseOn` (día local) evita duplicados si el
+      // proceso se reinicia dentro del mismo minuto.
+      const verseUsers = await User.find({
+        'notificationSettings.dailyVerse': { $ne: false },
+        $or: [
+          { expoPushToken: { $exists: true, $ne: null } },
+          { 'webPushSubscriptions.0': { $exists: true } },
+        ],
+      })
+        .select('expoPushToken timezone lastDailyVerseOn')
+        .lean();
+
+      for (const u of verseUsers) {
+        const tz = u.timezone || 'UTC';
+        let local: Date;
+        try {
+          local = toZonedTime(now, tz);
+        } catch {
+          continue; // zona horaria corrupta: no romper el job por un usuario
+        }
+        if (local.getHours() !== DAILY_VERSE_HOUR || local.getMinutes() !== 0) continue;
+
+        const dateKey = localDateKey(now, tz);
+        if (u.lastDailyVerseOn === dateKey) continue; // ya se le envió hoy
+
+        const verse = dailyVerseFor(dateKey);
+        if (!verse) continue;
+
+        const title = `📖 Versículo del día — ${verse.book} ${verse.chapter}:${verse.verse}`;
+        const body = verse.text;
+
+        if (u.expoPushToken) await sendPushNotification(u.expoPushToken, title, body);
+        sendWebPushToUser(
+          u._id as Types.ObjectId,
+          { title, body, url: '/', tag: `daily-verse-${dateKey}`, badge: 'activity' },
+          'dailyVerse'
+        );
+
+        await User.updateOne({ _id: u._id }, { $set: { lastDailyVerseOn: dateKey } });
       }
     } catch (err) {
       console.error('[cronService] minute job error:', err);

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getVersions, getBooks, getChapters, getVerses, searchVerses, downloadBible } from '../controllers/bibleController';
+import { getVersions, getBooks, getChapters, getVerses, searchVerses, downloadBible, getDailyVerse } from '../controllers/bibleController';
 import { authMiddleware } from '../middleware/authMiddleware';
 import {
   getMyBibleData,
@@ -50,6 +50,7 @@ router.get('/plans/:key', getPlanDetail);
 
 // Static routes before dynamic ones
 router.get('/versions', getVersions);
+router.get('/daily', getDailyVerse); // versículo del día (#8), público
 router.get('/books', getBooks);
 router.get('/search', searchVerses);
 router.get('/download', downloadBible);

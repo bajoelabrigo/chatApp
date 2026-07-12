@@ -47,12 +47,19 @@ interface Props {
 const MIN_FONT = 13;
 const MAX_FONT = 26;
 
+// La RVR1960 se retiró por copyright (ver RETIRED_VERSIONS en bibleService).
 const VERSION_META: Record<string, { name: string; short: string; lang: string }> = {
-  RVR1960: { name: 'Reina Valera 1960',       short: 'RVR 1960', lang: 'es' },
-  RVA:     { name: 'Reina Valera Actualizada', short: 'RVA',      lang: 'es' },
+  RV1909:  { name: 'Reina Valera 1909',         short: 'RV 1909',  lang: 'es' },
+  RVA:     { name: 'Reina Valera Actualizada',  short: 'RVA',      lang: 'es' },
+  SSE:     { name: 'Sagradas Escrituras 1569',  short: 'SSE 1569', lang: 'es' },
   KJV:     { name: 'King James Version',        short: 'KJV',      lang: 'en' },
-  WEB:     { name: 'World English Bible',        short: 'WEB',      lang: 'en' },
+  WEB:     { name: 'World English Bible',       short: 'WEB',      lang: 'en' },
+  ASV:     { name: 'American Standard Version', short: 'ASV',      lang: 'en' },
+  BBE:     { name: 'Bible in Basic English',    short: 'BBE',      lang: 'en' },
 };
+
+// Ids de todas las versiones (para consultar cuáles están descargadas).
+const VERSION_IDS = Object.keys(VERSION_META);
 
 function formatVersesForShare(verses: SelectedVerse[], versionName: string): string {
   return (
@@ -141,7 +148,7 @@ export default function BibleModal({ visible, onClose, onSendVerses }: Props) {
   }, [searchQuery]);
 
   const checkAllDownloads = async () => {
-    const ids = ['RVR1960', 'RVA', 'KJV', 'WEB'];
+    const ids = VERSION_IDS;
     const results = await Promise.all(ids.map((id) => isBibleDownloaded(id)));
     const downloaded = new Set<string>();
     ids.forEach((id, i) => { if (results[i]) downloaded.add(id); });
@@ -197,8 +204,9 @@ export default function BibleModal({ visible, onClose, onSendVerses }: Props) {
     setLoading(true);
     setView('search');
     try {
-      const data = await searchBible(token, q, selectedVersion);
-      setSearchResults(data);
+      // La búsqueda ahora pagina: aquí (modal del chat) basta con la 1ª página.
+      const page = await searchBible(token, q, selectedVersion);
+      setSearchResults(page.results);
     } catch {
       Alert.alert('Error', 'Error al buscar');
     } finally {

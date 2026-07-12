@@ -39,14 +39,28 @@ export async function getMySettings(req: AuthRequest, res: Response): Promise<vo
 export async function updateSettings(req: AuthRequest, res: Response): Promise<void> {
   try {
     const userId = req.userId!;
-    const { notificationSettings, privacySettings } = req.body as {
+    const { notificationSettings, privacySettings, timezone } = req.body as {
       notificationSettings?: Partial<INotificationSettings>;
       privacySettings?: Partial<IPrivacySettings>;
+      timezone?: string;
     };
 
     const updates: Record<string, any> = {};
+    // Zona horaria IANA: la mandan los clientes (Intl) para que el push del
+    // versículo del día (#8) salga a las 8:00 locales de cada usuario.
+    if (typeof timezone === 'string' && /^[A-Za-z_]+\/[A-Za-z_+\-/]+$/.test(timezone)) {
+      updates.timezone = timezone;
+    }
     if (notificationSettings) {
-      const keys: (keyof INotificationSettings)[] = ['messages', 'prayerRequests', 'activityReminders'];
+      const keys: (keyof INotificationSettings)[] = [
+        'messages',
+        'prayerRequests',
+        'activityReminders',
+        'dailyVerse',
+        'live',
+        'posts',
+        'materials',
+      ];
       keys.forEach((k) => {
         if (typeof notificationSettings[k] === 'boolean') {
           updates[`notificationSettings.${k}`] = notificationSettings[k];

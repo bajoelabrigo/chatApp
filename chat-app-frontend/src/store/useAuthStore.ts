@@ -5,6 +5,10 @@ export interface NotificationSettings {
   messages: boolean;
   prayerRequests: boolean;
   activityReminders: boolean;
+  // Versículo del día (#8): push diario a las 8:00 hora local. Activo por defecto.
+  dailyVerse?: boolean;
+  // Directos ("Fulano está en vivo 🔴"). Activo por defecto.
+  live?: boolean;
 }
 
 export interface PrivacySettings {

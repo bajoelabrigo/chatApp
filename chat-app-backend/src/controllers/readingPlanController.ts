@@ -2,6 +2,41 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { ReadingPlanSubscription } from '../models/ReadingPlanSubscription';
 import { listPlans, getPlan, computeCurrentDay, generateCustomPlan, BOOK_COUNT } from '../lib/readingPlans';
+import { User } from '../models/User';
+import { sendPushNotification } from '../services/pushService';
+import { sendWebPushToUser } from '../services/webPushService';
+
+// Aviso al EMPEZAR un plan: confirma que quedó activo y a qué hora llegará el
+// recordatorio diario (si no, no hay forma de saber que se guardó bien hasta el
+// día siguiente). Best-effort: nunca bloquea la respuesta ni la rompe.
+async function notifyPlanStarted(userId: string, sub: any, title: string) {
+  try {
+    const user = await User.findById(userId)
+      .select('expoPushToken notificationSettings')
+      .lean();
+    if (!user) return;
+    // Misma preferencia que los recordatorios de lectura: si los tiene apagados,
+    // tampoco quiere esta confirmación.
+    if (user.notificationSettings?.activityReminders === false) return;
+
+    const hhmm = `${String(sub.reminderHour ?? 7).padStart(2, '0')}:${String(
+      sub.reminderMinute ?? 0
+    ).padStart(2, '0')}`;
+    const pushTitle = '📖 Plan de lectura empezado';
+    const body = sub.reminderEnabled
+      ? `${title} · te avisaremos cada día a las ${hhmm}`
+      : `${title} · ¡a leer! (recordatorio diario desactivado)`;
+
+    if (user.expoPushToken) await sendPushNotification(user.expoPushToken, pushTitle, body);
+    sendWebPushToUser(
+      userId,
+      { title: pushTitle, body, url: '/bible', tag: `plan-started-${sub.planKey}`, badge: 'activity' },
+      'activityReminders'
+    );
+  } catch (err) {
+    console.error('notifyPlanStarted:', err);
+  }
+}
 
 // Plan efectivo de una suscripción: generado si es personalizado, del catálogo si no.
 function getPlanForSub(sub: any) {
@@ -107,7 +142,9 @@ export async function subscribePlan(req: AuthRequest, res: Response): Promise<vo
       if (Number.isInteger(reminderHour)) doc.reminderHour = Math.min(23, Math.max(0, reminderHour));
       if (Number.isInteger(reminderMinute)) doc.reminderMinute = Math.min(59, Math.max(0, reminderMinute));
       const sub = await ReadingPlanSubscription.create(doc);
-      res.status(201).json(shapeSubscription(sub.toObject()));
+      const shapedCustom = shapeSubscription(sub.toObject());
+      res.status(201).json(shapedCustom);
+      notifyPlanStarted(req.userId!, sub.toObject(), shapedCustom.title);
       return;
     }
 
@@ -131,7 +168,9 @@ export async function subscribePlan(req: AuthRequest, res: Response): Promise<vo
       { upsert: true, new: true }
     ).lean();
 
-    res.status(201).json(shapeSubscription(sub));
+    const shaped = shapeSubscription(sub);
+    res.status(201).json(shaped);
+    notifyPlanStarted(req.userId!, sub, shaped.title);
   } catch (err) {
     console.error('subscribePlan:', err);
     res.status(500).json({ error: 'Error al empezar el plan' });

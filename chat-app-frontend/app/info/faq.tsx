@@ -56,7 +56,7 @@ const faqs = [
   },
   {
     q: '¿En qué versiones de la Biblia está disponible?',
-    a: 'Actualmente la app incluye: Reina-Valera Antigua (RVA), Reina-Valera 1960 (RVR1960), King James Version (KJV) y World English Bible (WEB).',
+    a: 'En español: Reina-Valera 1909, Reina-Valera Actualizada (RVA) y Sagradas Escrituras 1569. En inglés: King James Version (KJV), World English Bible (WEB), American Standard Version (ASV) y Bible in Basic English (BBE). Todas son de libre distribución. Además puedes leer dos versiones a la vez con la vista paralela.',
   },
   {
     q: '¿Cómo activo las notificaciones?',

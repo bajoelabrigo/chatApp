@@ -95,7 +95,9 @@ export default function SettingsScreen() {
 
   const toggleNotif = async (key: keyof NotificationSettings) => {
     if (!token) return;
-    const next = { ...notifSettings, [key]: !notifSettings[key] };
+    // Ausente = activado (las claves nuevas no existen en usuarios antiguos), así
+    // que el primer toque debe APAGAR, no encender.
+    const next = { ...notifSettings, [key]: notifSettings[key] === false };
     setNotifSettings(next);
     try {
       await updateSettingsApi(token, { notificationSettings: { [key]: next[key] } });
@@ -478,9 +480,23 @@ export default function SettingsScreen() {
             colors={colors}
           />
           <SwitchRow
-            icon="⏰" label="Recordatorios de actividad" sub="Avisos de horario de oración"
+            icon="⏰" label="Actividades y planes" sub="Horarios de oración y recordatorio diario de tu plan"
             value={notifSettings.activityReminders}
             onToggle={() => toggleNotif('activityReminders')}
+            colors={colors}
+          />
+          {/* Ausente = activado: los usuarios antiguos no tienen estas claves y no
+              hay que apagárselas sin querer. */}
+          <SwitchRow
+            icon="📖" label="Versículo del día" sub="Cada mañana a las 8:00, tu hora"
+            value={notifSettings.dailyVerse !== false}
+            onToggle={() => toggleNotif('dailyVerse')}
+            colors={colors}
+          />
+          <SwitchRow
+            icon="🔴" label="Directos" sub="Cuando alguien empieza una transmisión en vivo"
+            value={notifSettings.live !== false}
+            onToggle={() => toggleNotif('live')}
             colors={colors}
             last
           />

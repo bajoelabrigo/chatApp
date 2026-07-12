@@ -50,7 +50,7 @@ interface UserLite {
 
 // Preferencia del usuario que gobierna este push (messages/prayerRequests/
 // activityReminders). Si el usuario la tiene en false, se le omite.
-type SettingKey = 'messages' | 'prayerRequests' | 'activityReminders';
+type SettingKey = 'messages' | 'prayerRequests' | 'activityReminders' | 'dailyVerse' | 'live';
 
 const CONCURRENCY = 20;
 

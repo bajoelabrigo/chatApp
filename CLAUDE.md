@@ -52,6 +52,17 @@ El "seminario" es una `Activity` con `seminar.enabled` (`activityModel.js`). Tod
 
 ---
 
+## Biblia — versiones y copyright (LEER ANTES DE AÑADIR NINGUNA)
+
+**La RVR1960 se retiró el 2026-07-11 y NO se puede volver a añadir sin licencia por escrito.** Su texto es propiedad de Sociedades Bíblicas Unidas (marca registrada; derechos administrados por la American Bible Society). El límite de cita libre es de 500 versículos — compartir versículos sueltos entra; distribuir la Biblia completa, y más aún permitir descargarla para uso offline, no.
+
+Las 7 versiones actuales son **todas de dominio público**: `RV1909` (por defecto), `RVA`, `SSE` (Sagradas Escrituras 1569) en español; `KJV`, `WEB`, `ASV`, `BBE` en inglés.
+
+- **Fuente única**: `chat-app-backend/src/lib/bible/<ID>.json`, con forma `{libro: {capítulo: {versículo: texto}}}` (~4-5 MB, ~10 MB de heap ya parseados → el controlador los carga de forma **perezosa** y cachea). La web NO codifica la lista: la pide a `GET /bible/versions`.
+- **Añadir una versión**: dejar el JSON + una línea en `ALLOWED_VERSIONS`/`VERSION_META` (`bibleController.ts`) y en el `VERSION_META` del móvil (`app/(tabs)/bible.tsx` y `src/components/chat/BibleModal.tsx`). **Los nombres de libro del JSON deben ser los de la RVA (español) o los de KJV/WEB (inglés)**, o la vista paralela no podrá emparejar los libros.
+- **Retirar una versión** (patrón ya montado, `RETIRED_VERSIONS` en ambos `bibleService`): no basta con quitarla del backend. Hay que (1) migrar la preferencia guardada del usuario (`safeVersion`), (2) **borrar la copia descargada** en su dispositivo/navegador (`purgeRetiredBibles` / `purgeRetiredVersions`) o la seguiría leyendo offline, y (3) dejar que el backend responda con la versión por defecto —nunca 400— a los clientes viejos que la sigan pidiendo (APKs sin OTA).
+- Las rutas `/api/bible` de `holy_app` (Mongo) **se eliminaron** junto con sus colecciones `bibles`/`bibleverses`: contenían la RVR1960 y estaban expuestas sin auth.
+
 ## Biblia web (`holy_app`) — orden de libros y compartir posts
 
 - **Orden tradicional (canónico) — SIEMPRE reordenar en cliente.** El backend devuelve los libros con `distinct("book")` / `Object.keys(...)`, que salen en orden **alfabético**, NO canónico. La pestaña "Tradicional" mostraba esa lista alfabética. Fuente única de verdad: `frontend/src/lib/bibleOrder.js` → `orderBooks(books, mode)` (`"traditional" | "alpha"`), con el orden de los 66 libros en ES (RVR1960/RVA: `S. Mateo`, `S.Juan`, etc.) e inglés (KJV/WEB: `Song of Songs`, `Revelation`); normaliza tildes/espacios/puntos y tiene alias (gospels sin "S."), filtra la clave `"lang"` de los payloads offline. Aplicado en `BibleDetail.jsx` (página Biblia — además la navegación Anterior/Siguiente usa una lista `canonicalBooks`, antes saltaba al siguiente libro *alfabético*), `chat/ChatBibleModal.jsx` (chat) y `VerseSelectorModal.jsx` (posts, comentarios y responder comentarios — los tres comparten este componente). Las pestañas Tradicional/A–Z + tamaño de letra se persisten en `localStorage` (`bible_book_order`, `bible_font_size`), compartidas entre todas las superficies.
@@ -501,4 +512,5 @@ Nota: la Play Store queda como opción futura (cuota única $25, requiere AAB, p
 
 ## Pending work
 
+- **Lectura en voz alta de la Biblia en el móvil — ESPERANDO EL PRÓXIMO `eas build`** (2026-07-11). El código ya está escrito y typechequea (`src/hooks/useSpeech.ts` + botón y barra de reproducción en `app/(tabs)/bible.tsx`), y `expo-speech` ya está en `package.json`. Pero `expo-speech` es un **módulo nativo**: no se activa con `eas update`, hace falta compilar un APK nuevo. Por eso `useSpeech` hace `require('expo-speech')` dentro de un `try/catch` y expone `available`: en los APKs actuales el módulo nativo no existe, `available` es false y el botón de escuchar simplemente no aparece (en vez de crashear). **Al hacer el siguiente build se activa solo, sin tocar código.** La versión web ya está en producción (usa la Web Speech API del navegador, sin dependencias).
 - **Migrar expo-av** — `expo-av` muestra warning de deprecación en SDK 54. Migrar a `expo-audio` y `expo-video` en algún momento (no urgente).

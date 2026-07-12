@@ -9,6 +9,8 @@ import {
   deleteHighlightRemote,
   pushAnnotation,
   deleteAnnotationRemote,
+  safeVersion,
+  DEFAULT_VERSION,
 } from '../services/bibleService';
 
 export interface BibleFavorite {
@@ -17,7 +19,21 @@ export interface BibleFavorite {
   chapter: string;
   verse: string;
   text: string;
+  // Etiquetas del versículo ("Promesa", "Mandato"…). Viven en el favorito porque
+  // la clave es la misma: etiquetar un versículo lo guarda en favoritos.
+  tags?: string[];
 }
+
+// Sugerencias por defecto (el usuario puede crear las suyas). Espejo del
+// TAG_PRESETS de la web.
+export const TAG_PRESETS = [
+  'Promesa',
+  'Mandato',
+  'Oración',
+  'Consuelo',
+  'Enseñanza',
+  'Gratitud',
+];
 
 export interface BibleHighlight {
   id: string;   // "{book}:{chapter}:{verse}"
@@ -40,6 +56,37 @@ export interface BibleAnnotation {
 const FAV_KEY        = 'bible_favorites';
 const HIGHLIGHT_KEY  = 'bible_highlights';
 const ANNOTATION_KEY = 'bible_annotations';
+const DELETION_KEY   = 'bible_deletions';
+
+// ── Lápidas de borrado (tombstones) ─────────────────────────
+// El merge del servidor era una UNIÓN: si borrabas un favorito aquí y luego
+// sincronizaba la web —que aún tenía su copia local— el favorito RESUCITABA.
+// Ahora cada borrado deja una lápida con su fecha; se manda al sincronizar y el
+// servidor descarta el item salvo que se haya vuelto a crear después.
+type BibleItemKind = 'favorite' | 'highlight' | 'annotation';
+interface BibleDeletion { id: string; kind: BibleItemKind; at: string }
+
+async function getDeletions(): Promise<BibleDeletion[]> {
+  try {
+    const raw = await AsyncStorage.getItem(DELETION_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function recordDeletion(kind: BibleItemKind, id: string) {
+  const list = (await getDeletions()).filter((d) => !(d.kind === kind && d.id === id));
+  list.push({ kind, id, at: new Date().toISOString() });
+  await AsyncStorage.setItem(DELETION_KEY, JSON.stringify(list));
+}
+
+// Volver a crear algo entierra su lápida: si no, el servidor lo seguiría
+// descartando por considerarlo borrado.
+async function clearDeletion(kind: BibleItemKind, id: string) {
+  const list = (await getDeletions()).filter((d) => !(d.kind === kind && d.id === id));
+  await AsyncStorage.setItem(DELETION_KEY, JSON.stringify(list));
+}
 const FONT_SIZE_KEY  = 'bible_font_size';
 const VERSION_KEY    = 'bible_selected_version';
 const LAST_READ_KEY  = 'bible_last_read';
@@ -62,6 +109,8 @@ interface BibleStoreState {
 
   loadFavorites: () => Promise<void>;
   addFavorite: (fav: BibleFavorite) => Promise<void>;
+  setVerseTags: (verse: BibleFavorite, tags: string[]) => Promise<void>;
+  getVerseTags: (id: string) => string[];
   removeFavorite: (id: string) => Promise<void>;
   isFavorite: (id: string) => boolean;
 
@@ -93,7 +142,7 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
   highlights: [],
   annotations: [],
   fontSize: DEFAULT_FONT_SIZE,
-  selectedVersion: 'RVR1960',
+  selectedVersion: DEFAULT_VERSION,
   authToken: null,
 
   // ── Sync con la cuenta ─────────────────────────────────
@@ -111,8 +160,20 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
         AsyncStorage.getItem(HIGHLIGHT_KEY),
         AsyncStorage.getItem(ANNOTATION_KEY),
       ]);
-      const local = { favorites: parse(rf), highlights: parse(rh), annotations: parse(ra) };
-      const hasLocal = local.favorites.length || local.highlights.length || local.annotations.length;
+      // Las lápidas viajan con el lote: así el servidor descarta lo que se borró
+      // aquí en vez de devolvérnoslo (antes el merge era una unión y lo resucitaba).
+      const deletions = await getDeletions();
+      const local = {
+        favorites: parse(rf),
+        highlights: parse(rh),
+        annotations: parse(ra),
+        deletions,
+      };
+      const hasLocal =
+        local.favorites.length ||
+        local.highlights.length ||
+        local.annotations.length ||
+        deletions.length;
 
       const data = hasLocal
         ? await syncBibleUserData(token, local)
@@ -126,6 +187,8 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
         AsyncStorage.setItem(FAV_KEY, JSON.stringify(favorites)),
         AsyncStorage.setItem(HIGHLIGHT_KEY, JSON.stringify(highlights)),
         AsyncStorage.setItem(ANNOTATION_KEY, JSON.stringify(annotations)),
+        // Las lápidas combinadas (ya sin las caducadas) sustituyen a las locales.
+        AsyncStorage.setItem(DELETION_KEY, JSON.stringify(data.deletions || [])),
       ]);
     } catch {
       // sin sesión válida / sin red → seguimos en local
@@ -146,17 +209,38 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
   addFavorite: async (fav) => {
     const current = get().favorites;
     if (current.some((f) => f.id === fav.id)) return;
-    const updated = [fav, ...current];
+    const entry = { ...fav, updatedAt: new Date().toISOString() };
+    const updated = [entry, ...current];
     set({ favorites: updated });
     await AsyncStorage.setItem(FAV_KEY, JSON.stringify(updated));
+    await clearDeletion('favorite', fav.id); // volver a guardarlo entierra su lápida
     const t = get().authToken;
-    if (t) pushFavorite(t, fav).catch(() => {});
+    if (t) pushFavorite(t, entry).catch(() => {});
   },
+
+  // Etiquetas del versículo: si no estaba en favoritos, se añade (la etiqueta
+  // vive en el favorito). Con la lista vacía se limpian, pero el favorito se
+  // mantiene: quitar etiquetas no es desguardar.
+  setVerseTags: async (verse, tags) => {
+    const current = get().favorites;
+    const i = current.findIndex((f) => f.id === verse.id);
+    const entry: BibleFavorite = i >= 0 ? { ...current[i], tags } : { ...verse, tags };
+    const updated = i >= 0 ? current.map((f, k) => (k === i ? entry : f)) : [entry, ...current];
+
+    set({ favorites: updated });
+    await AsyncStorage.setItem(FAV_KEY, JSON.stringify(updated));
+    await clearDeletion('favorite', verse.id); // etiquetar reactiva el favorito
+    const t = get().authToken;
+    if (t) pushFavorite(t, { ...entry, updatedAt: new Date().toISOString() } as any).catch(() => {});
+  },
+
+  getVerseTags: (id) => get().favorites.find((f) => f.id === id)?.tags ?? [],
 
   removeFavorite: async (id) => {
     const updated = get().favorites.filter((f) => f.id !== id);
     set({ favorites: updated });
     await AsyncStorage.setItem(FAV_KEY, JSON.stringify(updated));
+    await recordDeletion('favorite', id); // lápida: que no resucite al sincronizar
     const t = get().authToken;
     if (t) deleteFavoriteRemote(t, id).catch(() => {});
   },
@@ -180,6 +264,7 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
     const updated = [...current, entry];
     set({ highlights: updated });
     await AsyncStorage.setItem(HIGHLIGHT_KEY, JSON.stringify(updated));
+    await clearDeletion('highlight', h.id);
     const t = get().authToken;
     if (t) pushHighlight(t, entry).catch(() => {});
   },
@@ -188,6 +273,7 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
     const updated = get().highlights.filter((h) => h.id !== id);
     set({ highlights: updated });
     await AsyncStorage.setItem(HIGHLIGHT_KEY, JSON.stringify(updated));
+    await recordDeletion('highlight', id);
     const t = get().authToken;
     if (t) deleteHighlightRemote(t, id).catch(() => {});
   },
@@ -211,6 +297,7 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
     const updated = [entry, ...current];
     set({ annotations: updated });
     await AsyncStorage.setItem(ANNOTATION_KEY, JSON.stringify(updated));
+    await clearDeletion('annotation', id);
     const t = get().authToken;
     if (t) pushAnnotation(t, entry).catch(() => {});
   },
@@ -219,6 +306,7 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
     const updated = get().annotations.filter((a) => a.id !== id);
     set({ annotations: updated });
     await AsyncStorage.setItem(ANNOTATION_KEY, JSON.stringify(updated));
+    await recordDeletion('annotation', id);
     const t = get().authToken;
     if (t) deleteAnnotationRemote(t, id).catch(() => {});
   },
@@ -242,10 +330,14 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
 
   // ── Selected version ───────────────────────────────────
 
+  // Migra a quien tuviera guardada una versión retirada (RVR1960): sin esto,
+  // seguiría pidiéndola al backend en cada arranque.
   loadSelectedVersion: async () => {
     try {
       const raw = await AsyncStorage.getItem(VERSION_KEY);
-      if (raw) set({ selectedVersion: raw });
+      const v = safeVersion(raw);
+      set({ selectedVersion: v });
+      if (raw && raw !== v) await AsyncStorage.setItem(VERSION_KEY, v);
     } catch {}
   },
 
@@ -260,7 +352,16 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
   loadLastRead: async () => {
     try {
       const raw = await AsyncStorage.getItem(LAST_READ_KEY);
-      if (raw) set({ lastRead: JSON.parse(raw) });
+      if (!raw) return;
+      const r = JSON.parse(raw);
+      // La última lectura puede apuntar a una versión retirada (y a un libro con
+      // nombre de esa versión, p.ej. "S.Juan"): descartarla es más limpio que
+      // reabrir un pasaje que ya no existe.
+      if (r?.version && safeVersion(r.version) !== r.version) {
+        await AsyncStorage.removeItem(LAST_READ_KEY);
+        return;
+      }
+      set({ lastRead: r });
     } catch {}
   },
 

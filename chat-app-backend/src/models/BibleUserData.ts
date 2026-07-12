@@ -12,6 +12,12 @@ export interface IBibleFavorite {
   chapter: string;
   verse: string;
   text: string;
+  // Etiquetas del versículo ("Promesa", "Mandato"…). Viven en el favorito
+  // porque la clave es la misma (`book:chapter:verse`): etiquetar un versículo
+  // implica guardarlo en favoritos, y así las notas del mismo versículo pueden
+  // mostrar sus etiquetas sin duplicar el dato.
+  tags: string[];
+  updatedAt: Date;
 }
 
 export interface IBibleHighlight {
@@ -32,11 +38,25 @@ export interface IBibleAnnotation {
   updatedAt: Date;
 }
 
+// Lápida (tombstone) de un borrado. Antes el merge era una UNIÓN, así que si
+// borrabas un favorito en el móvil y luego sincronizaba la web —que todavía
+// tenía su copia local— el favorito RESUCITABA. Ahora cada borrado deja
+// constancia con su fecha: en el merge, un item solo sobrevive si su `updatedAt`
+// es POSTERIOR a la lápida (es decir, si se volvió a crear después de borrarlo).
+export type BibleItemKind = 'favorite' | 'highlight' | 'annotation';
+
+export interface IBibleDeletion {
+  id: string;   // "{book}:{chapter}:{verse}"
+  kind: BibleItemKind;
+  at: Date;
+}
+
 export interface IBibleUserData extends Document {
   user: Types.ObjectId;
   favorites: IBibleFavorite[];
   highlights: IBibleHighlight[];
   annotations: IBibleAnnotation[];
+  deletions: IBibleDeletion[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,6 +68,8 @@ const FavoriteSchema = new Schema<IBibleFavorite>(
     chapter: { type: String, default: '' },
     verse: { type: String, default: '' },
     text: { type: String, default: '' },
+    tags: { type: [String], default: [] },
+    updatedAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
@@ -76,12 +98,22 @@ const AnnotationSchema = new Schema<IBibleAnnotation>(
   { _id: false }
 );
 
+const DeletionSchema = new Schema<IBibleDeletion>(
+  {
+    id: { type: String, required: true },
+    kind: { type: String, enum: ['favorite', 'highlight', 'annotation'], required: true },
+    at: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const BibleUserDataSchema = new Schema<IBibleUserData>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
     favorites: { type: [FavoriteSchema], default: [] },
     highlights: { type: [HighlightSchema], default: [] },
     annotations: { type: [AnnotationSchema], default: [] },
+    deletions: { type: [DeletionSchema], default: [] },
   },
   { timestamps: true }
 );

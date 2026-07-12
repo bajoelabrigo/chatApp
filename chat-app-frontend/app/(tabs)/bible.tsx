@@ -14,11 +14,16 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuthStore } from '../../src/store/useAuthStore';
+import { useChatsStore } from '../../src/store/useChatsStore';
+import { createPrayerRequest, togglePray } from '../../src/services/activityService';
+import { getPrayerFeed as getPrayerFeedApi } from '../../src/services/dailyPopupService';
+import type { PrayerFeed } from '../../src/services/dailyPopupService';
+import { uploadFile } from '../../src/services/uploadService';
 import { useBibleStore } from '../../src/store/useBibleStore';
 import type { BibleFavorite } from '../../src/store/useBibleStore';
 import {
@@ -31,6 +36,9 @@ import {
   downloadBible,
   deleteBibleDownload,
   cancelBibleDownload,
+  purgeRetiredBibles,
+  fetchDailyVerse,
+  searchBackgroundPhotos,
   fetchReadingPlans,
   fetchMyReadingPlans,
   subscribeReadingPlan,
@@ -39,102 +47,52 @@ import {
   toggleReadingPlanDay,
   unsubscribeReadingPlan,
 } from '../../src/services/bibleService';
-import type { BibleVerse, BibleSearchResult, BibleVersion } from '../../src/services/bibleService';
+import type { BibleVerse, BibleSearchResult, BibleVersion, DailyVerse } from '../../src/services/bibleService';
+import { getSettingsApi, updateSettingsApi } from '../../src/services/userService';
 import VerseImageSheet from '../../src/components/bible/VerseImageSheet';
+import { useSpeech } from '../../src/hooks/useSpeech';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { parseReference, formatReference } from '../../src/utils/bibleRef';
+import { highlightParts, fold } from '../../src/utils/textFold';
+import { HIGHLIGHT_PALETTE, meaningOf } from '../../src/utils/highlightPalette';
+import type { BibleRef } from '../../src/utils/bibleRef';
 
-type ScreenView = 'books' | 'chapters' | 'reading' | 'search' | 'favorites' | 'plans';
-
-const HIGHLIGHT_COLORS = ['#FEF08A', '#86EFAC', '#93C5FD', '#F9A8D4'];
-const MIN_FONT = 13;
-const MAX_FONT = 26;
-
-// RVR1960 — Evangelios con prefijo "S."
-const CANONICAL_ORDER_RVR1960 = [
-  'Génesis', 'Éxodo', 'Levítico', 'Números', 'Deuteronomio',
-  'Josué', 'Jueces', 'Rut', '1 Samuel', '2 Samuel',
-  '1 Reyes', '2 Reyes', '1 Crónicas', '2 Crónicas', 'Esdras',
-  'Nehemías', 'Ester', 'Job', 'Salmos', 'Proverbios',
-  'Eclesiastés', 'Cantares', 'Isaías', 'Jeremías', 'Lamentaciones',
-  'Ezequiel', 'Daniel', 'Oseas', 'Joel', 'Amós',
-  'Abdías', 'Jonás', 'Miqueas', 'Nahúm', 'Habacuc',
-  'Sofonías', 'Hageo', 'Zacarías', 'Malaquías',
-  'S. Mateo', 'S. Marcos', 'S. Lucas', 'S.Juan',
-  'Hechos', 'Romanos', '1 Corintios', '2 Corintios', 'Gálatas',
-  'Efesios', 'Filipenses', 'Colosenses', '1 Tesalonicenses', '2 Tesalonicenses',
-  '1 Timoteo', '2 Timoteo', 'Tito', 'Filemón', 'Hebreos',
-  'Santiago', '1 Pedro', '2 Pedro', '1 Juan', '2 Juan',
-  '3 Juan', 'Judas', 'Apocalipsis',
-];
-
-// RVA — Evangelios sin prefijo
-const CANONICAL_ORDER_RVA = [
-  'Génesis', 'Éxodo', 'Levítico', 'Números', 'Deuteronomio',
-  'Josué', 'Jueces', 'Rut', '1 Samuel', '2 Samuel',
-  '1 Reyes', '2 Reyes', '1 Crónicas', '2 Crónicas', 'Esdras',
-  'Nehemías', 'Ester', 'Job', 'Salmos', 'Proverbios',
-  'Eclesiastés', 'Cantares', 'Isaías', 'Jeremías', 'Lamentaciones',
-  'Ezequiel', 'Daniel', 'Oseas', 'Joel', 'Amós',
-  'Abdías', 'Jonás', 'Miqueas', 'Nahúm', 'Habacuc',
-  'Sofonías', 'Hageo', 'Zacarías', 'Malaquías',
-  'Mateo', 'Marcos', 'Lucas', 'Juan',
-  'Hechos', 'Romanos', '1 Corintios', '2 Corintios', 'Gálatas',
-  'Efesios', 'Filipenses', 'Colosenses', '1 Tesalonicenses', '2 Tesalonicenses',
-  '1 Timoteo', '2 Timoteo', 'Tito', 'Filemón', 'Hebreos',
-  'Santiago', '1 Pedro', '2 Pedro', '1 Juan', '2 Juan',
-  '3 Juan', 'Judas', 'Apocalipsis',
-];
-
-// KJV / WEB — nombres en inglés
-const CANONICAL_ORDER_EN = [
-  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
-  'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
-  '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
-  'Nehemiah', 'Esther', 'Job', 'Psalms', 'Proverbs',
-  'Ecclesiastes', 'Song of Songs', 'Isaiah', 'Jeremiah', 'Lamentations',
-  'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos',
-  'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk',
-  'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-  'Matthew', 'Mark', 'Luke', 'John',
-  'Acts', 'Romans', '1 Corinthians', '2 Corinthians', 'Galatians',
-  'Ephesians', 'Philippians', 'Colossians', '1 Thessalonians', '2 Thessalonians',
-  '1 Timothy', '2 Timothy', 'Titus', 'Philemon', 'Hebrews',
-  'James', '1 Peter', '2 Peter', '1 John', '2 John',
-  '3 John', 'Jude', 'Revelation',
-];
-
-function getCanonicalOrder(version: string): string[] {
-  if (version === 'RVA') return CANONICAL_ORDER_RVA;
-  if (version === 'KJV' || version === 'WEB') return CANONICAL_ORDER_EN;
-  return CANONICAL_ORDER_RVR1960;
-}
-
-const VERSION_META: Record<string, { name: string; short: string; lang: string }> = {
-  RVR1960: { name: 'Reina Valera 1960',        short: 'RVR 1960', lang: 'es' },
-  RVA:     { name: 'Reina Valera Actualizada',  short: 'RVA',      lang: 'es' },
-  KJV:     { name: 'King James Version',         short: 'KJV',      lang: 'en' },
-  WEB:     { name: 'World English Bible',         short: 'WEB',      lang: 'en' },
-};
-
-type BookOrder = 'traditional' | 'alphabetical';
-
-interface VerseItem {
-  book: string;
-  chapter: string;
-  verse: string;
-  text: string;
-}
-
-function formatForShare(verses: VerseItem[], versionName: string): string {
-  return (
-    verses.map((v) => `${v.book} ${v.chapter}:${v.verse}\n${v.text}`).join('\n\n') +
-    `\n\n—Biblia ${versionName}`
-  );
-}
+import {
+  HIGHLIGHT_COLORS,
+  SEARCH_HISTORY_KEY,
+  READING_THEME_KEY,
+  READING_FONT_KEY,
+  SEPIA_BG,
+  SEPIA_TEXT,
+  MIN_FONT,
+  MAX_FONT,
+  VERSION_META,
+  VERSION_IDS,
+  CANONICAL_ORDER_RVA,
+  CANONICAL_ORDER_EN,
+  getCanonicalOrder,
+  formatForShare,
+} from '../../src/constants/bible';
+import type { ScreenView, BookOrder, VerseItem } from '../../src/constants/bible';
+import { DailyVerseCard } from '../../src/components/bible/DailyVerseCard';
+import { PrayerFeedCard } from '../../src/components/bible/PrayerFeedCard';
+import { ContinueReadingCard } from '../../src/components/bible/ContinueReadingCard';
+import { DownloadBanner } from '../../src/components/bible/DownloadBanner';
+import { VerseTagsModal } from '../../src/components/bible/VerseTagsModal';
+import { PrayerRequestModal } from '../../src/components/bible/PrayerRequestModal';
+import type { PrayerSubmission } from '../../src/components/bible/PrayerRequestModal';
+import { ReadingSettingsMenu } from '../../src/components/bible/ReadingSettingsMenu';
+import { VersionPickerModal, ComparePickerModal } from '../../src/components/bible/VersionPickerModal';
+import { ReadingPlansView } from '../../src/components/bible/ReadingPlansView';
+import { CreatePlanModal } from '../../src/components/bible/CreatePlanModal';
+import type { CustomPlanDraft } from '../../src/components/bible/CreatePlanModal';
 
 export default function BibleScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { token } = useAuthStore();
+  // Grupos del usuario: las peticiones de oración cuelgan de un grupo.
+  const conversations = useChatsStore((s) => s.conversations);
   const {
     favorites, highlights, annotations, fontSize, selectedVersion,
     loadFavorites, loadHighlights, loadAnnotations, loadFontSize, loadSelectedVersion,
@@ -143,6 +101,7 @@ export default function BibleScreen() {
     saveAnnotation, deleteAnnotation, getAnnotation,
     setFontSize, setSelectedVersion, syncWithServer,
     lastRead, loadLastRead, setLastRead, clearLastRead,
+    setVerseTags, getVerseTags,
   } = useBibleStore();
 
   const [view, setView] = useState<ScreenView>('books');
@@ -169,6 +128,15 @@ export default function BibleScreen() {
   const [versionPickerOpen, setVersionPickerOpen] = useState(false);
   const [availableVersions, setAvailableVersions] = useState<BibleVersion[]>([]);
 
+  // Lectura en voz alta (#6). `available` es false en los APKs que aún no traen
+  // el módulo nativo expo-speech → allí no se muestra el botón (ver useSpeech).
+  const speech = useSpeech();
+
+  // Vista paralela (#5): segunda versión en la columna derecha (null = apagada)
+  const [compareVersion, setCompareVersion] = useState<string | null>(null);
+  const [compareVerses, setCompareVerses] = useState<BibleVerse[]>([]);
+  const [comparePickerOpen, setComparePickerOpen] = useState(false);
+
   // Annotation modal state
   const [annotationTarget, setAnnotationTarget] = useState<VerseItem | null>(null);
   const [annotationText, setAnnotationText] = useState('');
@@ -184,12 +152,170 @@ export default function BibleScreen() {
 
   // Crear mi plan (#D)
   const [createPlanOpen, setCreatePlanOpen] = useState(false);
-  const [cTitle, setCTitle] = useState('');
-  const [cStart, setCStart] = useState(0);
-  const [cEnd, setCEnd] = useState(65);
-  const [cDays, setCDays] = useState('30');
-  const [bookPickerFor, setBookPickerFor] = useState<null | 'start' | 'end'>(null);
   const [creatingPlan, setCreatingPlan] = useState(false);
+
+  // Versículo del día (#8): el mismo para toda la comunidad cada día. La foto de
+  // fondo es opcional (si el backend no tiene clave de Pexels, queda el color).
+  const [daily, setDaily] = useState<DailyVerse | null>(null);
+  const [dailyPhoto, setDailyPhoto] = useState<string | null>(null);
+  // null = aún no sabemos si tiene el aviso diario activo → no se pinta la campana.
+  const [dailyReminder, setDailyReminder] = useState<boolean | null>(null);
+
+  // Petición de oración del Explorar: una al azar de mis grupos (la elige el
+  // backend). Sin grupos o sin peticiones abiertas → null y no se pinta.
+  const [prayerFeed, setPrayerFeed] = useState<PrayerFeed | null>(null);
+  const [prayerFeedDone, setPrayerFeedDone] = useState(false);
+
+  const loadPrayerFeed = async () => {
+    if (!token) return;
+    try {
+      const feed = await getPrayerFeedApi(token);
+      setPrayerFeed(feed);
+      setPrayerFeedDone(false);
+    } catch {
+      setPrayerFeed(null);
+    }
+  };
+
+  const prayForFeed = async () => {
+    if (!token || !prayerFeed || prayerFeedDone) return;
+    setPrayerFeedDone(true); // optimista: el botón responde al instante
+    try {
+      await togglePray(token, prayerFeed.groupId, prayerFeed._id);
+    } catch {
+      setPrayerFeedDone(false);
+    }
+  };
+
+  // Temas de lectura (backlog de pulido): sepia y tipografía con serifa.
+  const [readingTheme, setReadingTheme] = useState<'default' | 'sepia'>('default');
+  const [readingFont, setReadingFont] = useState<'sans' | 'serif'>('sans');
+
+  useEffect(() => {
+    Promise.all([
+      AsyncStorage.getItem(READING_THEME_KEY),
+      AsyncStorage.getItem(READING_FONT_KEY),
+    ])
+      .then(([t, f]) => {
+        if (t === 'sepia') setReadingTheme('sepia');
+        if (f === 'serif') setReadingFont('serif');
+      })
+      .catch(() => {});
+  }, []);
+
+  const changeReadingTheme = (t: 'default' | 'sepia') => {
+    setReadingTheme(t);
+    AsyncStorage.setItem(READING_THEME_KEY, t).catch(() => {});
+  };
+  const changeReadingFont = (f: 'sans' | 'serif') => {
+    setReadingFont(f);
+    AsyncStorage.setItem(READING_FONT_KEY, f).catch(() => {});
+  };
+
+  const isSepia = readingTheme === 'sepia';
+  const readBg = isSepia ? SEPIA_BG : colors.bgPrimary;
+  const readText = isSepia ? SEPIA_TEXT : colors.textPrimary;
+  // La serifa del sistema: "serif" existe en Android e iOS.
+  const readFontFamily = readingFont === 'serif' ? (Platform.OS === 'ios' ? 'Georgia' : 'serif') : undefined;
+
+  // Etiquetas del versículo (backlog de pulido). Se guardan en el favorito, así
+  // que etiquetar un versículo lo añade a Favoritos.
+  const [tagsVerse, setTagsVerse] = useState<VerseItem | null>(null);
+  const [tagFilter, setTagFilter] = useState('');
+
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of favorites) for (const t of f.tags ?? []) set.add(t);
+    return [...set].sort((a, b) => a.localeCompare(b, 'es'));
+  }, [favorites]);
+
+  const visibleFavorites = useMemo(
+    () => (tagFilter ? favorites.filter((f) => (f.tags ?? []).includes(tagFilter)) : favorites),
+    [favorites, tagFilter]
+  );
+
+  const openTagsModal = (v: VerseItem) => {
+    setTagsVerse(v);
+    setSelectedVerses(new Map());
+  };
+
+  const saveTags = async (tags: string[]) => {
+    if (!tagsVerse) return;
+    const v = tagsVerse;
+    await setVerseTags(
+      { id: `${v.book}:${v.chapter}:${v.verse}`, book: v.book, chapter: v.chapter, verse: v.verse, text: v.text },
+      tags
+    );
+    setTagsVerse(null);
+  };
+
+  // Pedir oración por un versículo (backlog de pulido). En el móvil las
+  // peticiones cuelgan de un GRUPO, así que hay que elegir uno de los del
+  // usuario; el versículo se adjunta al final del texto que escriba.
+  // El formulario entero vive en PrayerRequestModal: aquí solo se sube la foto
+  // (si la hay) y se llama a la API.
+  const [prayerVerse, setPrayerVerse] = useState<VerseItem | null>(null);
+
+  const myGroups = useMemo(
+    () => conversations.filter((c) => c.isGroup),
+    [conversations]
+  );
+
+  const openPrayerModal = (v: VerseItem) => {
+    setPrayerVerse(v);
+    setSelectedVerses(new Map());
+  };
+
+  const submitPrayer = async (data: PrayerSubmission) => {
+    if (!token || !prayerVerse) return;
+    const v = prayerVerse;
+    const content = `${data.text}\n\n“${v.text}”\n— ${v.book} ${v.chapter}:${v.verse}`;
+
+    try {
+      let imageUrl: string | undefined;
+      let cloudinaryPublicId: string | undefined;
+      if (data.image) {
+        const ext = data.image.uri.split('.').pop() ?? 'jpg';
+        const mimeType = data.image.mimeType ?? `image/${ext}`;
+        const up = await uploadFile(token, data.image.uri, mimeType, `prayer_${Date.now()}.${ext}`);
+        imageUrl = up.url;
+        cloudinaryPublicId = up.publicId;
+      }
+
+      await createPrayerRequest(
+        token,
+        data.groupId,
+        content,
+        data.isAnonymous,
+        imageUrl,
+        cloudinaryPublicId,
+        data.deadline
+      );
+      setPrayerVerse(null);
+      Alert.alert('Petición publicada', 'Tu grupo ya puede orar contigo.');
+    } catch {
+      Alert.alert('Error', 'No se pudo publicar la petición.');
+    }
+  };
+
+  // Mis notas y resaltados: sub-pestaña, filtro por color y búsqueda en notas.
+  const [notesTab, setNotesTab] = useState<'highlights' | 'notes'>('highlights');
+  const [colorFilter, setColorFilter] = useState('');
+  const [noteQuery, setNoteQuery] = useState('');
+  const [verseTexts, setVerseTexts] = useState<Record<string, string>>({});
+
+  // Buscar mejor (pulido): filtro por testamento/libro, historial y paginación.
+  const [testament, setTestament] = useState<'all' | 'ot' | 'nt'>('all');
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [searchTotal, setSearchTotal] = useState(0); // cuántos hay de verdad
+  const [searchBook, setSearchBook] = useState('');  // '' = toda la Biblia
+  const [bookPickerOpen, setBookPickerOpen] = useState(false);
+
+  // Ir a referencia (#7): el versículo al que se acaba de saltar. Se resalta un
+  // momento y la lista se desplaza hasta él.
+  const [flashVerse, setFlashVerse] = useState<string | null>(null);
+  const versesRef = useRef<FlatList<BibleVerse>>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -205,14 +331,71 @@ export default function BibleScreen() {
       if (token) syncWithServer(token);
       if (books.length === 0) doLoadBooks();
       checkAllDownloads();
+      loadDailyVerse();
+      loadPrayerFeed();
+      AsyncStorage.getItem(SEARCH_HISTORY_KEY)
+        .then((raw) => { if (raw) setSearchHistory(JSON.parse(raw)); })
+        .catch(() => {});
       if (availableVersions.length === 0 && token) {
         fetchVersions(token).then(setAvailableVersions).catch(() => {});
       }
     }, [])
   );
 
+  // ── Versículo del día (#8) ──────────────────────────────────
+  // Consultas de fondo por día de la semana, para que la tarjeta no enseñe
+  // siempre la misma foto. Sin clave de Pexels el backend responde 503 y la
+  // tarjeta se queda con su color de fondo.
+  const PHOTO_QUERIES = [
+    'sunrise sky', 'mountains fog', 'calm sea', 'forest light',
+    'desert dunes', 'clouds sunset', 'starry night',
+  ];
+
+  const loadDailyVerse = async () => {
+    try {
+      const v = await fetchDailyVerse(selectedVersion);
+      setDaily(v);
+
+      const dow = new Date(v.date).getUTCDay();
+      searchBackgroundPhotos(PHOTO_QUERIES[dow], 1)
+        .then((photos) => {
+          if (!photos.length) return;
+          // Estable durante todo el día: la elige la fecha, no el azar.
+          const n = Number(v.date.replace(/-/g, '')) % photos.length;
+          setDailyPhoto(photos[n].full);
+        })
+        .catch(() => {});
+    } catch {
+      // sin red y sin caché: la tarjeta simplemente no aparece
+    }
+
+    // La zona horaria del usuario, para que su push salga a SUS 8:00.
+    if (token) {
+      updateSettingsApi(token, { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+        .catch(() => {});
+      getSettingsApi(token)
+        .then((s) => setDailyReminder(s.notificationSettings?.dailyVerse !== false))
+        .catch(() => {});
+    }
+  };
+
+  const toggleDailyReminder = async () => {
+    if (!token) return;
+    const next = !dailyReminder;
+    setDailyReminder(next); // optimista: el interruptor responde al instante
+    try {
+      await updateSettingsApi(token, { notificationSettings: { dailyVerse: next } });
+    } catch {
+      setDailyReminder(!next);
+      Alert.alert('Error', 'No se pudo cambiar el aviso diario.');
+    }
+  };
+
   const checkAllDownloads = async () => {
-    const ids = ['RVR1960', 'RVA', 'KJV', 'WEB'];
+    // Antes de mirar qué hay descargado, borra del dispositivo las versiones
+    // retiradas (RVR1960): si no, quien la tuviera guardada la seguiría leyendo.
+    await purgeRetiredBibles();
+    const ids = VERSION_IDS;
     const results = await Promise.all(ids.map((id) => isBibleDownloaded(id)));
     const downloaded = new Set<string>();
     ids.forEach((id, i) => { if (results[i]) downloaded.add(id); });
@@ -255,12 +438,115 @@ export default function BibleScreen() {
     finally { setLoading(false); }
   };
 
-  const doSearch = async (q: string) => {
+  // La búsqueda pagina (50 en 50) y dice cuántos resultados hay en total; antes
+  // se cortaba a 100 en silencio. `offset > 0` = "cargar más".
+  const doSearch = async (
+    q: string,
+    scope: 'all' | 'ot' | 'nt' = testament,
+    onlyBook = searchBook,
+    offset = 0
+  ) => {
     if (!token) return;
     setLoading(true);
-    try { setSearchResults(await searchBible(token, q, selectedVersion)); }
+    try {
+      const page = await searchBible(token, q, selectedVersion, {
+        testament: scope === 'all' ? undefined : scope,
+        book: onlyBook || undefined,
+        offset,
+        bookOrder: getCanonicalOrder(selectedVersion),
+      });
+      setSearchResults((prev) => (offset > 0 ? [...prev, ...page.results] : page.results));
+      setSearchTotal(page.total);
+      pushSearchHistory(q);
+    }
     finally { setLoading(false); }
   };
+
+  // Cambiar de ámbito (testamento o libro) REPITE la búsqueda con él, no filtra
+  // lo ya encontrado: como se pagina, lo que falta puede no estar cargado aún.
+  const changeTestament = (scope: 'all' | 'ot' | 'nt') => {
+    setTestament(scope);
+    const q = searchQuery.trim();
+    if (q.length >= 3) doSearch(q, scope, searchBook, 0);
+  };
+
+  const changeSearchBook = (b: string) => {
+    setSearchBook(b);
+    setBookPickerOpen(false);
+    const q = searchQuery.trim();
+    if (q.length >= 3) doSearch(q, testament, b, 0);
+  };
+
+  // ── Buscar mejor (pulido) ───────────────────────────────────
+  // Historial (últimas 8 búsquedas) y filtro por testamento. El resaltado del
+  // término va en renderVerseRow.
+  const pushSearchHistory = async (q: string) => {
+    const term = q.trim();
+    if (term.length < 3) return;
+    const next = [term, ...searchHistory.filter((h) => h !== term)].slice(0, 8);
+    setSearchHistory(next);
+    await AsyncStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+  };
+
+  const clearSearchHistory = async () => {
+    setSearchHistory([]);
+    await AsyncStorage.removeItem(SEARCH_HISTORY_KEY);
+  };
+
+
+  // ─── Vista paralela (#5) ──────────────────────────────────
+  // Cada versión nombra los libros a su manera ("S.Juan" en RVR1960 → "John" en
+  // KJV), así que el libro se traduce por posición canónica antes de pedirlo.
+  const mapBookToVersion = (book: string, from: string, to: string): string | null => {
+    const i = getCanonicalOrder(from).indexOf(book);
+    return i >= 0 ? getCanonicalOrder(to)[i] ?? null : null;
+  };
+
+  // Carga el capítulo equivalente en la versión de comparación. Usa el mismo
+  // fetchVerses, así que también funciona sin conexión si está descargada.
+  useEffect(() => {
+    if (!token || !compareVersion || !selectedBook || !selectedChapter) {
+      setCompareVerses([]);
+      return;
+    }
+    const target = mapBookToVersion(selectedBook, selectedVersion, compareVersion);
+    if (!target) { setCompareVerses([]); return; }
+
+    let cancelled = false;
+    fetchVerses(token, target, selectedChapter, compareVersion)
+      .then((v) => { if (!cancelled) setCompareVerses(v); })
+      .catch(() => { if (!cancelled) setCompareVerses([]); });
+    return () => { cancelled = true; };
+  }, [token, compareVersion, selectedBook, selectedChapter, selectedVersion]);
+
+  // ─── Lectura en voz alta (#6) ─────────────────────────────
+  // Lo que se lee: el capítulo entero, versículo a versículo, anteponiendo el
+  // número ("1. En el principio…") para no perderse al escuchar.
+  const speechItems = useMemo(
+    () => verses.map((v) => ({ id: v.verse, text: `${v.verse}. ${v.text}` })),
+    [verses]
+  );
+
+  const speechLang = VERSION_META[selectedVersion]?.lang ?? 'es';
+
+  // Cambiar de capítulo/libro/versión o salir de la lectura corta la voz: si no,
+  // seguiría leyendo el capítulo anterior.
+  useEffect(() => {
+    speech.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBook, selectedChapter, selectedVersion, view]);
+
+  // Filas de la vista paralela: los versículos de la versión principal más los
+  // que solo existan en la de comparación (la numeración puede diferir), en
+  // orden numérico.
+  const compareRows = useMemo(() => {
+    const rows = new Map<string, { verse: string; left?: string; right?: string }>();
+    for (const v of verses) rows.set(v.verse, { verse: v.verse, left: v.text });
+    for (const v of compareVerses) {
+      rows.set(v.verse, { ...(rows.get(v.verse) ?? { verse: v.verse }), verse: v.verse, right: v.text });
+    }
+    return [...rows.values()].sort((a, b) => Number(a.verse) - Number(b.verse));
+  }, [verses, compareVerses]);
 
   const navigateChapter = async (dir: 'prev' | 'next') => {
     if (!selectedChapter) return;
@@ -269,8 +555,132 @@ export default function BibleScreen() {
     if (next >= 0 && next < chapters.length) await selectChapter(chapters[next]);
   };
 
+  // ── Ir a referencia (#7) ────────────────────────────────────
+  // El mismo cuadro de búsqueda entiende referencias: si lo escrito ("Juan
+  // 3:16", "1 co 13", "sal 23") apunta a un libro de la versión activa, se
+  // ofrece el salto directo encima de los resultados por palabra.
+  const refMatch = useMemo(() => {
+    if (view !== 'search' || !books.length) return null;
+
+    // 1. Contra los libros de la versión activa (el nombre ya sirve tal cual).
+    const direct = parseReference(searchQuery, books);
+    if (direct) return direct;
+
+    // 2. Contra los nombres de la otra lengua: quien lee la KJV sigue pudiendo
+    //    escribir "Juan 3:16", y quien lee la RVA, "John 3:16". El libro se
+    //    traduce a la versión activa por posición canónica.
+    const otherOrder =
+      VERSION_META[selectedVersion]?.lang === 'en' ? CANONICAL_ORDER_RVA : CANONICAL_ORDER_EN;
+    const cross = parseReference(searchQuery, otherOrder);
+    if (!cross) return null;
+
+    const name = getCanonicalOrder(selectedVersion)[otherOrder.indexOf(cross.book)];
+    return name && books.includes(name) ? { ...cross, book: name } : null;
+  }, [view, searchQuery, books, selectedVersion]);
+
+  const goToReference = async (ref: BibleRef) => {
+    if (!token) return;
+    setSelectedBook(ref.book);
+    setLoading(true);
+    try {
+      const chs = await fetchChapters(token, ref.book, selectedVersion);
+      setChapters(chs);
+
+      // Sin capítulo ("Génesis") se abre la lista de capítulos del libro.
+      if (!ref.chapter) { setSelectedChapter(null); setView('chapters'); return; }
+
+      // Un capítulo que no existe (Salmos 200) se acota al último del libro en
+      // vez de fallar: el usuario ya dijo a qué libro quiere ir.
+      const chapter = chs.includes(ref.chapter) ? ref.chapter : chs[chs.length - 1];
+
+      const vs = await fetchVerses(token, ref.book, chapter, selectedVersion);
+      setSelectedChapter(chapter);
+      setSelectedVerses(new Map());
+      setVerses(vs);
+      setView('reading');
+      setLastRead({ version: selectedVersion, book: ref.book, chapter });
+
+      const target = ref.verse && vs.some((v) => v.verse === ref.verse) ? ref.verse : null;
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      setFlashVerse(target);
+      if (target) flashTimer.current = setTimeout(() => setFlashVerse(null), 2500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Desplaza hasta el versículo al que se saltó, una vez pintada la lista.
+  useEffect(() => {
+    if (view !== 'reading' || !flashVerse || compareVersion) return;
+    const index = verses.findIndex((v) => v.verse === flashVerse);
+    if (index < 0) return;
+    const t = setTimeout(
+      () => versesRef.current?.scrollToIndex({ index, viewPosition: 0.25, animated: true }),
+      120
+    );
+    return () => clearTimeout(t);
+  }, [view, flashVerse, verses, compareVersion]);
+
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+
   const openSearch = () => { setPrevView(view); setView('search'); setSearchQuery(''); setSearchResults([]); };
   const openFavorites = () => { setPrevView(view); setView('favorites'); };
+  const openNotes = () => { setPrevView(view); setView('notes'); };
+
+  // ── Mis notas y resaltados ──────────────────────────────────
+  // Los resaltados y las notas guardan la REFERENCIA, no el texto del versículo,
+  // así que para listarlos hay que traerlo. Se piden los capítulos únicos que
+  // salen en la lista (suelen ser pocos) y se cachean en memoria.
+  const notesItems = useMemo(() => {
+    if (notesTab === 'highlights') {
+      const list = colorFilter ? highlights.filter((h) => h.color === colorFilter) : highlights;
+      return [...list].sort(
+        (a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime()
+      );
+    }
+    const q = fold(noteQuery.trim());
+    const list = q ? annotations.filter((a) => fold(a.note ?? '').includes(q)) : annotations;
+    return [...list].sort(
+      (a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime()
+    );
+  }, [notesTab, highlights, annotations, colorFilter, noteQuery]);
+
+  useEffect(() => {
+    if (view !== 'notes' || !token || notesItems.length === 0) return;
+
+    // Traduce el libro a la versión actual (los resaltados viejos pueden tener el
+    // nombre de otra versión) y agrupa por capítulo para pedir cada uno una vez.
+    const order = getCanonicalOrder(selectedVersion);
+    const pending = new Map<string, { book: string; chapter: string; raw: string }>();
+    for (const it of notesItems) {
+      if (verseTexts[`${it.book}:${it.chapter}:${it.verse}`] !== undefined) continue;
+      const book = books.includes(it.book) ? it.book : order[order.indexOf(it.book)] ?? it.book;
+      pending.set(`${book}:${it.chapter}`, { book, chapter: it.chapter, raw: it.book });
+    }
+    if (!pending.size) return;
+
+    let cancelled = false;
+    Promise.all(
+      [...pending.values()].map(async ({ book, chapter, raw }) => {
+        try {
+          const vs = await fetchVerses(token, book, chapter, selectedVersion);
+          // Se indexa con el nombre GUARDADO, que es con el que se busca luego.
+          return vs.map((v) => [`${raw}:${chapter}:${v.verse}`, v.text] as [string, string]);
+        } catch {
+          return [] as [string, string][];
+        }
+      })
+    ).then((chunks) => {
+      if (cancelled) return;
+      setVerseTexts((prev) => ({ ...prev, ...Object.fromEntries(chunks.flat()) }));
+    });
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, notesItems, token, selectedVersion, books]);
+
+  // Al cambiar de versión el texto cacheado ya no vale.
+  useEffect(() => setVerseTexts({}), [selectedVersion]);
 
   // ── Planes de lectura (#2) ──────────────────────────────────
   const loadPlans = async () => {
@@ -290,23 +700,19 @@ export default function BibleScreen() {
 
   const openPlans = () => { setPrevView(view); setView('plans'); loadPlans(); };
 
-  const submitCustomPlan = async () => {
+  // El formulario vive en CreatePlanModal; aquí solo se valida el rango y se
+  // llama a la API.
+  const submitCustomPlan = async (draft: CustomPlanDraft) => {
     if (!token) return;
-    if (cEnd < cStart) {
+    if (draft.bookEnd < draft.bookStart) {
       Alert.alert('Revisa el rango', 'El libro final debe ir después (o igual) del inicial.');
       return;
     }
     setCreatingPlan(true);
     try {
-      const sub = await createCustomReadingPlan(token, {
-        title: cTitle.trim() || 'Mi plan',
-        bookStart: cStart,
-        bookEnd: cEnd,
-        days: Math.max(1, parseInt(cDays, 10) || 1),
-      });
+      const sub = await createCustomReadingPlan(token, draft);
       setMyPlans((prev) => [...prev, sub]);
       setCreatePlanOpen(false);
-      setCTitle('');
     } catch {
       Alert.alert('Error', 'No se pudo crear el plan.');
     } finally {
@@ -434,8 +840,12 @@ export default function BibleScreen() {
   const goBack = () => {
     if (view === 'reading') setView('chapters');
     else if (view === 'chapters') setView('books');
-    else if (view === 'search' || view === 'favorites' || view === 'plans')
-      setView(prevView === 'search' || prevView === 'favorites' || prevView === 'plans' ? 'books' : prevView);
+    else if (view === 'search' || view === 'favorites' || view === 'notes' || view === 'plans')
+      setView(
+        prevView === 'search' || prevView === 'favorites' || prevView === 'notes' || prevView === 'plans'
+          ? 'books'
+          : prevView
+      );
   };
 
   const toggleVerse = (v: VerseItem) => {
@@ -476,7 +886,7 @@ export default function BibleScreen() {
     const list = Array.from(selectedVerses.values());
     if (!list.length) return;
     const vName = VERSION_META[selectedVersion]?.name ?? selectedVersion;
-    await Share.share({ message: formatForShare(list, vName) });
+    await Share.share({ message: formatForShare(list, vName, selectedVersion) });
     setSelectedVerses(new Map());
   };
 
@@ -539,6 +949,8 @@ export default function BibleScreen() {
     if (version === selectedVersion) { setVersionPickerOpen(false); return; }
     await setSelectedVersion(version);
     setVersionPickerOpen(false);
+    // No tiene sentido comparar una versión consigo misma.
+    if (version === compareVersion) setCompareVersion(null);
     // Reset navigation to books list with new version
     setView('books');
     setSelectedBook(null);
@@ -585,6 +997,7 @@ export default function BibleScreen() {
     if (view === 'chapters') title = selectedBook ?? '';
     if (view === 'reading') title = `${selectedBook} ${selectedChapter}`;
     if (view === 'favorites') title = 'Favoritos';
+    if (view === 'notes') title = 'Notas y resaltados';
     if (view === 'plans') title = 'Planes de lectura';
     const showBack = view !== 'books';
 
@@ -632,6 +1045,34 @@ export default function BibleScreen() {
 
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
 
+          {/* Escuchar el capítulo (#6). Oculto si el APK no trae expo-speech. */}
+          {view === 'reading' && speech.available && (
+            <TouchableOpacity
+              onPress={() =>
+                speech.speaking
+                  ? speech.stop()
+                  : speech.play(speechItems, { lang: speechLang })
+              }
+              style={iconBtn}
+            >
+              <Ionicons
+                name={speech.speaking ? 'stop-circle' : 'volume-high-outline'}
+                size={22}
+                color={speech.speaking ? colors.accent : colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
+
+          {/* Vista paralela (#5): solo tiene sentido leyendo un capítulo. */}
+          {view === 'reading' && (
+            <TouchableOpacity onPress={() => setComparePickerOpen(true)} style={iconBtn}>
+              <Ionicons
+                name="git-compare-outline"
+                size={22}
+                color={compareVersion ? colors.accent : colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
           {view !== 'favorites' && view !== 'plans' && (
             <TouchableOpacity onPress={openSearch} style={iconBtn}>
               <Ionicons name="search" size={20} color={colors.textSecondary} />
@@ -666,7 +1107,7 @@ export default function BibleScreen() {
         <TextInput
           autoFocus
           style={{ flex: 1, color: colors.inputText, fontSize: 15, paddingVertical: 9, paddingHorizontal: 8 }}
-          placeholder="Buscar en la Biblia..."
+          placeholder="Buscar o ir a Juan 3:16"
           placeholderTextColor={colors.inputPlaceholder}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -782,6 +1223,28 @@ export default function BibleScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Etiquetas del versículo */}
+        {selectedCount === 1 && firstSelected && (
+          <TouchableOpacity onPress={() => openTagsModal(firstSelected)} style={{ padding: 8 }}>
+            <Ionicons
+              name="pricetag-outline"
+              size={20}
+              color={
+                getVerseTags(`${firstSelected.book}:${firstSelected.chapter}:${firstSelected.verse}`).length
+                  ? colors.accent
+                  : colors.textSecondary
+              }
+            />
+          </TouchableOpacity>
+        )}
+
+        {/* Pedir oración por el versículo (se publica en un grupo) */}
+        {selectedCount === 1 && firstSelected && (
+          <TouchableOpacity onPress={() => openPrayerModal(firstSelected)} style={{ padding: 8 }}>
+            <FontAwesome5 name="pray" size={17} color={colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity onPress={handleFavoriteToggle} style={{ padding: 8 }}>
           <FontAwesome5 name="star" solid={allFav} size={18} color={allFav ? '#FBBF24' : colors.textMuted} />
         </TouchableOpacity>
@@ -797,104 +1260,66 @@ export default function BibleScreen() {
 
   // ─── Content views ─────────────────────────────────────────
 
-  const renderDownloadBanner = () => {
-    const isDownloaded = downloadedVersions.has(selectedVersion);
-    const isDownloading = downloadingVersion === selectedVersion;
-    const vName = VERSION_META[selectedVersion]?.name ?? selectedVersion;
-    return (
-      <View style={{
-        margin: 16, borderRadius: 16,
-        backgroundColor: colors.bgSecondary,
-        borderWidth: 1, borderColor: colors.border,
-        overflow: 'hidden',
-      }}>
-        {isDownloaded ? (
-          /* ── Downloaded state ── */
-          <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#22c55e22', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14 }}>{vName} descargada</Text>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Disponible sin conexión</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => handleDeleteDownload(selectedVersion)}
-              style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, backgroundColor: colors.bgTertiary, borderWidth: 1, borderColor: colors.border }}
-            >
-              <Text style={{ color: colors.danger, fontSize: 13, fontWeight: '600' }}>Eliminar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : isDownloading ? (
-          /* ── Downloading state ── */
-          <View style={{ padding: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 10 }}>
-              <ActivityIndicator size="small" color={colors.accent} />
-              <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 14, flex: 1 }}>
-                Descargando {vName}... {Math.round(downloadProgress * 100)}%
-              </Text>
-              <TouchableOpacity onPress={handleCancelDownload}>
-                <Ionicons name="close-circle" size={22} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-            <View style={{ height: 6, backgroundColor: colors.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-              <View style={{ height: '100%', width: `${Math.round(downloadProgress * 100)}%`, backgroundColor: colors.accent, borderRadius: 3 }} />
-            </View>
-          </View>
-        ) : (
-          /* ── Not downloaded state ── */
-          <TouchableOpacity
-            onPress={() => handleDownload(selectedVersion)}
-            style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}
-            activeOpacity={0.7}
-          >
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
-              <Ionicons name="download-outline" size={22} color={colors.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14 }}>Descargar para uso sin conexión</Text>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>~5 MB · Funciona sin internet</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
 
-  const renderContinueCard = () => {
-    if (!lastRead) return null;
-    const vShort = VERSION_META[lastRead.version]?.short ?? lastRead.version;
-    return (
-      <View style={{
-        marginHorizontal: 16, marginTop: 16, borderRadius: 16,
-        backgroundColor: colors.accent, flexDirection: 'row', alignItems: 'center',
-      }}>
-        <TouchableOpacity
-          onPress={resumeReading}
-          activeOpacity={0.85}
-          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}
-        >
-          <Ionicons name="book" size={22} color="#fff" />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Continuar leyendo</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>
-              {lastRead.book} {lastRead.chapter} · {vShort}
-            </Text>
-          </View>
-          <Ionicons name="play" size={18} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => clearLastRead()} style={{ padding: 14 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-          <Ionicons name="close" size={18} color="rgba(255,255,255,0.9)" />
-        </TouchableOpacity>
-      </View>
-    );
-  };
 
+  // Tarjeta del versículo del día (#8). Mismo versículo para todos cada día:
+  // se puede guardar, compartir como imagen o abrir el capítulo entero.
+
+  // Etiquetas del versículo: chips sugeridos (+ los que ya use el usuario) y
+  // opción de crear la suya.
+
+  // Pedir oración por un versículo: elegir grupo + escribir la petición.
+  // KeyboardAvoidingView como wrapper MÁS EXTERNO (si va dentro del backdrop,
+  // el maxHeight no tiene referencia y el modal queda cortado).
+
+  // Tarjeta de petición de oración: una al azar, sin responder, de los grupos del
+  // usuario. La elige el backend (`/users/me/prayer-feed`, el mismo del popup
+  // diario) y devuelve null si no hay grupos o peticiones → no se pinta.
+
+  // Cabecera de la lista de libros: las tarjetas de "hoy" y el banner de
+  // descarga. Cada una vive en src/components/bible/.
   const renderBooksHeader = () => (
     <>
-      {renderContinueCard()}
-      {renderDownloadBanner()}
+      <DailyVerseCard
+        daily={daily}
+        photo={dailyPhoto}
+        isFavorite={!!daily && isFavorite(`${daily.book}:${daily.chapter}:${daily.verse}`)}
+        reminder={dailyReminder}
+        colors={colors}
+        onToggleFavorite={(item, id) =>
+          isFavorite(id) ? removeFavorite(id) : addFavorite({ id, ...item })
+        }
+        onShareImage={setImageVerse}
+        onRead={(item) =>
+          goToReference({ book: item.book, chapter: item.chapter, verse: item.verse })
+        }
+        onToggleReminder={toggleDailyReminder}
+      />
+
+      <PrayerFeedCard
+        prayer={prayerFeed}
+        praying={prayerFeedDone}
+        colors={colors}
+        onPray={prayForFeed}
+      />
+
+      <ContinueReadingCard
+        lastRead={lastRead}
+        colors={colors}
+        onResume={resumeReading}
+        onDismiss={() => clearLastRead()}
+      />
+
+      <DownloadBanner
+        version={selectedVersion}
+        isDownloaded={downloadedVersions.has(selectedVersion)}
+        isDownloading={downloadingVersion === selectedVersion}
+        progress={downloadProgress}
+        colors={colors}
+        onDownload={() => handleDownload(selectedVersion)}
+        onCancel={handleCancelDownload}
+        onDelete={() => handleDeleteDownload(selectedVersion)}
+      />
     </>
   );
 
@@ -944,22 +1369,129 @@ export default function BibleScreen() {
     );
   };
 
-  const renderReading = () => {
-    if (loading) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color={colors.accent} /></View>;
+  // Lectura en vista paralela (#5): dos columnas, versículo a versículo. La
+  // versión principal (izquierda) manda: resaltados, notas y selección son
+  // suyos; la de comparación solo se lee.
+  const renderReadingCompare = () => {
+    const compareBook = selectedBook
+      ? mapBookToVersion(selectedBook, selectedVersion, compareVersion!)
+      : null;
+    const leftShort = VERSION_META[selectedVersion]?.short ?? selectedVersion;
+    const rightShort = VERSION_META[compareVersion!]?.short ?? compareVersion;
+    // En dos columnas el texto es la mitad de ancho: baja un punto la letra para
+    // que no queden líneas de dos palabras.
+    const fs = Math.max(MIN_FONT, fontSize - 1);
+
+    if (!compareBook) {
+      return (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
+          <Text style={{ color: colors.textSecondary, textAlign: 'center' }}>
+            Este libro no existe en {rightShort}.
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <FlatList
+        data={compareRows}
+        keyExtractor={(r) => r.verse}
+        contentContainerStyle={{ paddingBottom: 8 }}
+        stickyHeaderIndices={[0]}
+        ListHeaderComponent={
+          <View style={{
+            flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8,
+            backgroundColor: colors.bgSecondary,
+            borderBottomWidth: 1, borderBottomColor: colors.border,
+          }}>
+            <Text style={{ flex: 1, color: colors.accent, fontSize: 12, fontWeight: '700' }}>{leftShort}</Text>
+            <Text style={{ flex: 1, color: colors.accent, fontSize: 12, fontWeight: '700' }}>{rightShort}</Text>
+          </View>
+        }
+        renderItem={({ item }) => {
+          const key = `${selectedBook}:${selectedChapter}:${item.verse}`;
+          const isSelected = selectedVerses.has(key);
+          const hl = getHighlight(key);
+          const bg = isSelected
+            ? colors.accent + '30'
+            : hl
+            ? hl.color + 'AA'
+            : flashVerse === item.verse
+            ? colors.accent + '1A'
+            : 'transparent';
+          const textColor = hl ? '#1f2937' : colors.textPrimary;
+          return (
+            <TouchableOpacity
+              onPress={() =>
+                item.left &&
+                toggleVerse({ book: selectedBook!, chapter: selectedChapter!, verse: item.verse, text: item.left })
+              }
+              onLongPress={() =>
+                item.left &&
+                setHighlightTarget({ book: selectedBook!, chapter: selectedChapter!, verse: item.verse, text: item.left })
+              }
+              style={{
+                flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8, gap: 10,
+                backgroundColor: bg,
+                borderBottomWidth: 1, borderBottomColor: colors.borderLight,
+              }}
+            >
+              <View style={{ flex: 1, flexDirection: 'row' }}>
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 11, width: 20, marginTop: 2 }}>
+                  {item.verse}
+                </Text>
+                <Text style={{ flex: 1, color: textColor, fontSize: fs, lineHeight: fs * 1.55 }}>
+                  {item.left ?? '—'}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: textColor, fontSize: fs, lineHeight: fs * 1.55 }}>
+                  {item.right ?? '—'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    );
+  };
+
+  const renderReading = () => {
+    if (loading) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color={colors.accent} /></View>;
+    if (compareVersion) return renderReadingCompare();
+    return (
+      <FlatList
+        ref={versesRef}
         data={verses}
         keyExtractor={(v) => v.verse}
-        contentContainerStyle={{ paddingVertical: 8 }}
+        // Tema de lectura: en sepia el fondo del panel de texto cambia (el resto
+        // de la pantalla mantiene el tema de la app).
+        style={{ backgroundColor: readBg }}
+        contentContainerStyle={{ paddingVertical: 8, backgroundColor: readBg }}
+        // El salto a una referencia puede pedir un versículo que aún no se ha
+        // medido; sin esto scrollToIndex lanzaría.
+        onScrollToIndexFailed={({ index }) => {
+          setTimeout(
+            () => versesRef.current?.scrollToIndex({ index, viewPosition: 0.25, animated: true }),
+            300
+          );
+        }}
         renderItem={({ item }) => {
           const key = `${selectedBook}:${selectedChapter}:${item.verse}`;
           const isSelected = selectedVerses.has(key);
           const hl = getHighlight(key);
           const annotation = getAnnotation(key);
+          // El versículo que está sonando (#6) se resalta para poder seguir la
+          // lectura con la vista.
+          const isSpeaking = speech.currentId === item.verse;
+          // El versículo al que se acaba de saltar (#7) parpadea unos segundos.
+          const isFlash = flashVerse === item.verse;
           const bg = isSelected
             ? colors.accent + '30'
             : hl
             ? hl.color + 'AA'
+            : isSpeaking || isFlash
+            ? colors.accent + '1A'
             : 'transparent';
           return (
             <TouchableOpacity
@@ -971,7 +1503,12 @@ export default function BibleScreen() {
                 {item.verse}
               </Text>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: fontSize, lineHeight: fontSize * 1.65 }}>
+                <Text style={{
+                  color: hl ? '#1f2937' : readText,
+                  fontSize,
+                  lineHeight: fontSize * 1.65,
+                  fontFamily: readFontFamily,
+                }}>
                   {item.text}
                 </Text>
                 {annotation && (
@@ -993,7 +1530,8 @@ export default function BibleScreen() {
     );
   };
 
-  const renderVerseRow = (item: BibleSearchResult | BibleFavorite) => {
+  // `query` (solo en Buscar): resalta el término encontrado, ignorando tildes.
+  const renderVerseRow = (item: BibleSearchResult | BibleFavorite, query = '') => {
     const key = `${item.book}:${item.chapter}:${item.verse}`;
     const isSelected = selectedVerses.has(key);
     const hl = getHighlight(key);
@@ -1008,7 +1546,34 @@ export default function BibleScreen() {
         <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', marginBottom: 3 }}>
           {item.book} {item.chapter}:{item.verse}
         </Text>
-        <Text style={{ color: colors.textPrimary, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6 }}>{item.text}</Text>
+        <Text style={{ color: colors.textPrimary, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6 }}>
+          {highlightParts(item.text, query).map((part, i) =>
+            part.hit ? (
+              <Text key={i} style={{ backgroundColor: '#FEF08A', color: '#1f2937', fontWeight: '700' }}>
+                {part.text}
+              </Text>
+            ) : (
+              <Text key={i}>{part.text}</Text>
+            )
+          )}
+        </Text>
+        {/* Etiquetas del versículo (viven en el favorito) */}
+        {(item as BibleFavorite).tags?.length ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {(item as BibleFavorite).tags!.map((t) => (
+              <View
+                key={t}
+                style={{
+                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10,
+                  borderWidth: 1, borderColor: colors.accent,
+                }}
+              >
+                <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '600' }}>{t}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         {annotation && (
           <TouchableOpacity
             onPress={() => openAnnotation(item)}
@@ -1024,28 +1589,393 @@ export default function BibleScreen() {
     );
   };
 
+  // Tarjeta "Ir a Juan 3:16" (#7): aparece encima de los resultados en cuanto lo
+  // escrito se reconoce como una referencia.
+  const renderRefCard = () => {
+    if (!refMatch) return null;
+    return (
+      <TouchableOpacity
+        onPress={() => goToReference(refMatch)}
+        activeOpacity={0.85}
+        style={{
+          flexDirection: 'row', alignItems: 'center', gap: 12,
+          margin: 12, padding: 14, borderRadius: 14,
+          backgroundColor: colors.accent + '18',
+          borderWidth: 1, borderColor: colors.accent,
+        }}
+      >
+        <Ionicons name="navigate" size={20} color={colors.accent} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Ir a
+          </Text>
+          <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, marginTop: 2 }}>
+            {formatReference(refMatch)}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+      </TouchableOpacity>
+    );
+  };
+
+  // Cabecera de Buscar: salto a referencia + filtro por testamento + historial.
+  const renderSearchTools = () => {
+    const chip = (active: boolean) => ({
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+      backgroundColor: active ? colors.accent : colors.bgTertiary,
+      borderWidth: 1, borderColor: active ? colors.accent : colors.border,
+    });
+
+    return (
+      <View>
+        {renderRefCard()}
+
+        {/* Filtros (testamento y libro) + cuántos resultados hay de verdad */}
+        {searchResults.length > 0 && (
+          <View style={{ paddingHorizontal: 12, paddingTop: 10, gap: 8 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {([['all', 'Todo'], ['ot', 'A. Testamento'], ['nt', 'N. Testamento']] as const).map(
+                ([id, label]) => (
+                  <TouchableOpacity key={id} onPress={() => changeTestament(id)} style={chip(testament === id)}>
+                    <Text style={{
+                      fontSize: 12, fontWeight: '600',
+                      color: testament === id ? '#fff' : colors.textSecondary,
+                    }}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              )}
+
+              {/* Acotar a un libro concreto */}
+              <TouchableOpacity onPress={() => setBookPickerOpen(true)} style={chip(!!searchBook)}>
+                <Ionicons
+                  name="book-outline"
+                  size={13}
+                  color={searchBook ? '#fff' : colors.textSecondary}
+                />
+                <Text style={{
+                  fontSize: 12, fontWeight: '600', marginLeft: 5,
+                  color: searchBook ? '#fff' : colors.textSecondary,
+                }}>
+                  {searchBook || 'Todos los libros'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+              {searchTotal} {searchTotal === 1 ? 'resultado' : 'resultados'}
+              {searchBook ? ` en ${searchBook}` : ''} · mostrando {searchResults.length}
+            </Text>
+          </View>
+        )}
+
+        {/* Historial: se ofrece cuando aún no se ha escrito nada */}
+        {searchQuery.trim().length < 3 && searchHistory.length > 0 && (
+          <View style={{ paddingHorizontal: 12, paddingTop: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600' }}>
+                Búsquedas recientes
+              </Text>
+              <TouchableOpacity onPress={clearSearchHistory}>
+                <Text style={{ color: colors.danger, fontSize: 12 }}>Borrar</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+              {searchHistory.map((h) => (
+                <TouchableOpacity
+                  key={h}
+                  onPress={() => setSearchQuery(h)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 5,
+                    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+                    backgroundColor: colors.bgTertiary, borderWidth: 1, borderColor: colors.border,
+                  }}
+                >
+                  <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{h}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
+    );
+  };
+
   const renderSearch = () => (
     <FlatList
       data={searchResults}
       keyExtractor={(r) => `${r.book}:${r.chapter}:${r.verse}`}
+      ListHeaderComponent={renderSearchTools}
       ListEmptyComponent={
         loading
           ? <View style={{ padding: 60, alignItems: 'center' }}><ActivityIndicator color={colors.accent} /></View>
+          : refMatch
+          ? null
+          : searchHistory.length > 0 && searchQuery.trim().length < 3
+          ? null
           : <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40, fontSize: 15 }}>
-              {searchQuery.length >= 3 ? 'Sin resultados' : 'Escribe al menos 3 caracteres'}
+              {searchQuery.length >= 3 ? 'Sin resultados' : 'Busca una palabra o escribe una referencia (Juan 3:16)'}
             </Text>
       }
-      renderItem={({ item }) => renderVerseRow(item)}
+      renderItem={({ item }) => renderVerseRow(item, searchQuery)}
+      // Cargar más: pide la siguiente página desde donde nos quedamos.
+      ListFooterComponent={
+        searchResults.length > 0 && searchResults.length < searchTotal ? (
+          <TouchableOpacity
+            onPress={() => doSearch(searchQuery.trim(), testament, searchBook, searchResults.length)}
+            disabled={loading}
+            style={{
+              margin: 16, paddingVertical: 12, borderRadius: 20, alignItems: 'center',
+              borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgSecondary,
+              opacity: loading ? 0.6 : 1,
+            }}
+          >
+            <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 14 }}>
+              {loading
+                ? 'Cargando…'
+                : `Cargar más (${searchTotal - searchResults.length} restantes)`}
+            </Text>
+          </TouchableOpacity>
+        ) : null
+      }
     />
   );
 
+  // Selector de libro del buscador (acotar la búsqueda a un libro concreto).
+  const renderSearchBookPicker = () => (
+    <Modal visible={bookPickerOpen} transparent animationType="fade" onRequestClose={() => setBookPickerOpen(false)}>
+      <Pressable
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }}
+        onPress={() => setBookPickerOpen(false)}
+      >
+        <Pressable
+          onPress={() => {}}
+          style={{ backgroundColor: colors.bgSecondary, borderRadius: 18, maxHeight: '75%', overflow: 'hidden' }}
+        >
+          <Text style={{
+            color: colors.textPrimary, fontSize: 16, fontWeight: '700',
+            padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border,
+          }}>
+            Buscar solo en…
+          </Text>
+          <ScrollView>
+            <TouchableOpacity
+              onPress={() => changeSearchBook('')}
+              style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight }}
+            >
+              <Text style={{ color: !searchBook ? colors.accent : colors.textPrimary, fontWeight: !searchBook ? '700' : '400' }}>
+                Todos los libros
+              </Text>
+            </TouchableOpacity>
+            {sortedBooks.map((b) => (
+              <TouchableOpacity
+                key={b}
+                onPress={() => changeSearchBook(b)}
+                style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight }}
+              >
+                <Text style={{
+                  color: searchBook === b ? colors.accent : colors.textPrimary,
+                  fontWeight: searchBook === b ? '700' : '400',
+                }}>
+                  {b}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+
+  // Vista "Notas y resaltados": lo resaltado y lo anotado, en un solo sitio.
+  // Tocar una fila abre el pasaje; el botón rojo lo quita.
+  const renderNotes = () => {
+    const chip = (active: boolean) => ({
+      flexDirection: 'row' as const, alignItems: 'center' as const, gap: 6,
+      paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+      backgroundColor: active ? colors.accent : colors.bgTertiary,
+      borderWidth: 1, borderColor: active ? colors.accent : colors.border,
+    });
+
+    return (
+      <FlatList
+        data={notesItems as any[]}
+        keyExtractor={(it) => it.id}
+        contentContainerStyle={{ paddingBottom: 24 }}
+        ListHeaderComponent={
+          <View style={{ padding: 12, gap: 12 }}>
+            {/* Resaltados | Notas */}
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([['highlights', `Resaltados (${highlights.length})`], ['notes', `Notas (${annotations.length})`]] as const).map(
+                ([id, label]) => (
+                  <TouchableOpacity
+                    key={id}
+                    onPress={() => setNotesTab(id)}
+                    style={{
+                      flex: 1, paddingVertical: 10, borderRadius: 14, alignItems: 'center',
+                      backgroundColor: notesTab === id ? colors.accent : colors.bgTertiary,
+                      borderWidth: 1, borderColor: notesTab === id ? colors.accent : colors.border,
+                    }}
+                  >
+                    <Text style={{
+                      color: notesTab === id ? '#fff' : colors.textSecondary,
+                      fontWeight: '600', fontSize: 13,
+                    }}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              )}
+            </View>
+
+            {notesTab === 'highlights' ? (
+              /* Filtro por significado del color */
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <TouchableOpacity onPress={() => setColorFilter('')} style={chip(!colorFilter)}>
+                  <Text style={{ color: !colorFilter ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                    Todos
+                  </Text>
+                </TouchableOpacity>
+                {HIGHLIGHT_PALETTE.map((c) => {
+                  const on = colorFilter === c.value;
+                  return (
+                    <TouchableOpacity key={c.value} onPress={() => setColorFilter(c.value)} style={chip(on)}>
+                      <View style={{
+                        width: 12, height: 12, borderRadius: 6, backgroundColor: c.value,
+                        borderWidth: 1, borderColor: colors.border,
+                      }} />
+                      <Text style={{ color: on ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                        {c.meaning}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              /* Buscar dentro de lo que escribí (sin tildes) */
+              <TextInput
+                value={noteQuery}
+                onChangeText={setNoteQuery}
+                placeholder="Buscar en mis notas…"
+                placeholderTextColor={colors.inputPlaceholder}
+                style={{
+                  backgroundColor: colors.inputBg, color: colors.inputText,
+                  borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+                  paddingHorizontal: 12, paddingVertical: 10, fontSize: 15,
+                }}
+              />
+            )}
+          </View>
+        }
+        ListEmptyComponent={
+          <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 30, fontSize: 15, paddingHorizontal: 24 }}>
+            {notesTab === 'highlights'
+              ? colorFilter
+                ? 'No tienes resaltados de ese color.'
+                : 'Todavía no has resaltado ningún versículo.'
+              : noteQuery
+              ? 'Ninguna nota coincide con esa búsqueda.'
+              : 'Todavía no has escrito ninguna nota.'}
+          </Text>
+        }
+        renderItem={({ item }) => {
+          const key = `${item.book}:${item.chapter}:${item.verse}`;
+          const text = verseTexts[key];
+          const note = notesTab === 'notes' ? item.note : getAnnotation(item.id)?.note;
+          const tags = getVerseTags(item.id);
+          const stripe = notesTab === 'highlights' ? item.color : colors.accent;
+
+          return (
+            <TouchableOpacity
+              onPress={() => goToReference({ book: item.book, chapter: item.chapter, verse: item.verse })}
+              style={{
+                marginHorizontal: 12, marginBottom: 10, padding: 12,
+                borderRadius: 12, backgroundColor: colors.bgSecondary,
+                borderLeftWidth: 4, borderLeftColor: stripe,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', flex: 1 }}>
+                  {item.book} {item.chapter}:{item.verse}
+                  {notesTab === 'highlights' && meaningOf(item.color) ? (
+                    <Text style={{ color: colors.textMuted, fontWeight: '400' }}>
+                      {'  '}{meaningOf(item.color)}
+                    </Text>
+                  ) : null}
+                </Text>
+                <TouchableOpacity
+                  onPress={() =>
+                    notesTab === 'highlights' ? removeHighlight(item.id) : deleteAnnotation(item.id)
+                  }
+                  hitSlop={10}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="trash-outline" size={16} color={colors.danger} />
+                </TouchableOpacity>
+              </View>
+
+              {/* El texto del versículo se trae aparte: no se guarda con el
+                  resaltado ni con la nota. */}
+              <Text style={{ color: colors.textPrimary, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6, marginTop: 6 }}>
+                {text ?? '…'}
+              </Text>
+
+              {note ? (
+                <View style={{ marginTop: 8, padding: 8, borderRadius: 8, backgroundColor: colors.bgTertiary }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>📝 {note}</Text>
+                </View>
+              ) : null}
+
+              {tags.length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {tags.map((t) => (
+                    <View key={t} style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1, borderColor: colors.accent }}>
+                      <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '600' }}>{t}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </TouchableOpacity>
+          );
+        }}
+      />
+    );
+  };
+
   const renderFavorites = () => (
     <FlatList
-      data={favorites}
+      data={visibleFavorites}
       keyExtractor={(f) => f.id}
+      // Filtro por etiqueta: solo si hay etiquetas que filtrar.
+      ListHeaderComponent={
+        allTags.length > 0 ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, padding: 12 }}>
+            {['', ...allTags].map((t) => {
+              const on = tagFilter === t;
+              return (
+                <TouchableOpacity
+                  key={t || 'all'}
+                  onPress={() => setTagFilter(t)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                    backgroundColor: on ? colors.accent : colors.bgTertiary,
+                    borderWidth: 1, borderColor: on ? colors.accent : colors.border,
+                  }}
+                >
+                  <Text style={{ color: on ? '#fff' : colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+                    {t || 'Todas'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
         <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 40, fontSize: 15 }}>
-          Sin versículos guardados
+          {tagFilter ? `Ningún favorito con la etiqueta “${tagFilter}”` : 'Sin versículos guardados'}
         </Text>
       }
       renderItem={({ item }) => renderVerseRow(item)}
@@ -1053,221 +1983,12 @@ export default function BibleScreen() {
   );
 
   // ── Planes de lectura (#2) ─────────────────────────────────
-  const renderPlanCard = (plan: any) => {
-    const pct = plan.totalDays ? Math.round((plan.completedCount / plan.totalDays) * 100) : 0;
-    return (
-      <View key={plan.planKey} style={{
-        margin: 16, marginBottom: 0, borderRadius: 16, padding: 16,
-        backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
-      }}>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16 }}>{plan.title}</Text>
-            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
-              Día {plan.currentDay} de {plan.totalDays} · {plan.completedCount} leídos
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => reminderMenu(plan)} style={{ padding: 4 }}>
-            <Ionicons name={plan.reminderEnabled ? 'notifications' : 'notifications-off-outline'} size={20} color={plan.reminderEnabled ? colors.accent : colors.textMuted} />
-          </TouchableOpacity>
-        </View>
 
-        {/* Barra de progreso */}
-        <View style={{ height: 6, backgroundColor: colors.bgTertiary, borderRadius: 3, overflow: 'hidden', marginTop: 12 }}>
-          <View style={{ height: '100%', width: `${pct}%`, backgroundColor: colors.accent, borderRadius: 3 }} />
-        </View>
 
-        {plan.isFinished ? (
-          <View style={{ marginTop: 12 }}>
-            <Text style={{ color: '#22c55e', fontWeight: '600', marginBottom: 10 }}>¡Plan completado! 🎉</Text>
-            <TouchableOpacity
-              onPress={() => restartPlan(plan)}
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 20, backgroundColor: colors.accent }}
-            >
-              <Ionicons name="refresh" size={16} color="#fff" />
-              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Volver a empezar</Text>
-            </TouchableOpacity>
-          </View>
-        ) : plan.today ? (
-          <View style={{ marginTop: 12, backgroundColor: colors.bgTertiary, borderRadius: 12, padding: 12 }}>
-            <Text style={{ color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              Hoy · Día {plan.today.day}
-            </Text>
-            <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15, marginTop: 3 }}>{plan.today.label}</Text>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-              <TouchableOpacity
-                onPress={() => { const r = plan.today.references?.[0]; if (r) openPlanPassage(r.book, r.startChapter); }}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.accent }}
-              >
-                <Ionicons name="play" size={14} color="#fff" />
-                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Leer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => togglePlanDay(plan)}
-                disabled={planBusy === plan.planKey}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1, borderColor: plan.isTodayDone ? '#22c55e' : colors.border, backgroundColor: plan.isTodayDone ? '#22c55e22' : 'transparent' }}
-              >
-                <Ionicons name="checkmark" size={14} color={plan.isTodayDone ? '#22c55e' : colors.textSecondary} />
-                <Text style={{ color: plan.isTodayDone ? '#22c55e' : colors.textSecondary, fontWeight: '600', fontSize: 13 }}>
-                  {plan.isTodayDone ? 'Leído' : 'Marcar leído'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : null}
-
-        <View style={{ flexDirection: 'row', gap: 20, marginTop: 12 }}>
-          <TouchableOpacity onPress={() => restartPlan(plan)}>
-            <Text style={{ color: colors.accent, fontSize: 12 }}>Volver a empezar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => abandonPlan(plan.planKey)}>
-            <Text style={{ color: colors.danger, fontSize: 12 }}>Abandonar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  const renderCatalogCard = (plan: any) => (
-    <View key={plan.key} style={{
-      margin: 16, marginBottom: 0, borderRadius: 16, padding: 16,
-      backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border,
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-    }}>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15 }}>{plan.title}</Text>
-        <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{plan.description}</Text>
-        <Text style={{ color: colors.accent, fontSize: 11, marginTop: 4 }}>{plan.totalDays} días · {plan.category}</Text>
-      </View>
-      <TouchableOpacity
-        onPress={() => startPlan(plan.key)}
-        disabled={planBusy === plan.key}
-        style={{ paddingHorizontal: 16, paddingVertical: 9, borderRadius: 20, backgroundColor: colors.accent }}
-      >
-        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 }}>Empezar</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderPlans = () => {
-    if (plansLoading) {
-      return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator size="large" color={colors.accent} /></View>;
-    }
-    const subscribedKeys = new Set(myPlans.map((p) => p.planKey));
-    const available = planCatalog.filter((p) => !subscribedKeys.has(p.key));
-    return (
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-        {myPlans.length > 0 && (
-          <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 16 }}>
-            Mis planes
-          </Text>
-        )}
-        {myPlans.map(renderPlanCard)}
-
-        {/* Crear mi plan (#D) */}
-        <TouchableOpacity
-          onPress={() => setCreatePlanOpen(true)}
-          style={{
-            marginHorizontal: 16, marginTop: 16, borderRadius: 16, padding: 14,
-            borderWidth: 1, borderColor: colors.accent, borderStyle: 'dashed',
-            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-          }}
-        >
-          <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
-          <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 14 }}>Crear mi plan</Text>
-        </TouchableOpacity>
-
-        {available.length > 0 && (
-          <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, paddingHorizontal: 16, paddingTop: 24 }}>
-            {myPlans.length > 0 ? 'Otros planes' : 'Empieza un plan de lectura'}
-          </Text>
-        )}
-        {available.map(renderCatalogCard)}
-      </ScrollView>
-    );
-  };
 
   // ── Modal: crear mi plan (#D) ───────────────────────────────
   const canonicalForPicker = getCanonicalOrder(selectedVersion);
 
-  const renderCreatePlanModal = () => (
-    <Modal visible={createPlanOpen} transparent animationType="slide" onRequestClose={() => setCreatePlanOpen(false)}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
-        <Pressable style={{ flex: 1 }} onPress={() => setCreatePlanOpen(false)} />
-        <View style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: insets.bottom + 16, paddingHorizontal: 20 }}>
-          <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 16 }} />
-          <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 14 }}>Crear mi plan</Text>
-
-          <TextInput
-            value={cTitle}
-            onChangeText={setCTitle}
-            placeholder="Nombre del plan"
-            placeholderTextColor={colors.inputPlaceholder}
-            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.inputText, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, marginBottom: 12 }}
-          />
-
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Desde</Text>
-              <TouchableOpacity onPress={() => setBookPickerFor('start')} style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 11 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: 14 }} numberOfLines={1}>{canonicalForPicker[cStart] ?? '—'}</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Hasta</Text>
-              <TouchableOpacity onPress={() => setBookPickerFor('end')} style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 11 }}>
-                <Text style={{ color: colors.textPrimary, fontSize: 14 }} numberOfLines={1}>{canonicalForPicker[cEnd] ?? '—'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 4 }}>Días</Text>
-          <TextInput
-            value={cDays}
-            onChangeText={setCDays}
-            keyboardType="number-pad"
-            placeholder="30"
-            placeholderTextColor={colors.inputPlaceholder}
-            style={{ backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.inputText, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, marginBottom: 16 }}
-          />
-
-          <TouchableOpacity
-            onPress={submitCustomPlan}
-            disabled={creatingPlan}
-            style={{ paddingVertical: 14, borderRadius: 14, backgroundColor: colors.accent, alignItems: 'center', marginBottom: 8, opacity: creatingPlan ? 0.6 : 1 }}
-          >
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Crear plan</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setCreatePlanOpen(false)} style={{ paddingVertical: 12, alignItems: 'center' }}>
-            <Text style={{ color: colors.textSecondary, fontWeight: '600', fontSize: 15 }}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-
-      {/* Selector de libro */}
-      <Modal visible={bookPickerFor !== null} transparent animationType="fade" onRequestClose={() => setBookPickerFor(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 }} onPress={() => setBookPickerFor(null)}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, maxHeight: '70%', overflow: 'hidden' }}>
-            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15, padding: 16 }}>
-              {bookPickerFor === 'start' ? 'Libro inicial' : 'Libro final'}
-            </Text>
-            <FlatList
-              data={canonicalForPicker}
-              keyExtractor={(_, i) => String(i)}
-              renderItem={({ item, index }) => (
-                <TouchableOpacity
-                  onPress={() => { if (bookPickerFor === 'start') setCStart(index); else setCEnd(index); setBookPickerFor(null); }}
-                  style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.borderLight }}
-                >
-                  <Text style={{ color: colors.textPrimary, fontSize: 15 }}>{item}</Text>
-                </TouchableOpacity>
-              )}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </Modal>
-  );
 
   const renderContent = () => {
     switch (view) {
@@ -1276,7 +1997,25 @@ export default function BibleScreen() {
       case 'reading': return renderReading();
       case 'search': return renderSearch();
       case 'favorites': return renderFavorites();
-      case 'plans': return renderPlans();
+      case 'notes': return renderNotes();
+      case 'plans':
+        return (
+          <ReadingPlansView
+            loading={plansLoading}
+            myPlans={myPlans}
+            catalog={planCatalog}
+            busyKey={planBusy}
+            colors={colors}
+            bottomInset={insets.bottom}
+            onOpenPassage={openPlanPassage}
+            onToggleDay={togglePlanDay}
+            onReminder={reminderMenu}
+            onRestart={restartPlan}
+            onAbandon={abandonPlan}
+            onStart={startPlan}
+            onCreate={() => setCreatePlanOpen(true)}
+          />
+        );
     }
   };
 
@@ -1361,22 +2100,36 @@ export default function BibleScreen() {
                 </Text>
               )}
 
-              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 20, marginBottom: 24 }}>
-                {HIGHLIGHT_COLORS.map((color) => {
-                  const isActive = currentHl?.color === color;
+              {/* Cada color tiene un significado (Promesa, Mandato…): la leyenda
+                  va aquí, que es donde se elige el color. */}
+              <View style={{
+                flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
+                gap: 10, marginBottom: 24, paddingHorizontal: 12,
+              }}>
+                {HIGHLIGHT_PALETTE.map((c) => {
+                  const isActive = currentHl?.color === c.value;
                   return (
                     <TouchableOpacity
-                      key={color}
-                      onPress={() => applyHighlight(color)}
+                      key={c.value}
+                      onPress={() => applyHighlight(c.value)}
                       style={{
-                        width: 48, height: 48, borderRadius: 24,
-                        backgroundColor: color,
-                        borderWidth: isActive ? 3 : 2,
-                        borderColor: isActive ? colors.textPrimary : colors.border,
-                        alignItems: 'center', justifyContent: 'center',
+                        flexDirection: 'row', alignItems: 'center', gap: 8,
+                        paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14,
+                        borderWidth: isActive ? 2 : 1,
+                        borderColor: isActive ? colors.accent : colors.border,
+                        backgroundColor: colors.bgTertiary,
+                        minWidth: 130,
                       }}
                     >
-                      {isActive && <Ionicons name="checkmark" size={22} color={colors.textPrimary} />}
+                      <View style={{
+                        width: 20, height: 20, borderRadius: 10,
+                        backgroundColor: c.value,
+                        borderWidth: 1, borderColor: colors.border,
+                      }} />
+                      <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '600', flex: 1 }}>
+                        {c.meaning}
+                      </Text>
+                      {isActive && <Ionicons name="checkmark" size={16} color={colors.accent} />}
                     </TouchableOpacity>
                   );
                 })}
@@ -1516,199 +2269,74 @@ export default function BibleScreen() {
 
   // ─── Dots menu ────────────────────────────────────────────
 
-  const renderDotsMenu = () => (
-    <Modal visible={dotsMenuOpen} transparent animationType="slide" onRequestClose={() => setDotsMenuOpen(false)}>
-      <Pressable
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
-        onPress={() => setDotsMenuOpen(false)}
-      >
-        <Pressable onPress={() => {}}>
-          <View style={{
-            backgroundColor: colors.bgSecondary,
-            borderTopLeftRadius: 22, borderTopRightRadius: 22,
-            paddingBottom: insets.bottom + 16,
-          }}>
-            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 16 }} />
 
-            {/* Font size */}
-            <View style={{ paddingHorizontal: 20, marginBottom: 8 }}>
-              <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 14 }}>
-                Tamaño de letra
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <TouchableOpacity
-                  onPress={() => setFontSize(fontSize - 1)}
-                  disabled={fontSize <= MIN_FONT}
-                  style={{
-                    flex: 1, paddingVertical: 14, borderRadius: 14,
-                    backgroundColor: colors.bgTertiary, alignItems: 'center',
-                    borderWidth: 1, borderColor: colors.border,
-                    opacity: fontSize <= MIN_FONT ? 0.35 : 1,
-                  }}
-                >
-                  <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700' }}>Aa−</Text>
-                </TouchableOpacity>
+  // ─── Compare picker modal (#5) ────────────────────────────
+  // Elige la segunda versión de la vista paralela (o la desactiva).
 
-                <View style={{ width: 52, alignItems: 'center' }}>
-                  <Text style={{ color: colors.textPrimary, fontSize: 22, fontWeight: '700' }}>{fontSize}</Text>
-                  <Text style={{ color: colors.textMuted, fontSize: 11 }}>pt</Text>
-                </View>
-
-                <TouchableOpacity
-                  onPress={() => setFontSize(fontSize + 1)}
-                  disabled={fontSize >= MAX_FONT}
-                  style={{
-                    flex: 1, paddingVertical: 14, borderRadius: 14,
-                    backgroundColor: colors.bgTertiary, alignItems: 'center',
-                    borderWidth: 1, borderColor: colors.border,
-                    opacity: fontSize >= MAX_FONT ? 0.35 : 1,
-                  }}
-                >
-                  <Text style={{ color: colors.textPrimary, fontSize: 19, fontWeight: '700' }}>Aa+</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Size track */}
-              <View style={{ height: 3, backgroundColor: colors.bgTertiary, borderRadius: 2, marginTop: 16, overflow: 'hidden' }}>
-                <View style={{
-                  height: '100%',
-                  width: `${((fontSize - MIN_FONT) / (MAX_FONT - MIN_FONT)) * 100}%`,
-                  backgroundColor: colors.accent, borderRadius: 2,
-                }} />
-              </View>
-            </View>
-
-            <View style={{ height: 1, backgroundColor: colors.borderLight, marginHorizontal: 20, marginVertical: 12 }} />
-
-            {/* Favorites */}
-            <TouchableOpacity
-              onPress={() => { setDotsMenuOpen(false); openFavorites(); }}
-              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 14 }}
-            >
-              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#FBBF2422', alignItems: 'center', justifyContent: 'center' }}>
-                <FontAwesome5 name="star" size={18} color="#FBBF24" />
-              </View>
-              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Mis favoritos</Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-            </TouchableOpacity>
-
-            {/* Reading plans */}
-            <TouchableOpacity
-              onPress={() => { setDotsMenuOpen(false); openPlans(); }}
-              style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, gap: 14 }}
-            >
-              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="calendar" size={20} color={colors.accent} />
-              </View>
-              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Planes de lectura</Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setDotsMenuOpen(false)}
-              style={{ marginHorizontal: 20, marginTop: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
-            >
-              <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
 
   // ─── Version picker modal ─────────────────────────────────
 
-  const renderVersionPicker = () => (
-    <Modal
-      visible={versionPickerOpen}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setVersionPickerOpen(false)}
-    >
-      <Pressable
-        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
-        onPress={() => setVersionPickerOpen(false)}
-      >
-        <Pressable onPress={() => {}}>
-          <View style={{
-            backgroundColor: colors.bgSecondary,
-            borderTopLeftRadius: 22, borderTopRightRadius: 22,
-            paddingBottom: insets.bottom + 16,
-          }}>
-            {/* Handle */}
-            <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 4 }} />
 
-            <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, textAlign: 'center', marginVertical: 12 }}>
-              Versión de la Biblia
+  // ─── Barra de reproducción (#6) ────────────────────────────
+  // Solo mientras suena. Pausar en Android es parar y retomar desde el versículo
+  // actual (expo-speech no tiene pause real ahí), que a efectos del usuario es
+  // lo mismo. La velocidad se aplica al versículo siguiente.
+  const renderSpeechBar = () => {
+    if (view !== 'reading' || !speech.available || !speech.speaking) return null;
+    const RATES = [0.75, 1, 1.25, 1.5];
+
+    return (
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        paddingHorizontal: 16, paddingVertical: 10,
+        backgroundColor: colors.bgSecondary,
+        borderTopWidth: 1, borderTopColor: colors.border,
+      }}>
+        <TouchableOpacity
+          onPress={() => (speech.paused ? speech.resume() : speech.pause())}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20,
+            backgroundColor: colors.accent,
+          }}
+        >
+          <Ionicons name={speech.paused ? 'play' : 'pause'} size={16} color="#fff" />
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+            {speech.paused ? 'Continuar' : 'Pausar'}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={speech.stop} style={{ paddingHorizontal: 8, paddingVertical: 9 }}>
+          <Text style={{ color: '#EF4444', fontWeight: '600', fontSize: 13 }}>Detener</Text>
+        </TouchableOpacity>
+
+        <View style={{ flex: 1 }}>
+          {speech.currentId && (
+            <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+              Versículo {speech.currentId}
             </Text>
+          )}
+        </View>
 
-            {(availableVersions.length > 0
-              ? availableVersions
-              : Object.entries(VERSION_META).map(([id, m]) => ({ id, name: m.name, short: m.short, lang: m.lang as 'es' | 'en' }))
-            ).map((v) => {
-              const isActive = v.id === selectedVersion;
-              const isDownloaded = downloadedVersions.has(v.id);
-              const isDownloading = downloadingVersion === v.id;
-              const langEmoji = v.lang === 'en' ? '🇬🇧' : '🇪🇸';
-
-              return (
-                <TouchableOpacity
-                  key={v.id}
-                  onPress={() => handleSelectVersion(v.id)}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center',
-                    paddingHorizontal: 20, paddingVertical: 14,
-                    borderBottomWidth: 1, borderBottomColor: colors.borderLight,
-                    backgroundColor: isActive ? colors.accent + '15' : 'transparent',
-                  }}
-                >
-                  <Text style={{ fontSize: 22, marginRight: 12 }}>{langEmoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: isActive ? '700' : '500' }}>
-                      {v.name}
-                    </Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>{v.short}</Text>
-                  </View>
-
-                  {/* Status badge / download button */}
-                  {isDownloaded ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#22c55e22' }}>
-                      <Ionicons name="checkmark-circle" size={14} color="#22c55e" />
-                      <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '600' }}>Descargada</Text>
-                    </View>
-                  ) : isDownloading ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Text style={{ color: colors.accent, fontSize: 12 }}>{Math.round(downloadProgress * 100)}%</Text>
-                      <TouchableOpacity onPress={handleCancelDownload}>
-                        <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      onPress={(e) => { e.stopPropagation(); handleDownload(v.id); }}
-                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.bgTertiary, borderWidth: 1, borderColor: colors.border }}
-                    >
-                      <Ionicons name="download-outline" size={14} color={colors.accent} />
-                      <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>Descargar</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {isActive && <Ionicons name="checkmark" size={18} color={colors.accent} style={{ marginLeft: 8 }} />}
-                </TouchableOpacity>
-              );
-            })}
-
-            <TouchableOpacity
-              onPress={() => setVersionPickerOpen(false)}
-              style={{ marginHorizontal: 20, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
-            >
-              <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
+        {/* Velocidad: se cicla entre los 4 valores para no meter otro modal. */}
+        <TouchableOpacity
+          onPress={() => {
+            const next = RATES[(RATES.indexOf(speech.rate) + 1) % RATES.length];
+            speech.changeRate(next);
+          }}
+          style={{
+            paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16,
+            backgroundColor: colors.bgTertiary,
+            borderWidth: 1, borderColor: colors.border,
+          }}
+        >
+          <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>
+            {String(speech.rate).replace('.', ',')}×
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   // ─── Layout ────────────────────────────────────────────────
 
@@ -1717,18 +2345,98 @@ export default function BibleScreen() {
       {renderHeader()}
       <View style={{ flex: 1 }}>{renderContent()}</View>
       {renderBookOrderBar()}
+      {renderSpeechBar()}
       {renderChapterNav()}
       {renderActionBar()}
       {renderHighlightPicker()}
       {renderAnnotationModal()}
-      {renderDotsMenu()}
-      {renderVersionPicker()}
-      {renderCreatePlanModal()}
+      <ReadingSettingsMenu
+        visible={dotsMenuOpen}
+        fontSize={fontSize}
+        readingTheme={readingTheme}
+        readingFont={readingFont}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onClose={() => setDotsMenuOpen(false)}
+        onFontSize={setFontSize}
+        onReadingTheme={changeReadingTheme}
+        onReadingFont={changeReadingFont}
+        onOpenFavorites={openFavorites}
+        onOpenNotes={openNotes}
+        onOpenPlans={openPlans}
+      />
+
+      <VersionPickerModal
+        visible={versionPickerOpen}
+        versions={availableVersions}
+        selectedVersion={selectedVersion}
+        downloadedVersions={downloadedVersions}
+        downloadingVersion={downloadingVersion}
+        downloadProgress={downloadProgress}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onClose={() => setVersionPickerOpen(false)}
+        onSelect={handleSelectVersion}
+        onDownload={handleDownload}
+        onCancelDownload={handleCancelDownload}
+      />
+
+      <ComparePickerModal
+        visible={comparePickerOpen}
+        versions={availableVersions}
+        selectedVersion={selectedVersion}
+        compareVersion={compareVersion}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onClose={() => setComparePickerOpen(false)}
+        onSelect={(v) => { setCompareVersion(v); setComparePickerOpen(false); }}
+      />
+
+      <CreatePlanModal
+        visible={createPlanOpen}
+        books={getCanonicalOrder(selectedVersion)}
+        saving={creatingPlan}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onClose={() => setCreatePlanOpen(false)}
+        onCreate={submitCustomPlan}
+      />
       {imageVerse && (
         <VerseImageSheet
           verse={imageVerse}
           versionLabel={VERSION_META[selectedVersion]?.short ?? selectedVersion}
           onClose={() => setImageVerse(null)}
+        />
+      )}
+      {renderSearchBookPicker()}
+
+      {/* Etiquetas del versículo. El borrador vive DENTRO del modal, así que se
+          monta solo cuando hay versículo: si estuviera siempre montado, al abrir
+          otro versículo arrastraría las etiquetas del anterior. */}
+      {tagsVerse && (
+        <VerseTagsModal
+          verse={tagsVerse}
+          initialTags={getVerseTags(
+            `${tagsVerse.book}:${tagsVerse.chapter}:${tagsVerse.verse}`
+          )}
+          usedTags={allTags}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setTagsVerse(null)}
+          onSave={saveTags}
+        />
+      )}
+
+      {/* Pedir oración por el versículo (se publica en un grupo). Igual: se monta
+          al abrirlo para que el formulario empiece en blanco. */}
+      {prayerVerse && (
+        <PrayerRequestModal
+          verse={prayerVerse}
+          groups={myGroups}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setPrayerVerse(null)}
+          onSubmit={submitPrayer}
         />
       )}
     </View>
