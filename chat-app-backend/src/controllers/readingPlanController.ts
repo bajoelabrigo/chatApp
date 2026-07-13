@@ -3,8 +3,9 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { ReadingPlanSubscription } from '../models/ReadingPlanSubscription';
 import { listPlans, getPlan, computeCurrentDay, generateCustomPlan, BOOK_COUNT } from '../lib/readingPlans';
 import { User } from '../models/User';
-import { sendPushNotification } from '../services/pushService';
-import { sendWebPushToUser } from '../services/webPushService';
+import { Conversation } from '../models/Conversation';
+import { sendPushNotification, sendPushNotifications } from '../services/pushService';
+import { sendWebPushToUser, sendWebPushToUsers } from '../services/webPushService';
 
 // Aviso al EMPEZAR un plan: confirma que quedó activo y a qué hora llegará el
 // recordatorio diario (si no, no hay forma de saber que se guardó bien hasta el
@@ -39,9 +40,76 @@ async function notifyPlanStarted(userId: string, sub: any, title: string) {
 }
 
 // Plan efectivo de una suscripción: generado si es personalizado, del catálogo si no.
-function getPlanForSub(sub: any) {
+// Exportado porque la franja del chat (activityController) también lo necesita:
+// duplicarlo allí sería tener dos formas de resolver "qué plan es este".
+export function getPlanForSub(sub: any) {
   if (sub?.custom) return generateCustomPlan(sub.custom);
   return getPlan(sub.planKey);
+}
+
+// ── Planes de grupo ────────────────────────────────────────
+//
+// Un plan de grupo NO es un documento aparte: son las suscripciones de los
+// miembros con el mismo `planKey` y el mismo `group`. Cada uno conserva su
+// progreso y su recordatorio; lo que comparten es el plan y la fecha de inicio,
+// que es lo que hace que "el día 12" signifique lo mismo para todos.
+
+/** El grupo si el usuario es miembro; null si no existe o no pertenece. */
+function assertGroupMember(groupId: string, userId: string) {
+  return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId }).lean();
+}
+
+/**
+ * Avisa a los DEMÁS miembros de que alguien empezó un plan con el grupo, para
+ * que puedan unirse. Best-effort: nunca bloquea ni rompe la respuesta.
+ */
+async function notifyGroupPlanStarted(
+  conv: any,
+  starterId: string,
+  planTitle: string,
+  isNew: boolean
+) {
+  try {
+    const memberIds = (conv.participants || [])
+      .map((p: any) => p.toString())
+      .filter((id: string) => id !== starterId);
+    if (!memberIds.length) return;
+
+    const starter = await User.findById(starterId).select('name').lean();
+    const name = starter?.name ?? 'Alguien';
+    const groupName = conv.groupName ?? 'el grupo';
+
+    const title = isNew ? '📖 Nuevo plan de lectura en el grupo' : '📖 Alguien más se unió al plan';
+    const body = isNew
+      ? `${name} empezó "${planTitle}" en ${groupName}. ¡Únete!`
+      : `${name} se unió a "${planTitle}" en ${groupName}.`;
+
+    // Los tokens salen de User (no de ActivityCommitment): así llega a TODOS los
+    // miembros, no solo a los que tengan compromisos en el grupo.
+    const tokens = await User.find({
+      _id: { $in: memberIds },
+      expoPushToken: { $exists: true, $ne: null },
+    }).distinct('expoPushToken');
+
+    sendPushNotifications(tokens, title, body, {
+      groupId: conv._id.toString(),
+      screen: 'bible',
+    });
+
+    sendWebPushToUsers(
+      memberIds,
+      {
+        title,
+        body,
+        url: '/bible',
+        tag: `group-plan-${conv._id}`,
+        badge: 'activity',
+      },
+      'activityReminders'
+    );
+  } catch (err) {
+    console.error('notifyGroupPlanStarted:', err);
+  }
 }
 
 // ── Catálogo (público, no requiere sesión) ─────────────────
@@ -75,6 +143,8 @@ function shapeSubscription(sub: any) {
     planKey: sub.planKey,
     isCustom: !!sub.custom,
     custom: sub.custom ?? null,
+    // Grupo con el que se lee este plan (null = plan personal).
+    groupId: sub.group ? sub.group.toString() : null,
     title: plan?.title ?? sub.planKey,
     description: plan?.description ?? '',
     category: plan?.category ?? '',
@@ -154,10 +224,45 @@ export async function subscribePlan(req: AuthRequest, res: Response): Promise<vo
       res.status(400).json({ error: 'Plan no válido' });
       return;
     }
+
+    // ── ¿Es un plan de GRUPO? ───────────────────────────────
+    // Con `groupId` la suscripción queda ligada al grupo. Dos reglas:
+    //  1. Hay que ser miembro (si no, cualquiera se colaría en el progreso ajeno).
+    //  2. La fecha de inicio la manda el GRUPO, no el cliente: quien se une el
+    //     día 12 se alinea con los demás en vez de empezar por el día 1. Sin
+    //     esto, "hoy toca Juan 5" significaría algo distinto para cada miembro y
+    //     la función entera pierde el sentido.
+    const groupId = typeof req.body?.groupId === 'string' ? req.body.groupId : null;
+    let conv: any = null;
+    let groupStartDate: Date | null = null;
+    let isNewGroupPlan = true;
+
+    if (groupId) {
+      conv = await assertGroupMember(groupId, req.userId!);
+      if (!conv) {
+        res.status(403).json({ error: 'No eres miembro de ese grupo' });
+        return;
+      }
+      // ¿Ya hay alguien del grupo leyendo este plan? Entonces heredo su fecha.
+      const existing = await ReadingPlanSubscription.findOne({ group: groupId, planKey })
+        .sort({ startDate: 1 })
+        .select('startDate')
+        .lean();
+      if (existing) {
+        groupStartDate = existing.startDate;
+        isNewGroupPlan = false;
+      }
+    }
+
     const update: any = {
       timezone: typeof timezone === 'string' && timezone ? timezone : 'UTC',
-      startDate: startDate ? new Date(startDate) : new Date(),
+      startDate: groupStartDate ?? (startDate ? new Date(startDate) : new Date()),
     };
+    // `group` solo se toca cuando viene groupId: así, reajustar el recordatorio de
+    // un plan personal no lo desliga de nada, y volver a suscribirse a un plan
+    // que ya seguías por tu cuenta lo LIGA al grupo (el índice único
+    // {user, planKey} garantiza que no se duplique).
+    if (groupId) update.group = groupId;
     if (typeof reminderEnabled === 'boolean') update.reminderEnabled = reminderEnabled;
     if (Number.isInteger(reminderHour)) update.reminderHour = Math.min(23, Math.max(0, reminderHour));
     if (Number.isInteger(reminderMinute)) update.reminderMinute = Math.min(59, Math.max(0, reminderMinute));
@@ -170,10 +275,88 @@ export async function subscribePlan(req: AuthRequest, res: Response): Promise<vo
 
     const shaped = shapeSubscription(sub);
     res.status(201).json(shaped);
-    notifyPlanStarted(req.userId!, sub, shaped.title);
+
+    if (conv) notifyGroupPlanStarted(conv, req.userId!, shaped.title, isNewGroupPlan);
+    else notifyPlanStarted(req.userId!, sub, shaped.title);
   } catch (err) {
     console.error('subscribePlan:', err);
     res.status(500).json({ error: 'Error al empezar el plan' });
+  }
+}
+
+// GET /bible/groups/:groupId/plans — los planes que lee el grupo, con el progreso
+// de cada miembro. Es LA vista de la función: ver quién va por dónde es lo que
+// hace que nadie abandone en silencio.
+export async function getGroupPlans(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { groupId } = req.params;
+    const conv = await assertGroupMember(groupId, req.userId!);
+    if (!conv) {
+      res.status(403).json({ error: 'No eres miembro de ese grupo' });
+      return;
+    }
+
+    const subs = await ReadingPlanSubscription.find({ group: groupId })
+      .populate('user', 'name avatar')
+      .lean();
+
+    // Las suscripciones se agrupan por plan: cada plan del grupo con sus lectores.
+    const byPlan = new Map<string, any[]>();
+    for (const sub of subs) {
+      if (!byPlan.has(sub.planKey)) byPlan.set(sub.planKey, []);
+      byPlan.get(sub.planKey)!.push(sub);
+    }
+
+    const plans = [];
+    for (const [planKey, list] of byPlan) {
+      const plan = getPlanForSub(list[0]);
+      if (!plan) continue; // plan retirado del catálogo: no lo mostramos
+
+      const totalDays = plan.totalDays;
+      const startDate = list[0].startDate;
+
+      // El día en curso se calcula con la zona horaria de CADA miembro (en Madrid
+      // y en Lima el día no cambia a la vez), pero la fecha de inicio es la misma.
+      const members = list
+        .map((sub: any) => {
+          const currentDay = computeCurrentDay(sub.startDate, sub.timezone, totalDays);
+          const completed = sub.completedDays || [];
+          return {
+            userId: (sub.user?._id ?? sub.user)?.toString(),
+            name: sub.user?.name ?? 'Usuario',
+            avatar: sub.user?.avatar ?? null,
+            currentDay,
+            completedCount: completed.length,
+            isTodayDone: completed.includes(currentDay),
+            isFinished: completed.length >= totalDays,
+          };
+        })
+        .sort((a, b) => b.completedCount - a.completedCount);
+
+      const mySub = list.find(
+        (s: any) => (s.user?._id ?? s.user)?.toString() === req.userId
+      );
+      const me = members.find((m) => m.userId === req.userId);
+
+      plans.push({
+        planKey,
+        title: plan.title,
+        description: plan.description ?? '',
+        category: plan.category ?? '',
+        totalDays,
+        startDate,
+        // "Hoy toca el día N" según MI zona horaria (o UTC si aún no me he unido).
+        currentDay: computeCurrentDay(startDate, mySub?.timezone ?? 'UTC', totalDays),
+        memberCount: members.length,
+        isJoined: !!me,
+        members,
+      });
+    }
+
+    res.json(plans);
+  } catch (err) {
+    console.error('getGroupPlans:', err);
+    res.status(500).json({ error: 'Error al cargar los planes del grupo' });
   }
 }
 

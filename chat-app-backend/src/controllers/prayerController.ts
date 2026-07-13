@@ -6,12 +6,32 @@ import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendPushNotifications } from '../services/pushService';
 import { sendWebPushToUsers } from '../services/webPushService';
-import { ActivityCommitment } from '../models/ActivityCommitment';
 import { isGlobalAdmin } from '../services/adminService';
 import { deleteCloudinaryAssets } from '../services/cloudinaryService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
+}
+
+/**
+ * Tokens de push de los miembros de un grupo.
+ *
+ * OJO: esto salía de `ActivityCommitment` (los compromisos con actividades del
+ * grupo), no de `User`. O sea que una petición de oración nueva solo llegaba a
+ * quien YA se había comprometido con alguna actividad de ese grupo — justo los
+ * que menos falta hacía avisar. El resto no se enteraba de nada y solo veía la
+ * petición si abría el grupo y entraba a la sección de oración por su cuenta.
+ * Ese era el motivo real de que "nadie participa", y no la falta de interés.
+ *
+ * Las actividades (`activityController`) siempre lo hicieron bien, desde `User`:
+ * de ahí que la asimetría pasara desapercibida.
+ */
+async function groupPushTokens(memberIds: string[]): Promise<string[]> {
+  if (!memberIds.length) return [];
+  return User.find({
+    _id: { $in: memberIds },
+    expoPushToken: { $exists: true, $ne: null },
+  }).distinct('expoPushToken');
 }
 
 // Resuelve la conversación de grupo permitiendo al admin general (web role:'admin')
@@ -82,18 +102,15 @@ export async function createPrayerRequest(req: Request, res: Response) {
     const io = getIO();
     if (io) io.to(groupId).emit('prayer:new', { request: populated });
 
-    // Push to all group members with push tokens
+    // Push a TODOS los miembros del grupo (antes solo a los que ya tenían
+    // compromisos: ver `groupPushTokens`).
     const memberIds = conv.participants.map((p: any) => p.toString()).filter((id: string) => id !== userId);
-    const commitments = await ActivityCommitment.find({
-      groupId,
-      userId: { $in: memberIds },
-      expoPushToken: { $exists: true, $ne: null },
-    }).distinct('expoPushToken');
+    const tokens = await groupPushTokens(memberIds);
 
     const user = await User.findById(userId).select('name').lean();
     const author = isAnonymous ? 'Alguien en el grupo' : (user?.name ?? 'Alguien');
     sendPushNotifications(
-      commitments,
+      tokens,
       '📿 Nueva petición de oración',
       `${author}: ${content.trim().slice(0, 80)}`,
       { groupId, screen: 'prayer' }
@@ -378,16 +395,14 @@ export async function markAnswered(req: Request, res: Response) {
     const io = getIO();
     if (io) io.to(groupId).emit('prayer:answered', { requestId, answeredNote });
 
-    // Push notification to all group members with tokens
+    // Push a TODOS los miembros del grupo (antes solo a los que ya tenían
+    // compromisos: ver `groupPushTokens`). Una oración respondida es lo que más
+    // anima a los demás a orar: era justo lo que no se estaba contando.
     const memberIds = conv.participants.map((p: any) => p.toString());
-    const commitments = await ActivityCommitment.find({
-      groupId,
-      userId: { $in: memberIds },
-      expoPushToken: { $exists: true, $ne: null },
-    }).distinct('expoPushToken');
+    const tokens = await groupPushTokens(memberIds);
 
     sendPushNotifications(
-      commitments,
+      tokens,
       '✅ ¡Oración respondida!',
       answeredNote?.trim() ? answeredNote.trim().slice(0, 80) : 'Una petición de oración fue respondida en tu grupo.',
       { groupId, screen: 'prayer' }

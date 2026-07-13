@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Conversation } from '../models/Conversation';
 import { User } from '../models/User';
 import { Message } from '../models/Message';
+import { escapeRegex } from '../lib/regex';
 import { sendGroupJoinApproved } from '../services/emailService';
 import { Report } from '../models/Report';
 import { GroupActivity } from '../models/GroupActivity';
@@ -87,7 +88,7 @@ export async function updateGroup(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { id } = req.params;
-    const { name, permissions, tempMessageDuration, groupAvatar } = req.body;
+    const { name, permissions, tempMessageDuration, groupAvatar, isDiscoverable, groupDescription } = req.body;
 
     const { conv, globalAdmin } = await resolveGroup(id, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -97,6 +98,10 @@ export async function updateGroup(req: Request, res: Response) {
 
     const update: Record<string, any> = {};
     if (name?.trim()) update.groupName = name.trim();
+    // Exponer el grupo en "Descubrir grupos" es decisión del ADMIN, y solo suya:
+    // un grupo se creó privado y así sigue mientras nadie lo cambie a propósito.
+    if (typeof isDiscoverable === 'boolean') update.isDiscoverable = isDiscoverable;
+    if (typeof groupDescription === 'string') update.groupDescription = groupDescription.trim().slice(0, 200);
     if (groupAvatar !== undefined) {
       update.groupAvatar = groupAvatar;
       // Si se cambia o elimina el avatar, borrar el anterior de Cloudinary.
@@ -390,6 +395,66 @@ export async function leaveGroup(req: Request, res: Response) {
 // autenticado con el enlace puede unirse; el _id del grupo actúa como "invitación".
 // Si el grupo exige aprobación (requireAdminApproval), la solicitud queda
 // pendiente y el admin debe aceptarla.
+/**
+ * GET /groups/discover — grupos que el usuario puede encontrar y a los que puede
+ * pedir unirse.
+ *
+ * Hasta ahora a un grupo solo se entraba si un admin te metía o si alguien te
+ * pasaba un enlace: no había forma de DESCUBRIRLOS, y por eso no crecían. La
+ * maquinaria para entrar (solicitud + aprobación del admin) ya existía entera;
+ * lo único que faltaba era esta lista.
+ *
+ * Solo salen los grupos que el admin marcó como `isDiscoverable`, y nunca los
+ * que ya son tuyos. `requestPending` distingue "puedo pedir entrar" de "ya lo
+ * pedí y estoy esperando" — sin eso, el usuario pulsaría el botón una y otra vez
+ * sin entender por qué no pasa nada.
+ */
+export async function discoverGroups(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    // Se acota la longitud ANTES de nada: un patrón largo es lo que hace cara una
+    // búsqueda, y nadie busca un grupo escribiendo 300 caracteres.
+    const q = (typeof req.query.q === 'string' ? req.query.q.trim() : '').slice(0, 60);
+
+    const filter: Record<string, any> = {
+      isGroup: true,
+      isDiscoverable: true,
+      participants: { $ne: userId }, // los grupos en los que ya estoy, no
+    };
+    // El texto del usuario se ESCAPA: va como literal, nunca como patrón.
+    //
+    // Antes entraba crudo en el $regex. Con eso, buscar "(" rompía la consulta
+    // (regex inválido → 500) y un patrón como "(a+)+$" dejaba a MongoDB en un
+    // backtracking catastrófico: cualquiera con sesión podía tumbar el servidor
+    // desde el buscador de grupos. Escapar es lo correcto, no filtrar caracteres
+    // "raros": lo que el usuario escribe es TEXTO, y así se busca.
+    if (q) filter.groupName = { $regex: escapeRegex(q), $options: 'i' };
+
+    const groups = await Conversation.find(filter)
+      .select('groupName groupAvatar groupDescription participants pendingMembers permissions')
+      .limit(40)
+      .lean();
+
+    res.json(
+      groups.map((g: any) => ({
+        _id: g._id,
+        groupName: g.groupName,
+        groupAvatar: g.groupAvatar ?? null,
+        groupDescription: g.groupDescription ?? '',
+        memberCount: g.participants?.length ?? 0,
+        // Si el grupo pide aprobación, el botón dice "Pedir unirse"; si no,
+        // "Unirme" (y se entra al instante). Lo decide el grupo, no el cliente.
+        requiresApproval: !!g.permissions?.requireAdminApproval,
+        requestPending: (g.pendingMembers ?? []).some(
+          (pm: any) => pm.userId?.toString() === userId
+        ),
+      }))
+    );
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo grupos' });
+  }
+}
+
 export async function joinGroup(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;

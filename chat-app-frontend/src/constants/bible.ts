@@ -14,7 +14,9 @@ export type ScreenView =
   | 'search'
   | 'favorites'
   | 'notes'
-  | 'plans';
+  | 'plans'
+  | 'memorize'
+  | 'topics';
 
 export type BookOrder = 'traditional' | 'alphabetical';
 export type ReadingTheme = 'default' | 'sepia';

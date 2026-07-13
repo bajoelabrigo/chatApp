@@ -19,6 +19,12 @@ interface Props {
   onOpenFavorites: () => void;
   onOpenNotes: () => void;
   onOpenPlans: () => void;
+  onOpenMemorize: () => void;
+  onOpenTopics: () => void;
+  /** Versículos que toca repasar hoy (0 = no se muestra el contador). */
+  dueCount: number;
+  /** Racha de lectura; null mientras carga o sin sesión. */
+  streak: { current: number; longest: number; isTodayDone: boolean } | null;
 }
 
 export function ReadingSettingsMenu({
@@ -35,6 +41,10 @@ export function ReadingSettingsMenu({
   onOpenFavorites,
   onOpenNotes,
   onOpenPlans,
+  onOpenMemorize,
+  onOpenTopics,
+  dueCount,
+  streak,
 }: Props) {
   const row = {
     flexDirection: 'row' as const,
@@ -183,6 +193,62 @@ export function ReadingSettingsMenu({
               <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Planes de lectura</Text>
               <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </TouchableOpacity>
+
+            {/* Temas: pasajes para una ocasión (boda, duelo, ansiedad…). Resuelve
+                lo que la búsqueda NO puede: quien busca "boda" no encuentra
+                Eclesiastés 4:12, porque la palabra no aparece en el texto. */}
+            <TouchableOpacity onPress={() => { onClose(); onOpenTopics(); }} style={row}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="pricetags" size={20} color={colors.accent} />
+              </View>
+              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>
+                Temas
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={() => { onClose(); onOpenMemorize(); }} style={row}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="school" size={20} color={colors.accent} />
+              </View>
+              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Memorizar</Text>
+              {dueCount > 0 && (
+                <View style={{ backgroundColor: colors.accent, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginRight: 6 }}>
+                  <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>{dueCount}</Text>
+                </View>
+              )}
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            {/* Racha de lectura: días seguidos leyendo. Solo se muestra si hay
+                algo que celebrar — un "0 días" no motiva a nadie. */}
+            {streak && streak.current > 0 && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginHorizontal: 20,
+                  marginTop: 6,
+                  marginBottom: 10,
+                  padding: 12,
+                  borderRadius: 14,
+                  backgroundColor: colors.bgTertiary,
+                }}
+              >
+                <Text style={{ fontSize: 20 }}>🔥</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14 }}>
+                    {streak.current} día{streak.current === 1 ? '' : 's'} seguido
+                    {streak.current === 1 ? '' : 's'}
+                  </Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
+                    {streak.isTodayDone ? 'Hoy ya leíste' : 'Lee hoy para no perderla'}
+                    {streak.longest > streak.current ? ` · récord: ${streak.longest}` : ''}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             <TouchableOpacity
               onPress={onClose}

@@ -119,6 +119,8 @@ export function setupSocketHandlers(io: Server) {
       cloudinaryPublicId?: string;
       replyToMessageId?: string;
       contactUserId?: string;
+      mentions?: string[];
+      poll?: { question?: string; options?: string[]; multiple?: boolean };
     }) => {
       try {
         const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId, replyToMessageId, contactUserId } = data;
@@ -129,6 +131,20 @@ export function setupSocketHandlers(io: Server) {
         });
         if (!conversation) return;
 
+        // Menciones (@) — solo en grupos.
+        //
+        // Se CRIBAN contra los participantes: el cliente manda ids, y sin este
+        // filtro cualquiera podría mencionar (y por tanto notificar) a alguien que
+        // ni siquiera está en el grupo. Tampoco tiene sentido mencionarse a uno
+        // mismo, así que también se descarta.
+        const mentions = conversation.isGroup
+          ? [...new Set(data.mentions ?? [])].filter(
+              (m) =>
+                m !== userId &&
+                conversation.participants.some((p) => p.toString() === m)
+            )
+          : [];
+
         // Contacto compartido: el cliente solo manda el id; el nombre y el avatar
         // se leen de la base para no confiar en un snapshot manipulable.
         let contact: { userId: string; name: string; avatar?: string } | undefined;
@@ -137,6 +153,34 @@ export function setupSocketHandlers(io: Server) {
           const shared = await User.findById(contactUserId).select('name avatar').lean();
           if (!shared) return;
           contact = { userId: contactUserId, name: shared.name, avatar: shared.avatar };
+        }
+
+        // Encuesta. Se valida y se NORMALIZA aquí: el cliente podría mandar cero
+        // opciones, cien, o venir con los votos ya puestos. La encuesta nace
+        // siempre vacía de votos (`votes: []`) — se vota con `poll:vote`, no
+        // creándola.
+        let poll: { question: string; options: { text: string; votes: [] }[]; multiple: boolean; closed: boolean } | undefined;
+        if (type === 'poll') {
+          // Solo en GRUPOS. La regla vivía únicamente en la interfaz (el botón no
+          // se pinta en un 1:1), que es el sitio donde no se puede hacer cumplir:
+          // un cliente modificado podía crear una encuesta en un chat individual.
+          if (!conversation.isGroup) return;
+
+          const question = (data.poll?.question ?? '').trim().slice(0, 200);
+          const options = (data.poll?.options ?? [])
+            .map((o) => String(o ?? '').trim().slice(0, 100))
+            .filter(Boolean)
+            .slice(0, 12); // más de 12 opciones no se leen en una burbuja
+
+          // Una encuesta sin pregunta o con una sola opción no es una encuesta.
+          if (!question || options.length < 2) return;
+
+          poll = {
+            question,
+            options: options.map((text) => ({ text, votes: [] })),
+            multiple: !!data.poll?.multiple,
+            closed: false,
+          };
         }
 
         const otherParticipants = conversation.participants
@@ -176,17 +220,20 @@ export function setupSocketHandlers(io: Server) {
         const message = await Message.create({
           conversationId,
           senderId: userId,
-          // En un contacto compartido el `content` es el nombre: así las vistas
-          // previas (lista de chats, citas) tienen algo que mostrar sin leer `contact`.
-          content: contact ? contact.name : content,
+          // En un contacto compartido el `content` es el nombre, y en una encuesta
+          // la pregunta: así las vistas previas (lista de chats, citas, push)
+          // tienen algo que mostrar sin tener que leer `contact` ni `poll`.
+          content: contact ? contact.name : poll ? poll.question : content,
           type,
           fileName,
           fileSize,
           cloudinaryPublicId: cloudinaryPublicId ?? undefined,
           contact,
+          poll,
           status: 'sent',
           readBy: [userId],
           replyTo,
+          mentions,
           expiresAt,
         });
 
@@ -254,36 +301,88 @@ export function setupSocketHandlers(io: Server) {
                 ? '🎤 Mensaje de voz'
                 : type === 'contact'
                 ? `👤 ${contact?.name ?? 'Contacto'}`
+                : type === 'poll'
+                ? `📊 ${poll?.question ?? 'Encuesta'}`
                 : '📎 Archivo'
               : (content || '').trim().slice(0, 80) || 'Nuevo mensaje';
-          const title = conversation.isGroup
-            ? (conversation as any).groupName || 'Nuevo mensaje'
-            : senderName;
+          const groupName = (conversation as any).groupName || 'el grupo';
+          const title = conversation.isGroup ? groupName : senderName;
           const pushBody = conversation.isGroup ? `${senderName}: ${preview}` : preview;
 
-          sendWebPushToUsers(
-            offline,
-            {
-              title,
-              body: pushBody,
-              url: '/chat',
-              tag: `chat-${conversationId}`,
-              icon: sender?.avatar,
-              badge: 'chat',
-            },
-            'messages'
+          // A quien MENCIONAS se le avisa aparte, con otro texto. Sin esto su push
+          // sería idéntico al de cualquier otro mensaje del grupo: se perdería
+          // entre los demás, que es justo el problema que la mención resuelve.
+          const mentionedOffline = offline.filter((pid) => mentions.includes(pid));
+
+          // SILENCIAR ahora silencia de verdad.
+          //
+          // `Conversation.mutedBy` existía y lo respetaba la campana de
+          // notificaciones, pero el push (nativo y web) NO lo consultaba: quien
+          // silenciaba un chat seguía recibiendo cada mensaje en el móvil. Ese era
+          // el silencio que no silenciaba nada.
+          //
+          // Las MENCIONES son la excepción a propósito: silenciar un grupo dice
+          // "no me interesa la conversación general", no "no me avises si me
+          // hablan a mí". Es lo que hace WhatsApp, y sin esa excepción la mención
+          // pierde justo su razón de ser.
+          const mutedBy = new Set(
+            ((conversation as any).mutedBy ?? []).map((u: any) => u.toString())
+          );
+          const restOffline = offline.filter(
+            (pid) => !mentions.includes(pid) && !mutedBy.has(pid)
           );
 
-          // 🔔 Push nativo (Expo) a la app móvil de los participantes offline.
-          sendExpoPushToUsers(
-            offline,
-            {
-              title,
-              body: pushBody,
-              data: { type: 'chat', conversationId },
-            },
-            'messages'
-          );
+          const mentionPush = {
+            title: `💬 ${senderName} te mencionó`,
+            body: `${groupName}: ${preview}`,
+          };
+
+          if (mentionedOffline.length) {
+            sendWebPushToUsers(
+              mentionedOffline,
+              {
+                ...mentionPush,
+                url: '/chat',
+                // `tag` propio: si compartiera el del chat, un mensaje normal
+                // posterior REEMPLAZARÍA el aviso de la mención en la bandeja.
+                tag: `mention-${conversationId}`,
+                icon: sender?.avatar,
+                badge: 'chat',
+              },
+              'messages'
+            );
+            sendExpoPushToUsers(
+              mentionedOffline,
+              { ...mentionPush, data: { type: 'chat', conversationId } },
+              'messages'
+            );
+          }
+
+          if (restOffline.length) {
+            sendWebPushToUsers(
+              restOffline,
+              {
+                title,
+                body: pushBody,
+                url: '/chat',
+                tag: `chat-${conversationId}`,
+                icon: sender?.avatar,
+                badge: 'chat',
+              },
+              'messages'
+            );
+
+            // 🔔 Push nativo (Expo) a la app móvil de los participantes offline.
+            sendExpoPushToUsers(
+              restOffline,
+              {
+                title,
+                body: pushBody,
+                data: { type: 'chat', conversationId },
+              },
+              'messages'
+            );
+          }
         }
       } catch (err) {
         socket.emit('error', { message: 'Error enviando mensaje' });
@@ -328,9 +427,21 @@ export function setupSocketHandlers(io: Server) {
         }
         if (!message) return; // solo el autor (o el admin general) puede editar
 
+        // En una encuesta, editar el mensaje es editar la PREGUNTA.
+        //
+        // Antes solo se tocaba `content`, que es lo que leen las vistas previas
+        // (lista de chats, push), mientras la burbuja pinta `poll.question`. O sea
+        // que el autor corregía la pregunta, la lista mostraba el texto nuevo, la
+        // burbuja seguía con el viejo, y la edición parecía no haber hecho nada.
+        const esEncuesta = message.type === 'poll' && !!message.poll;
+
         const updated = await Message.findByIdAndUpdate(
           messageId,
-          { content: trimmed, editedAt: new Date() },
+          {
+            content: trimmed,
+            editedAt: new Date(),
+            ...(esEncuesta ? { 'poll.question': trimmed } : {}),
+          },
           { new: true }
         );
 
@@ -339,6 +450,8 @@ export function setupSocketHandlers(io: Server) {
           conversationId,
           content: trimmed,
           editedAt: updated?.editedAt,
+          // La encuesta actualizada, para que la burbuja repinte la pregunta.
+          ...(esEncuesta ? { poll: updated?.poll } : {}),
         });
       } catch {
         socket.emit('error', { message: 'Error editando mensaje' });
@@ -385,6 +498,125 @@ export function setupSocketHandlers(io: Server) {
         }
       } catch {
         socket.emit('error', { message: 'Error eliminando mensaje' });
+      }
+    });
+
+    /**
+     * Votar en una encuesta.
+     *
+     * El voto se aplica con UN update atómico (`$addToSet` / `$pull`), no leyendo
+     * el mensaje, modificándolo y guardándolo: en una encuesta votan varios a la
+     * vez, y un `findById` + `save()` haría que el último en guardar pisara los
+     * votos que llegaron entre medias (lost-update). Es el mismo patrón que ya
+     * usáis para el progreso del seminario.
+     *
+     * Votar la misma opción otra vez la DESMARCA (es lo que espera todo el mundo),
+     * y en las encuestas de una sola respuesta se retira el voto anterior.
+     */
+    socket.on('poll:vote', async (data: { messageId: string; conversationId: string; optionIndex: number }) => {
+      try {
+        const { messageId, conversationId, optionIndex } = data;
+
+        const conversation = await Conversation.findOne({
+          _id: conversationId,
+          participants: userId,
+        }).lean();
+        if (!conversation) return;
+
+        const message = await Message.findOne({ _id: messageId, conversationId }).lean();
+        if (!message || message.type !== 'poll' || !message.poll) return;
+        if (message.poll.closed) return; // encuesta cerrada: no se toca
+
+        const idx = Number(optionIndex);
+        const options = message.poll.options ?? [];
+        if (!Number.isInteger(idx) || idx < 0 || idx >= options.length) return;
+
+        const yaVotada = (options[idx].votes ?? []).some((v: any) => v.toString() === userId);
+
+        if (yaVotada) {
+          // Desmarcar.
+          await Message.updateOne(
+            { _id: messageId },
+            { $pull: { [`poll.options.${idx}.votes`]: userId } as any }
+          );
+        } else if (message.poll.multiple) {
+          await Message.updateOne(
+            { _id: messageId },
+            { $addToSet: { [`poll.options.${idx}.votes`]: userId } as any }
+          );
+        } else {
+          // Respuesta única: se retira el voto de las OTRAS opciones y se pone en
+          // la elegida, TODO EN UN SOLO update.
+          //
+          // Antes eran dos ($pull de todas y luego $addToSet en la elegida) y entre
+          // ellos había un instante en el que el votante no tenía ningún voto: si
+          // otro miembro votaba justo ahí, su `poll:update` llevaba ese estado
+          // intermedio y todos veían el recuento bajar y volver a subir. Y si el
+          // segundo update fallaba, el voto se perdía del todo.
+          //
+          // `$pull` y `$addToSet` pueden ir juntos mientras no toquen el MISMO
+          // campo — y no lo hacen: de la opción elegida no hay nada que quitar, así
+          // que se excluye del $pull.
+          const pull: Record<string, unknown> = {};
+          options.forEach((_, i) => {
+            if (i !== idx) pull[`poll.options.${i}.votes`] = userId;
+          });
+
+          await Message.updateOne({ _id: messageId }, {
+            ...(Object.keys(pull).length ? { $pull: pull } : {}),
+            $addToSet: { [`poll.options.${idx}.votes`]: userId },
+          } as any);
+        }
+
+        const updated = await Message.findById(messageId).select('poll').lean();
+        io.to(conversationId).emit('poll:update', {
+          messageId,
+          conversationId,
+          poll: updated?.poll,
+        });
+      } catch (err) {
+        console.error('poll:vote:', err);
+      }
+    });
+
+    /**
+     * Cerrar una encuesta (deja de admitir votos).
+     *
+     * Faltaba: `poll.closed` solo se escribía como `false` y no había forma de
+     * ponerlo a true, así que todo el código que lo respeta —el guardia de
+     * `poll:vote`, el "· cerrada" de las dos burbujas— era inalcanzable. El autor
+     * cuadraba los turnos y la gente seguía votando y moviéndoselos.
+     *
+     * Solo puede cerrarla quien la creó o un admin del grupo: cerrar la encuesta
+     * de otro sería quitarle la palabra.
+     */
+    socket.on('poll:close', async (data: { messageId: string; conversationId: string }) => {
+      try {
+        const { messageId, conversationId } = data;
+
+        const conversation = await Conversation.findOne({
+          _id: conversationId,
+          participants: userId,
+        }).lean();
+        if (!conversation) return;
+
+        const message = await Message.findOne({ _id: messageId, conversationId }).lean();
+        if (!message || message.type !== 'poll' || !message.poll) return;
+
+        const esAutor = message.senderId.toString() === userId;
+        const esAdmin = (conversation.admins ?? []).some((a: any) => a.toString() === userId);
+        if (!esAutor && !esAdmin) return;
+
+        await Message.updateOne({ _id: messageId }, { $set: { 'poll.closed': true } });
+
+        const updated = await Message.findById(messageId).select('poll').lean();
+        io.to(conversationId).emit('poll:update', {
+          messageId,
+          conversationId,
+          poll: updated?.poll,
+        });
+      } catch (err) {
+        console.error('poll:close:', err);
       }
     });
 

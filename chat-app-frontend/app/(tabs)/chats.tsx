@@ -43,10 +43,19 @@ import {
   apiToggleBlock,
   apiToggleMute,
   markAllConversationsRead,
+  discoverGroups,
+  joinGroup,
   type Conversation,
   type ChatUser,
   type Message,
+  type DiscoverableGroup,
 } from '../../src/services/conversationService';
+import { DiscoverGroups } from '../../src/components/chat/DiscoverGroups';
+
+// Cuántos sugeridos ("Quizás los conozcas") se ven sin desplegar. El backend
+// manda hasta 15; en filas verticales, pintarlos todos empujaría los CHATS —lo
+// que el usuario viene a ver— por debajo de una pantalla de desconocidos.
+const SUGGESTED_PREVIEW = 5;
 
 function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   const lm = conv.lastMessage;
@@ -57,6 +66,7 @@ function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   else if (lm.type === 'audio') content = '🎤 Nota de voz';
   else if (lm.type === 'document') content = `📎 ${lm.fileName ?? 'Documento'}`;
   else if (lm.type === 'contact') content = `👤 ${lm.contact?.name ?? lm.content}`;
+  else if (lm.type === 'poll') content = `📊 ${lm.poll?.question ?? lm.content}`;
   else content = lm.content;
   if (conv.isGroup && lm.senderId && typeof lm.senderId === 'object') {
     const isMe = lm.senderId._id === currentUserId;
@@ -217,7 +227,44 @@ export default function ChatsScreen() {
       .catch(() => {})
       .finally(() => setLoading(false));
     getSuggestedUsers(token).then(setSuggestedUsers).catch(() => {});
+    discoverGroups(token).then(setDiscoverable).catch(() => {});
   }, [token]);
+
+  // ── Descubrir grupos ────────────────────────────────────────
+  const [discoverable, setDiscoverable] = useState<DiscoverableGroup[]>([]);
+  const [joiningGroup, setJoiningGroup] = useState<string | null>(null);
+
+  const handleJoinGroup = async (g: DiscoverableGroup) => {
+    if (!token) return;
+    setJoiningGroup(g._id);
+    try {
+      const res: any = await joinGroup(token, g._id);
+
+      // El grupo pide aprobación: la solicitud queda encolada y el admin decide.
+      // Se marca como pendiente en la lista para que el botón deje de invitar.
+      if (res?.pending) {
+        setDiscoverable((prev) =>
+          prev.map((x) => (x._id === g._id ? { ...x, requestPending: true } : x))
+        );
+        Alert.alert(
+          'Solicitud enviada',
+          `Un administrador de "${g.groupName}" revisará tu solicitud. Te avisaremos cuando te acepten.`
+        );
+        return;
+      }
+
+      // Grupo abierto: se entra al momento. Sale de "descubrir" y aparece en los
+      // chats, así que se recarga la lista.
+      setDiscoverable((prev) => prev.filter((x) => x._id !== g._id));
+      const convs = await getConversations(token);
+      setConversations(convs);
+      Alert.alert('¡Ya estás dentro!', `Te uniste a "${g.groupName}".`);
+    } catch {
+      Alert.alert('Error', 'No se pudo enviar la solicitud.');
+    } finally {
+      setJoiningGroup(null);
+    }
+  };
 
   // Refrescar el badge de notificaciones cada vez que se enfoca el tab de chats.
   useFocusEffect(
@@ -821,47 +868,6 @@ export default function ChatsScreen() {
                   </View>
                 )}
 
-                {/* Sección: Quizás los conozcas */}
-                {suggestedUsers.length > 0 && listSearch.trim().length < 2 && (
-                  <View style={{ backgroundColor: colors.bgSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 12 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 10 }}>
-                      <Text style={{ flex: 1, color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Quizás los conozcas
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() => setShowAllUsers(true)}
-                        style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <Ionicons name="add" size={20} color="#fff" />
-                      </TouchableOpacity>
-                    </View>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ paddingHorizontal: 12, gap: 14 }}
-                    >
-                      {suggestedUsers.map((u) => (
-                        <TouchableOpacity
-                          key={u._id}
-                          onPress={() => openOrCreateChat(u)}
-                          style={{ alignItems: 'center', width: 60 }}
-                        >
-                          {u.avatar ? (
-                            <Image source={{ uri: u.avatar }} style={{ width: 52, height: 52, borderRadius: 26, marginBottom: 5 }} />
-                          ) : (
-                            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center', marginBottom: 5 }}>
-                              <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 20 }}>{u.name[0]?.toUpperCase()}</Text>
-                            </View>
-                          )}
-                          <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'center' }} numberOfLines={1}>
-                            {u.name.split(' ')[0]}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </View>
-                )}
-
                 <TouchableOpacity
                   onPress={() => router.navigate({ pathname: '/(tabs)/settings', params: { section: 'archivados' } } as any)}
                   style={{
@@ -884,6 +890,117 @@ export default function ChatsScreen() {
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
                 </TouchableOpacity>
+              </View>
+            )
+          }
+          // "Quizás los conozcas" y "Descubre grupos" van DEBAJO de las
+          // conversaciones, igual que en la web (Sidebar.jsx: <Conversations /> y
+          // después <SuggestedUsers />). Estaban arriba y empujaban los chats —lo
+          // que el usuario viene a ver— por debajo de una lista de desconocidos.
+          ListFooterComponent={
+            (
+              <View>
+                {/* Sección: Quizás los conozcas.
+                    Filas verticales, como en el chat de la web (SuggestedUsers.jsx
+                    → Contact.jsx). Antes era un carrusel horizontal de avatares con
+                    el nombre de pila recortado: cabían pocos, no se leía quién era
+                    cada uno y había que arrastrar para verlos. Una fila normal se
+                    lee de un vistazo y es el mismo gesto que abrir un chat. */}
+                {suggestedUsers.length > 0 && listSearch.trim().length < 2 && (
+                  <View style={{ backgroundColor: colors.bgSecondary, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 4 }}>
+                      <Text style={{ flex: 1, color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        Quizás los conozcas
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setShowAllUsers(true)}
+                        style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="add" size={20} color="#fff" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Solo los primeros. En vertical ocupan mucho más que el
+                        carrusel, y el backend manda hasta 15: pintarlos todos
+                        empujaría los CHATS —lo que el usuario viene a ver— por
+                        debajo de una pantalla entera de desconocidos. El resto
+                        está a un toque, en "Ver todos". */}
+                    {suggestedUsers.slice(0, SUGGESTED_PREVIEW).map((u) => {
+                      const isOnline = onlineUsers.has(u._id);
+                      return (
+                        <TouchableOpacity
+                          key={u._id}
+                          onPress={() => openOrCreateChat(u)}
+                          activeOpacity={0.7}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            paddingHorizontal: 16,
+                            paddingVertical: 10,
+                          }}
+                        >
+                          <View>
+                            {u.avatar ? (
+                              <Image source={{ uri: u.avatar }} style={{ width: 50, height: 50, borderRadius: 25 }} />
+                            ) : (
+                              <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
+                                <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 20 }}>
+                                  {u.name[0]?.toUpperCase()}
+                                </Text>
+                              </View>
+                            )}
+                            {/* Punto verde de "en línea", igual que en la lista de chats. */}
+                            {isOnline && (
+                              <View
+                                style={{
+                                  position: 'absolute', right: 0, bottom: 0,
+                                  width: 14, height: 14, borderRadius: 7,
+                                  backgroundColor: '#22c55e',
+                                  borderWidth: 2, borderColor: colors.bgSecondary,
+                                }}
+                              />
+                            )}
+                          </View>
+
+                          <View style={{ flex: 1, marginLeft: 12 }}>
+                            <Text numberOfLines={1} style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '600' }}>
+                              {u.name}
+                            </Text>
+                            <Text style={{ color: isOnline ? '#22c55e' : colors.textMuted, fontSize: 13, marginTop: 2 }}>
+                              {isOnline ? 'En línea' : 'Toca para escribirle'}
+                            </Text>
+                          </View>
+
+                          <Ionicons name="chatbubble-outline" size={18} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {suggestedUsers.length > SUGGESTED_PREVIEW && (
+                      <TouchableOpacity
+                        onPress={() => setShowAllUsers(true)}
+                        style={{ paddingHorizontal: 16, paddingVertical: 10 }}
+                      >
+                        <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '600' }}>
+                          Ver todos ({suggestedUsers.length})
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Grupos abiertos a los que se puede pedir entrar. Hasta ahora a un
+                    grupo solo se entraba si un admin te metía o por un enlace: no
+                    había forma de encontrarlos, y por eso no crecían. */}
+                {listSearch.trim().length < 2 && (
+                  <DiscoverGroups
+                    groups={discoverable}
+                    busyId={joiningGroup}
+                    colors={colors}
+                    onJoin={handleJoinGroup}
+                  />
+                )}
+
               </View>
             )
           }

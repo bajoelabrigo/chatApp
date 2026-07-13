@@ -163,6 +163,66 @@ export async function fetchVerses(
   return data;
 }
 
+// ─── Referencias cruzadas ────────────────────────────────────────────────────
+//
+// Viven SOLO en el servidor (dataset de openbible.info, CC-BY): no se descargan
+// con la Biblia, así que sin conexión no hay referencias. Las dos funciones se
+// degradan en silencio a "ninguna" en vez de propagar el error — quien lee
+// offline debe seguir leyendo, no toparse con una pantalla rota.
+
+export interface CrossRef {
+  book: string;
+  chapter: string;
+  verse: string;
+  endVerse?: string;
+  text: string;
+}
+
+export interface CrossRefs {
+  book: string;
+  chapter: string;
+  verse: string;
+  source: string;
+  results: CrossRef[];
+}
+
+/** Cuántas referencias tiene cada versículo del capítulo: { "16": 10 }. */
+export async function fetchChapterXrefCounts(
+  token: string,
+  book: string,
+  chapter: string,
+  version = DEFAULT_VERSION
+): Promise<Record<string, number>> {
+  try {
+    const { data } = await api.get<Record<string, number>>(
+      `/bible/xrefs/${encodeURIComponent(book)}/${chapter}`,
+      { headers: { Authorization: `Bearer ${token}` }, params: { version } }
+    );
+    return data;
+  } catch {
+    return {};
+  }
+}
+
+/** Las referencias de un versículo, con el texto ya resuelto en `version`. */
+export async function fetchVerseXrefs(
+  token: string,
+  book: string,
+  chapter: string,
+  verse: string,
+  version = DEFAULT_VERSION
+): Promise<CrossRefs | null> {
+  try {
+    const { data } = await api.get<CrossRefs>(
+      `/bible/xrefs/${encodeURIComponent(book)}/${chapter}/${verse}`,
+      { headers: { Authorization: `Bearer ${token}` }, params: { version } }
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 // Búsqueda paginada: devuelve { results, total, offset }.
 //
 // - `testament` y `book` acotan el ámbito, y se aplican DENTRO de la búsqueda:
@@ -319,6 +379,210 @@ export async function subscribeReadingPlan(token: string, planKey: string, extra
     authHeader(token)
   );
   return data;
+}
+
+// ─── Temas (pasajes para una ocasión: boda, cumpleaños, duelo…) ──────────────
+//
+// El catálogo lo define el BACKEND (`lib/bibleTopics.ts`), no el cliente: si cada
+// app llevara su lista, se separarían al primer retoque. Las referencias van por
+// índice de libro, así que el mismo tema sirve para las 7 versiones; el backend
+// resuelve nombre y texto en la versión pedida.
+
+export interface Topic {
+  key: string;
+  title: string;
+  description: string;
+  category: string;
+  emoji: string;
+  count: number;
+}
+
+export interface TopicPassage {
+  book: string;
+  chapter: string;
+  from: string;
+  to?: string;
+  /** "Salmos 23:1-6" — la referencia tal y como se muestra. */
+  label: string;
+  verses: { verse: string; text: string }[];
+}
+
+export interface TopicDetail {
+  key: string;
+  title: string;
+  description: string;
+  category: string;
+  emoji: string;
+  version: string;
+  passages: TopicPassage[];
+}
+
+export async function fetchTopics(): Promise<{ categories: string[]; topics: Topic[] }> {
+  try {
+    const { data } = await api.get('/bible/topics');
+    return data;
+  } catch {
+    return { categories: [], topics: [] };
+  }
+}
+
+export async function fetchTopicDetail(
+  key: string,
+  version = DEFAULT_VERSION
+): Promise<TopicDetail | null> {
+  try {
+    const { data } = await api.get<TopicDetail>(
+      `/bible/topics/${encodeURIComponent(key)}`,
+      { params: { version } }
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Memorizar versículos (repaso espaciado) ─────────────────────────────────
+//
+// Sistema de Leitner: cada acierto aleja el siguiente repaso (1, 3, 7, 16, 35
+// días) y un fallo lo devuelve al principio. El backend lleva la cuenta; aquí
+// solo se pide lo que toca hoy y se manda el resultado del repaso.
+
+export interface MemorizeVerse {
+  id: string;
+  book: string;
+  chapter: string;
+  verse: string;
+  text: string;
+  level: number;
+  dueAt: string;
+  reviews: number;
+  isLearned: boolean;
+  isDue: boolean;
+}
+
+export async function fetchMemorize(token: string): Promise<MemorizeVerse[]> {
+  try {
+    const { data } = await api.get<MemorizeVerse[]>('/bible/me/memorize', authHeader(token));
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+export async function addMemorize(token: string, verse: any): Promise<MemorizeVerse | null> {
+  try {
+    const { data } = await api.post<MemorizeVerse>('/bible/me/memorize', verse, authHeader(token));
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function reviewMemorize(
+  token: string,
+  id: string,
+  correct: boolean
+): Promise<MemorizeVerse | null> {
+  try {
+    const { data } = await api.post<MemorizeVerse>(
+      `/bible/me/memorize/${encodeURIComponent(id)}/review`,
+      { correct },
+      authHeader(token)
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function removeMemorize(token: string, id: string): Promise<void> {
+  try {
+    await api.delete(`/bible/me/memorize/${encodeURIComponent(id)}`, authHeader(token));
+  } catch { /* ignora */ }
+}
+
+// ─── Racha de lectura ────────────────────────────────────────────────────────
+//
+// Días naturales seguidos leyendo. El día es el LOCAL del usuario (por eso se
+// manda `tz`): leer a las 23:30 en Lima cuenta como hoy, no como mañana.
+
+export interface ReadingStreak {
+  current: number;
+  longest: number;
+  totalDays: number;
+  lastDay: string;
+  isTodayDone: boolean;
+}
+
+export async function fetchStreak(token: string): Promise<ReadingStreak | null> {
+  try {
+    const { data } = await api.get<ReadingStreak>('/bible/me/streak', {
+      ...authHeader(token),
+      params: { tz: myTimezone() },
+    });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** "Hoy he leído". Idempotente: llamarlo varias veces el mismo día no suma. */
+export async function markReadToday(token: string): Promise<ReadingStreak | null> {
+  try {
+    const { data } = await api.post<ReadingStreak>(
+      '/bible/me/streak',
+      { tz: myTimezone() },
+      authHeader(token)
+    );
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Planes de lectura en GRUPO ──────────────────────────────────────────────
+//
+// Un plan de grupo no es un objeto aparte: son las suscripciones de los miembros
+// al mismo plan, ligadas al grupo. Cada uno lleva su progreso y su recordatorio;
+// lo que comparten es la fecha de inicio, y por eso "hoy toca el día 12"
+// significa lo mismo para todos. Quien se une tarde se ALINEA con el grupo (lo
+// hace el backend), no empieza por el día 1.
+
+export interface GroupPlanMember {
+  userId: string;
+  name: string;
+  avatar: string | null;
+  currentDay: number;
+  completedCount: number;
+  isTodayDone: boolean;
+  isFinished: boolean;
+}
+
+export interface GroupPlan {
+  planKey: string;
+  title: string;
+  description: string;
+  category: string;
+  totalDays: number;
+  startDate: string;
+  currentDay: number;
+  memberCount: number;
+  isJoined: boolean;
+  members: GroupPlanMember[];
+}
+
+/** Los planes que lee un grupo, con el progreso de cada miembro. */
+export async function fetchGroupPlans(token: string, groupId: string): Promise<GroupPlan[]> {
+  try {
+    const { data } = await api.get<GroupPlan[]>(`/bible/groups/${groupId}/plans`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data;
+  } catch {
+    // Sin conexión (o ya no eres del grupo): la pantalla de planes debe seguir
+    // funcionando, solo que sin la parte social.
+    return [];
+  }
 }
 
 export async function createCustomReadingPlan(token: string, custom: any): Promise<any> {

@@ -51,12 +51,44 @@ export interface IBibleDeletion {
   at: Date;
 }
 
+// ── Memorización (repaso espaciado) ─────────────────────────
+//
+// Un versículo que el usuario quiere aprenderse. `level` es el escalón del
+// repaso: cada acierto sube uno (y el siguiente repaso se aleja), cada fallo
+// vuelve al principio. Los intervalos viven en el controlador (MEMORIZE_STEPS);
+// aquí solo se guarda el escalón y CUÁNDO toca repasarlo.
+export interface IBibleMemorize {
+  id: string; // "{book}:{chapter}:{verse}"
+  book: string;
+  chapter: string;
+  verse: string;
+  text: string;
+  level: number; // 0 = recién añadido; al superar el último escalón, "aprendido"
+  dueAt: Date;   // cuándo vuelve a tocar
+  reviews: number;
+  addedAt: Date;
+}
+
+// ── Racha de lectura ────────────────────────────────────────
+//
+// `lastDay` es la fecha LOCAL del usuario ('YYYY-MM-DD'), no un Date: la racha va
+// de días naturales, y en Madrid y en Lima el día no cambia a la vez. Guardar un
+// instante UTC haría que leer a las 23:30 en Lima contara como el día siguiente.
+export interface IBibleReadingStreak {
+  lastDay: string;
+  current: number;
+  longest: number;
+  totalDays: number;
+}
+
 export interface IBibleUserData extends Document {
   user: Types.ObjectId;
   favorites: IBibleFavorite[];
   highlights: IBibleHighlight[];
   annotations: IBibleAnnotation[];
   deletions: IBibleDeletion[];
+  memorize: IBibleMemorize[];
+  streak: IBibleReadingStreak;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -107,6 +139,31 @@ const DeletionSchema = new Schema<IBibleDeletion>(
   { _id: false }
 );
 
+const MemorizeSchema = new Schema<IBibleMemorize>(
+  {
+    id: { type: String, required: true },
+    book: { type: String, default: '' },
+    chapter: { type: String, default: '' },
+    verse: { type: String, default: '' },
+    text: { type: String, default: '' },
+    level: { type: Number, default: 0 },
+    dueAt: { type: Date, default: Date.now }, // recién añadido = toca hoy
+    reviews: { type: Number, default: 0 },
+    addedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
+const StreakSchema = new Schema<IBibleReadingStreak>(
+  {
+    lastDay: { type: String, default: '' },
+    current: { type: Number, default: 0 },
+    longest: { type: Number, default: 0 },
+    totalDays: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const BibleUserDataSchema = new Schema<IBibleUserData>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
@@ -114,6 +171,8 @@ const BibleUserDataSchema = new Schema<IBibleUserData>(
     highlights: { type: [HighlightSchema], default: [] },
     annotations: { type: [AnnotationSchema], default: [] },
     deletions: { type: [DeletionSchema], default: [] },
+    memorize: { type: [MemorizeSchema], default: [] },
+    streak: { type: StreakSchema, default: () => ({}) },
   },
   { timestamps: true }
 );

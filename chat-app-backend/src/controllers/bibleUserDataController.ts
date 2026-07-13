@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { BibleUserData } from '../models/BibleUserData';
+import { localDateKey } from '../lib/dailyVerses';
 
 // Sincronización de datos personales de la Biblia (favoritos, resaltados, notas).
 // La clave lógica de cada versículo es `id = "{book}:{chapter}:{verse}"`.
@@ -357,5 +358,271 @@ export async function removeAnnotation(req: AuthRequest, res: Response): Promise
   } catch (err) {
     console.error('removeAnnotation:', err);
     res.status(500).json({ error: 'Error al quitar la nota' });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Memorización (repaso espaciado)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Sistema de Leitner: cada versículo tiene un `level`. Acertar lo sube un escalón
+// (y aleja el siguiente repaso); fallar lo devuelve al 0. Repasar algo que ya te
+// sabes es tiempo perdido, y repasar demasiado tarde es volver a empezar: los
+// intervalos crecen para repasar justo antes de olvidar.
+//
+// Días hasta el siguiente repaso según el escalón alcanzado.
+const MEMORIZE_STEPS = [1, 3, 7, 16, 35];
+const MEMORIZE_MAX = 200; // techo razonable: nadie memoriza 10.000 versículos
+
+/**
+ * Aprendido = ha SUPERADO el último escalón, no alcanzado.
+ *
+ * Con `>=` (el error original) el nivel 5 ya contaba como aprendido y el repaso
+ * saltaba de 16 a 90 días: el escalón de 35 no se usaba nunca y el versículo se
+ * daba por sabido un repaso antes de tiempo. El nivel N consume el escalón N-1,
+ * así que hacen falta `MEMORIZE_STEPS.length + 1` aciertos para aprenderlo.
+ */
+function isLearned(level: number): boolean {
+  return level > MEMORIZE_STEPS.length;
+}
+
+function nextDueAt(level: number): Date {
+  // Aprendido: se aparca lejos (no desaparece, pero deja de pedir repaso a diario).
+  const days = isLearned(level)
+    ? 90
+    : MEMORIZE_STEPS[Math.max(0, level - 1)] ?? 1;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
+function shapeMemorize(m: any) {
+  return {
+    id: m.id,
+    book: m.book,
+    chapter: m.chapter,
+    verse: m.verse,
+    text: m.text,
+    level: m.level,
+    dueAt: m.dueAt,
+    reviews: m.reviews,
+    isLearned: isLearned(m.level),
+    isDue: new Date(m.dueAt).getTime() <= Date.now(),
+  };
+}
+
+// GET /bible/me/memorize — los versículos que estoy memorizando. Primero los que
+// tocan hoy: es lo único que el usuario necesita ver al abrir la pantalla.
+export async function getMemorize(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const doc = await BibleUserData.findOne({ user: req.userId }).lean();
+    const list = (doc?.memorize ?? []).map(shapeMemorize).sort((a, b) => {
+      if (a.isDue !== b.isDue) return a.isDue ? -1 : 1; // pendientes primero
+      return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+    });
+    res.json(list);
+  } catch (err) {
+    console.error('getMemorize:', err);
+    res.status(500).json({ error: 'Error al cargar tus versículos' });
+  }
+}
+
+// POST /bible/me/memorize — empezar a memorizar un versículo.
+export async function addMemorize(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = cleanId(req.body ?? {});
+    if (!id) {
+      res.status(400).json({ error: 'Versículo inválido' });
+      return;
+    }
+    const text = str(req.body?.text, 2000);
+    if (!text) {
+      res.status(400).json({ error: 'Falta el texto del versículo' });
+      return;
+    }
+
+    await ensureDoc(req.userId!);
+
+    const doc = await BibleUserData.findOne({ user: req.userId }).select('memorize').lean();
+    const already = (doc?.memorize ?? []).some((m: any) => m.id === id);
+    if (already) {
+      // Volver a añadirlo no reinicia el progreso: sería un castigo absurdo por
+      // pulsar dos veces.
+      const current = (doc!.memorize as any[]).find((m) => m.id === id);
+      res.json(shapeMemorize(current));
+      return;
+    }
+    if ((doc?.memorize ?? []).length >= MEMORIZE_MAX) {
+      res.status(400).json({ error: 'Has alcanzado el máximo de versículos a memorizar' });
+      return;
+    }
+
+    const entry = {
+      id,
+      book: str(req.body?.book, 60),
+      chapter: str(req.body?.chapter, 10),
+      verse: str(req.body?.verse, 10),
+      text,
+      level: 0,
+      dueAt: new Date(), // toca ya: se empieza a repasar hoy
+      reviews: 0,
+      addedAt: new Date(),
+    };
+
+    // El `$push` va CONDICIONADO a que el versículo siga sin estar.
+    //
+    // La comprobación de arriba (leer y luego escribir) no basta: dos toques
+    // seguidos —o un reintento de la app— hacían que ambas peticiones leyeran "no
+    // está" y ambas insertaran, dejando el versículo duplicado en la lista y
+    // pidiéndolo repasar dos veces. Con el filtro dentro del propio update, el
+    // segundo no encuentra documento que cumpla y no hace nada. Es el mismo patrón
+    // que ya usáis para el progreso del seminario.
+    const result = await BibleUserData.updateOne(
+      { user: req.userId, 'memorize.id': { $ne: id } },
+      { $push: { memorize: entry } }
+    );
+
+    // No se insertó porque otra petición se adelantó: se devuelve el que ya está,
+    // no un error — para el usuario, el versículo quedó añadido igual.
+    if (result.modifiedCount === 0) {
+      const fresh = await BibleUserData.findOne({ user: req.userId }).select('memorize').lean();
+      const current = (fresh?.memorize ?? []).find((m: any) => m.id === id);
+      res.json(current ? shapeMemorize(current) : shapeMemorize(entry));
+      return;
+    }
+
+    res.status(201).json(shapeMemorize(entry));
+  } catch (err) {
+    console.error('addMemorize:', err);
+    res.status(500).json({ error: 'Error al añadir el versículo' });
+  }
+}
+
+// POST /bible/me/memorize/:id/review — resultado de un repaso.
+export async function reviewMemorize(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = decodeURIComponent(req.params.id);
+    const correct = req.body?.correct === true;
+
+    const doc = await BibleUserData.findOne({ user: req.userId }).select('memorize');
+    const entry = (doc?.memorize ?? []).find((m: any) => m.id === id) as any;
+    if (!entry) {
+      res.status(404).json({ error: 'No estás memorizando ese versículo' });
+      return;
+    }
+
+    // Acertar sube un escalón; fallar vuelve al principio (si no te sale, no lo
+    // sabes: alargar el intervalo solo lo empeoraría).
+    entry.level = correct ? entry.level + 1 : 0;
+    entry.reviews = (entry.reviews ?? 0) + 1;
+    entry.dueAt = nextDueAt(entry.level);
+    await doc!.save();
+
+    res.json(shapeMemorize(entry));
+  } catch (err) {
+    console.error('reviewMemorize:', err);
+    res.status(500).json({ error: 'Error al guardar el repaso' });
+  }
+}
+
+// DELETE /bible/me/memorize/:id — dejar de memorizarlo.
+export async function removeMemorize(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const id = decodeURIComponent(req.params.id);
+    await BibleUserData.updateOne(
+      { user: req.userId },
+      { $pull: { memorize: { id } } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('removeMemorize:', err);
+    res.status(500).json({ error: 'Error al quitar el versículo' });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Racha de lectura
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** El día anterior a 'YYYY-MM-DD', en el mismo formato. */
+function previousDay(dayKey: string): string {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  // Date.UTC evita que el horario de verano desplace el día al restar 24h.
+  const prev = new Date(Date.UTC(y, m - 1, d) - 24 * 60 * 60 * 1000);
+  return prev.toISOString().slice(0, 10);
+}
+
+// POST /bible/me/streak — "hoy he leído". Idempotente: leer diez capítulos en un
+// día cuenta como UN día, y volver a llamar no altera nada.
+//
+// El día es el LOCAL del usuario (`tz`), no UTC: leer a las 23:30 en Lima debe
+// contar como hoy, no como mañana.
+export async function markReadToday(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const tz = typeof req.body?.tz === 'string' && req.body.tz ? req.body.tz : 'UTC';
+    let today: string;
+    try {
+      today = localDateKey(new Date(), tz);
+    } catch {
+      today = localDateKey(new Date(), 'UTC'); // zona horaria inválida del cliente
+    }
+
+    await ensureDoc(req.userId!);
+    const doc = await BibleUserData.findOne({ user: req.userId }).select('streak');
+    const streak: any = doc!.streak ?? {};
+
+    if (streak.lastDay === today) {
+      // Ya contaba hoy: no se toca nada (ni se rompe la racha ni se duplica).
+      res.json(shapeStreak(streak));
+      return;
+    }
+
+    const continues = streak.lastDay === previousDay(today);
+    streak.current = continues ? (streak.current ?? 0) + 1 : 1;
+    streak.longest = Math.max(streak.longest ?? 0, streak.current);
+    streak.totalDays = (streak.totalDays ?? 0) + 1;
+    streak.lastDay = today;
+
+    doc!.streak = streak;
+    await doc!.save();
+    res.json(shapeStreak(streak));
+  } catch (err) {
+    console.error('markReadToday:', err);
+    res.status(500).json({ error: 'Error al guardar la racha' });
+  }
+}
+
+/**
+ * La racha tal y como debe VERSE hoy. Ojo: el número guardado puede estar
+ * caducado — si leíste 5 días seguidos y luego pasaste una semana sin abrir la
+ * Biblia, en la base sigue poniendo 5. La racha solo sigue viva si el último día
+ * leído fue hoy o ayer; si no, se muestra 0 (sin tocar la base: ya se corregirá
+ * al volver a leer).
+ */
+function shapeStreak(streak: any, today?: string) {
+  const last = streak?.lastDay ?? '';
+  const alive = !today || last === today || last === previousDay(today);
+  return {
+    current: alive ? streak?.current ?? 0 : 0,
+    longest: streak?.longest ?? 0,
+    totalDays: streak?.totalDays ?? 0,
+    lastDay: last,
+    isTodayDone: !!today && last === today,
+  };
+}
+
+// GET /bible/me/streak?tz=… — la racha para pintarla.
+export async function getStreak(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const tz = (req.query.tz as string) || 'UTC';
+    let today: string;
+    try {
+      today = localDateKey(new Date(), tz);
+    } catch {
+      today = localDateKey(new Date(), 'UTC');
+    }
+    const doc = await BibleUserData.findOne({ user: req.userId }).select('streak').lean();
+    res.json(shapeStreak(doc?.streak, today));
+  } catch (err) {
+    console.error('getStreak:', err);
+    res.status(500).json({ error: 'Error al cargar la racha' });
   }
 }

@@ -89,6 +89,45 @@ export async function getGroupActivities(token: string, groupId: string): Promis
   return data;
 }
 
+// Lo que hay abierto en el grupo, para la franja del chat. `iParticipate` decide
+// el tono: al que no participa se le invita; al que ya está dentro solo se le
+// informa (insistirle es ruido, y el ruido acaba en que se ignora la franja).
+export interface GroupSummaryPlan {
+  planKey: string;
+  title: string;
+  currentDay: number;
+  totalDays: number;
+  memberCount: number;
+  /** Cuántos del grupo llevan hecha la lectura de HOY. Es el dato que engancha. */
+  readToday: number;
+  iJoined: boolean;
+  isTodayDone: boolean;
+}
+
+export interface GroupSummary {
+  activities: number;
+  prayers: number;
+  /** Plan de lectura que lee el grupo (null si no hay). */
+  plan: GroupSummaryPlan | null;
+  myCommitments: number;
+  myPrayers: number;
+  iParticipate: boolean;
+}
+
+export async function getGroupSummary(
+  token: string,
+  groupId: string
+): Promise<GroupSummary | null> {
+  try {
+    const { data } = await api.get<GroupSummary>(`/groups/${groupId}/activities/summary`, h(token));
+    return data;
+  } catch {
+    // Sin conexión (o backend viejo): el chat debe abrirse igual, solo que sin la
+    // franja.
+    return null;
+  }
+}
+
 export async function createActivity(
   token: string,
   groupId: string,

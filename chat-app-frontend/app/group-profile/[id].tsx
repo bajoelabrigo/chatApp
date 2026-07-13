@@ -96,6 +96,12 @@ export default function GroupProfileScreen() {
   });
   const [savingPerms, setSavingPerms] = useState(false);
 
+  // Visibilidad: si el grupo sale en "Descubre grupos" y con qué descripción.
+  // Va junto a los permisos y se guarda con ellos (mismo botón), para no añadir
+  // un segundo "Guardar" que nadie pulsaría.
+  const [discoverEdit, setDiscoverEdit] = useState(false);
+  const [descEdit, setDescEdit] = useState('');
+
   const [tempEdit, setTempEdit] = useState<number | null>(null);
   const [savingTemp, setSavingTemp] = useState(false);
 
@@ -130,6 +136,8 @@ export default function GroupProfileScreen() {
         membersCanInvite: true,
         requireAdminApproval: false,
       });
+      setDiscoverEdit(!!(data as any).isDiscoverable);
+      setDescEdit((data as any).groupDescription ?? '');
       setTempEdit(data.tempMessageDuration ?? null);
     } finally {
       setLoading(false);
@@ -189,8 +197,16 @@ export default function GroupProfileScreen() {
     if (!token || !group) return;
     setSavingPerms(true);
     try {
-      await updateGroup(token, groupId, { permissions: permEdit });
-      setGroup((g) => g ? { ...g, permissions: permEdit } : g);
+      // La visibilidad se guarda con los permisos: es el mismo botón "Guardar" y
+      // así no hay un segundo botón que nadie pulsaría.
+      await updateGroup(token, groupId, {
+        permissions: permEdit,
+        isDiscoverable: discoverEdit,
+        groupDescription: descEdit.trim(),
+      } as any);
+      setGroup((g) =>
+        g ? ({ ...g, permissions: permEdit, isDiscoverable: discoverEdit, groupDescription: descEdit.trim() } as any) : g
+      );
       setShowPermissions(false);
     } catch {
       Alert.alert('Error', 'No se pudo actualizar los permisos');
@@ -803,6 +819,55 @@ export default function GroupProfileScreen() {
                   thumbColor="#fff"
                 />
               </View>
+            </View>
+
+            {/* Visibilidad. Va aparte de los permisos porque no es lo mismo:
+                los permisos regulan lo que pasa DENTRO del grupo; esto decide si
+                el grupo existe para el resto del mundo. */}
+            <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 }}>
+              Visibilidad
+            </Text>
+            <View style={s.card}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 }}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={{ color: colors.textPrimary, fontSize: 14 }}>Visible para todos</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+                    Aparecerá en "Descubre grupos" y cualquiera podrá pedir unirse.
+                    Los mensajes y las peticiones de oración solo los ven los miembros.
+                  </Text>
+                </View>
+                <Switch
+                  value={discoverEdit}
+                  onValueChange={setDiscoverEdit}
+                  trackColor={{ false: colors.border, true: colors.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              {discoverEdit && (
+                <View style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
+                  <TextInput
+                    value={descEdit}
+                    onChangeText={setDescEdit}
+                    maxLength={200}
+                    multiline
+                    placeholder="¿De qué es este grupo? (se ve en la lista)"
+                    placeholderTextColor={colors.inputPlaceholder}
+                    style={{
+                      backgroundColor: colors.inputBg,
+                      color: colors.inputText,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      fontSize: 14,
+                      minHeight: 60,
+                      textAlignVertical: 'top',
+                    }}
+                  />
+                </View>
+              )}
             </View>
           </ScrollView>
         </SafeAreaView>

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import path from 'path';
 import { getDailyRef, localDateKey, BOOK_NAMES_EN } from '../lib/dailyVerses';
 import { BOOK_NAMES } from '../lib/readingPlans';
+import { TOPICS, TOPIC_CATEGORIES, getTopic } from '../lib/bibleTopics';
 
 type BibleData = Record<string, Record<string, Record<string, string>>>;
 
@@ -236,6 +237,246 @@ export function searchVerses(req: Request, res: Response) {
     return;
   }
   res.json(results);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Referencias cruzadas
+//
+// Dataset de openbible.info (CC-BY), derivado del Treasury of Scripture
+// Knowledge. Son solo PUNTEROS (Juan 3:16 → Romanos 5:8), no texto bíblico, así
+// que no arrastran las restricciones de copyright de una traducción: el texto que
+// se muestra sale siempre de nuestras versiones de dominio público.
+//
+// El JSON está indexado por ÍNDICE de libro (0–65, orden canónico), no por
+// nombre, para ser agnóstico de versión — igual que los planes de lectura. La
+// clave es "libro.capítulo.versículo" y el valor, los destinos ordenados de más
+// a menos respaldados: [libro, capítulo, versículo] o [libro, capítulo, desde,
+// hasta] cuando el destino es un tramo.
+// La licencia CC-BY obliga a atribuir: los clientes muestran `source`.
+type XrefTarget = [number, number, number] | [number, number, number, number];
+type XrefData = Record<string, XrefTarget[]>;
+
+export const XREF_SOURCE = 'openbible.info (CC BY)';
+
+// Misma carga perezosa que las versiones: ~2,6 MB que solo pagan quienes usan la
+// función.
+let xrefCache: XrefData | null = null;
+function loadXrefs(): XrefData {
+  if (!xrefCache) xrefCache = require(path.join(lib, 'XREFS.json')) as XrefData;
+  return xrefCache;
+}
+
+/**
+ * Los nombres de libro de las 7 versiones coinciden EXACTAMENTE con las listas
+ * canónicas (verificado: 66/66 en cada versión), así que la posición en la lista
+ * del idioma es el índice canónico. Si algún día una versión nueva nombrara los
+ * libros de otra forma, esto devuelve -1 y la función se degrada a "sin
+ * referencias" en vez de apuntar al libro equivocado.
+ */
+function bookNames(version: VersionId): string[] {
+  return VERSION_META[version].lang === 'en' ? BOOK_NAMES_EN : BOOK_NAMES;
+}
+
+export interface XrefResult {
+  book: string;
+  chapter: string;
+  verse: string;
+  endVerse?: string;
+  text: string;
+}
+
+/** Los destinos de un versículo, ya resueltos a nombre y texto de `version`. */
+function resolveTargets(
+  targets: XrefTarget[],
+  version: VersionId,
+  data: BibleData
+): XrefResult[] {
+  const names = bookNames(version);
+  const out: XrefResult[] = [];
+
+  for (const t of targets) {
+    const [bookIdx, chapter, from, to] = t;
+    const book = names[bookIdx];
+    if (!book) continue;
+
+    const chapterData = data[book]?.[String(chapter)];
+    if (!chapterData) continue;
+
+    // Un tramo (Ps.148.4-5) se muestra como un solo bloque de texto. Si alguno de
+    // los versículos del tramo no existe en esta versión, se usa lo que haya.
+    const last = to && to > from ? to : from;
+    const parts: string[] = [];
+    for (let v = from; v <= last; v++) {
+      const text = chapterData[String(v)];
+      if (text) parts.push(text.trim());
+    }
+    if (!parts.length) continue;
+
+    out.push({
+      book,
+      chapter: String(chapter),
+      verse: String(from),
+      ...(last > from ? { endVerse: String(last) } : {}),
+      text: parts.join(' '),
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Cuántas referencias cruzadas tiene cada versículo del capítulo:
+ * `{ "1": 4, "16": 10 }`. Solo números — el cliente lo pide al abrir el capítulo
+ * para pintar el indicador junto a cada versículo, así que tiene que ser
+ * diminuto. Los versículos sin referencias no aparecen.
+ */
+export function getChapterXrefCounts(req: Request, res: Response) {
+  const version = resolveVersionId(req);
+  const names = bookNames(version);
+  const book = decodeURIComponent(req.params.book);
+  const bookIdx = names.indexOf(book);
+  if (bookIdx < 0) { res.json({}); return; }
+
+  const chapter = parseInt(req.params.chapter, 10);
+  if (!Number.isFinite(chapter)) { res.json({}); return; }
+
+  const xrefs = loadXrefs();
+  const counts: Record<string, number> = {};
+  const prefix = `${bookIdx}.${chapter}.`;
+
+  // Se recorren los versículos del capítulo (no las 29.000 claves del dataset):
+  // el capítulo más largo es Salmos 119 con 176.
+  const { data } = loadVersion(version);
+  const chapterData = data[book]?.[String(chapter)];
+  if (!chapterData) { res.json({}); return; }
+
+  for (const verse of Object.keys(chapterData)) {
+    const hit = xrefs[prefix + verse];
+    if (hit?.length) counts[verse] = hit.length;
+  }
+
+  res.json(counts);
+}
+
+/**
+ * Las referencias cruzadas de UN versículo, con el texto de cada pasaje ya
+ * resuelto en la versión activa. Una sola petición pinta el panel entero: sin
+ * esto el cliente tendría que pedir 10 versículos sueltos.
+ */
+export function getVerseXrefs(req: Request, res: Response) {
+  const version = resolveVersionId(req);
+  const { data } = loadVersion(version);
+  const names = bookNames(version);
+
+  const book = decodeURIComponent(req.params.book);
+  const bookIdx = names.indexOf(book);
+  const chapter = parseInt(req.params.chapter, 10);
+  const verse = parseInt(req.params.verse, 10);
+
+  if (bookIdx < 0 || !Number.isFinite(chapter) || !Number.isFinite(verse)) {
+    res.status(404).json({ error: 'Referencia no válida' });
+    return;
+  }
+
+  const targets = loadXrefs()[`${bookIdx}.${chapter}.${verse}`] ?? [];
+  res.json({
+    book,
+    chapter: String(chapter),
+    verse: String(verse),
+    version,
+    source: XREF_SOURCE,
+    results: resolveTargets(targets, version, data),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Temas: pasajes para un momento concreto (boda, cumpleaños, visita, duelo…).
+//
+// Resuelve el catálogo de `lib/bibleTopics.ts` (referencias por índice de libro,
+// agnósticas de versión) al nombre y al texto de la versión que pida el cliente.
+//
+// Cada pasaje se devuelve VERSÍCULO A VERSÍCULO, aunque sea un rango (Salmos
+// 23:1-6): así cada versículo conserva su clave `libro:capítulo:versículo` y con
+// ella TODO lo que ya existe —favorito, resaltado, nota, etiquetas, compartir,
+// referencias cruzadas, memorizar, pedir oración—. Devolver el rango como un
+// bloque de texto habría dejado esas acciones sin a qué agarrarse.
+
+export interface TopicPassage {
+  book: string;
+  chapter: string;
+  from: string;
+  to?: string;
+  /** "Salmos 23:1-6" — la referencia tal y como se muestra. */
+  label: string;
+  verses: { verse: string; text: string }[];
+}
+
+// GET /bible/topics — el catálogo (sin texto: solo los temas y cuántos pasajes).
+export function getTopics(_req: Request, res: Response) {
+  res.json({
+    categories: TOPIC_CATEGORIES,
+    topics: TOPICS.map((t) => ({
+      key: t.key,
+      title: t.title,
+      description: t.description,
+      category: t.category,
+      emoji: t.emoji,
+      count: t.refs.length,
+    })),
+  });
+}
+
+// GET /bible/topics/:key?version=… — los pasajes del tema, con su texto.
+export function getTopicDetail(req: Request, res: Response) {
+  const topic = getTopic(req.params.key);
+  if (!topic) {
+    res.status(404).json({ error: 'Tema no encontrado' });
+    return;
+  }
+
+  const version = resolveVersionId(req);
+  const { data } = loadVersion(version);
+  const names = bookNames(version);
+
+  const passages: TopicPassage[] = [];
+
+  for (const ref of topic.refs) {
+    const [bookIdx, chapter, from, to] = ref;
+    const book = names[bookIdx];
+    if (!book) continue;
+
+    const chapterData = data[book]?.[String(chapter)];
+    if (!chapterData) continue;
+
+    const last = to && to > from ? to : from;
+    const verses: { verse: string; text: string }[] = [];
+    for (let v = from; v <= last; v++) {
+      const text = chapterData[String(v)];
+      if (text) verses.push({ verse: String(v), text: text.trim() });
+    }
+    // Un pasaje que no existe en esta versión se omite en vez de salir vacío.
+    if (!verses.length) continue;
+
+    const realLast = verses[verses.length - 1].verse;
+    passages.push({
+      book,
+      chapter: String(chapter),
+      from: String(from),
+      ...(realLast !== String(from) ? { to: realLast } : {}),
+      label: `${book} ${chapter}:${from}${realLast !== String(from) ? `-${realLast}` : ''}`,
+      verses,
+    });
+  }
+
+  res.json({
+    key: topic.key,
+    title: topic.title,
+    description: topic.description,
+    category: topic.category,
+    emoji: topic.emoji,
+    version,
+    passages,
+  });
 }
 
 export function downloadBible(req: Request, res: Response) {

@@ -5,13 +5,16 @@ import {
   addGroupMembers, removeGroupMember, toggleAdmin,
   deleteGroup, leaveGroup, reportGroup, joinGroup,
   getPendingMembers, approvePendingMember, rejectPendingMember,
-  getGroupMedia,
+  getGroupMedia, discoverGroups,
 } from '../controllers/groupController';
 
 const router = Router();
 
 router.use(authMiddleware);
 router.post('/', createGroup);
+// Descubrir grupos. ANTES de `/:id` o Express tomaría "discover" por el id de un
+// grupo y devolvería 404.
+router.get('/discover', discoverGroups);
 router.get('/:id', getGroupInfo);
 router.get('/:id/media', getGroupMedia);
 router.patch('/:id', updateGroup);

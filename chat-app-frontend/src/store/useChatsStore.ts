@@ -25,6 +25,7 @@ interface ChatsState {
   editMessage: (messageId: string, conversationId: string, content: string, editedAt: string) => void;
   deleteMessage: (messageId: string, conversationId: string, deletedForEveryone: boolean, currentUserId?: string) => void;
   updateReactions: (messageId: string, conversationId: string, reactions: Reaction[]) => void;
+  updatePoll: (messageId: string, conversationId: string, poll: Message['poll']) => void;
   setUserOnline: (userId: string) => void;
   setUserOffline: (userId: string) => void;
   setTyping: (conversationId: string, userId: string, isTyping: boolean) => void;
@@ -178,6 +179,19 @@ export const useChatsStore = create<ChatsState>()(
       },
     })),
 
+  // Votos de una encuesta. Mismo patrón que las reacciones: el servidor manda la
+  // encuesta ENTERA ya actualizada y aquí solo se sustituye, sin recalcular nada
+  // en el cliente (que es donde se colarían los descuadres si dos votan a la vez).
+  updatePoll: (messageId, conversationId, poll) =>
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [conversationId]: (s.messages[conversationId] ?? []).map((m) =>
+          m._id === messageId ? { ...m, poll } : m
+        ),
+      },
+    })),
+
   setUserOnline: (userId) =>
     set((s) => {
       const next = new Set(s.onlineUsers);
@@ -313,14 +327,21 @@ export const useChatsStore = create<ChatsState>()(
         conversationId,
         content,
         editedAt,
+        poll,
       }: {
         messageId: string;
         conversationId: string;
         content: string;
         editedAt: string;
+        poll?: Message['poll'];
       }) => {
         console.log('[store] message:edited received', messageId);
         store.editMessage(messageId, conversationId, content, editedAt);
+        // Al editar una ENCUESTA lo que se corrige es la pregunta, y la burbuja
+        // pinta `poll.question`, no `content`. Sin esto, la lista de chats mostraba
+        // el texto nuevo y la burbuja seguía con el viejo. Se reutiliza `updatePoll`
+        // en vez de cambiar la firma de `editMessage`.
+        if (poll) store.updatePoll(messageId, conversationId, poll);
       }
     );
     socket.on(
@@ -345,6 +366,14 @@ export const useChatsStore = create<ChatsState>()(
       ({ messageId, conversationId, reactions }: { messageId: string; conversationId: string; reactions: Reaction[] }) => {
         console.log('[store] message:reaction received', messageId, reactions);
         store.updateReactions(messageId, conversationId, reactions);
+      }
+    );
+    // Votos de una encuesta: el servidor manda la encuesta entera ya actualizada,
+    // así que las barras se mueven en vivo para todos los del grupo.
+    socket.on(
+      'poll:update',
+      ({ messageId, conversationId, poll }: { messageId: string; conversationId: string; poll: Message['poll'] }) => {
+        store.updatePoll(messageId, conversationId, poll);
       }
     );
     socket.on('users:online', ({ userIds }: { userIds: string[] }) => {

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, memo } from 'react';
+import { useRef, useEffect, useState, useMemo, memo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, Image, Linking, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message, MessageReplyTo, Reaction, ChatUser, SharedContact } from '../../services/conversationService';
@@ -6,6 +6,8 @@ import { VoicePlayer } from './VoicePlayer';
 import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
 import { parseFormatting } from '../../utils/chatFormat';
+import { splitMentions } from '../../utils/mentions';
+import { PollBubble } from './PollBubble';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 const EMOJI_ONLY_REGEX = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
@@ -36,6 +38,19 @@ function nameColor(key: string, isDark: boolean): string {
 // ahora resuelven al MISMO color de la web, para que web y app coincidan.
 const bubbleNameColor = nameColor;
 const labelNameColor = nameColor;
+
+// Recorte de los mensajes largos ("Ver más"). Vive en el módulo porque el
+// troceado del texto (memoizado) lo necesita antes de que se declare nada dentro
+// del componente.
+const MAX_LENGTH = 250;
+
+// Un trozo del texto ya preparado para pintar: o es una URL, o es texto con sus
+// menciones ya marcadas. Se calcula una vez (memoizado) en vez de en cada render.
+type TextPart = {
+  type: string;
+  value: string;
+  pieces: ReturnType<typeof splitMentions>;
+};
 
 function isEmojiOnly(text: string): boolean {
   return EMOJI_ONLY_REGEX.test(text.trim()) && text.trim().length > 0;
@@ -258,6 +273,8 @@ interface Props {
   isMine: boolean;
   currentUserId: string;
   isGroup?: boolean;
+  /** Miembros del grupo, para resaltar las menciones (@nombre) del texto. */
+  mentionUsers?: { _id: string; name: string; avatar?: string }[];
   onLongPress: (msg: Message) => void;
   onDownload: (msg: Message) => void;
   showAvatar?: boolean;
@@ -266,12 +283,16 @@ interface Props {
   onReactDetail?: (msg: Message, emoji: string) => void;
   onAvatarPress?: (sender: ChatUser) => void;
   onReplyPress?: (messageId?: string) => void;
+  /** Votar en una encuesta (índice de la opción tocada). */
+  onVote?: (msg: Message, optionIndex: number) => void;
+  /** Cerrar la votación (solo el autor; el backend lo vuelve a comprobar). */
+  onClosePoll?: (msg: Message) => void;
   /** Botón "Mensaje" de una tarjeta de contacto compartido. */
   onContactPress?: (contact: SharedContact) => void;
   highlighted?: boolean;
 }
 
-function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, mentionUsers, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, onVote, onClosePoll, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId.name;
@@ -280,6 +301,25 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   // holy_app Message.jsx) mostrando los primeros MAX_LENGTH caracteres con un
   // botón para expandir. Evita burbujas gigantescas en la lista.
   const [expanded, setExpanded] = useState(false);
+
+  // El texto ya troceado: primero por URLs y, dentro de cada trozo, por menciones.
+  //
+  // Va en un `useMemo` y ARRIBA DEL TODO por dos razones. La de rendimiento:
+  // `splitMentions` recorre TODOS los miembros del grupo (con un `fold()` del texto
+  // por nombre), y sin memo eso se repetía en cada render de cada burbuja — en un
+  // grupo de 100 miembros, durante el scroll, es trabajo tirado en el hilo de UI.
+  // La de corrección: debajo hay un `return null` (mensaje borrado para mí), y un
+  // hook después de un return condicional rompe las reglas de los hooks.
+  const parts = useMemo<TextPart[]>(() => {
+    if (item.type !== 'text' || item.isDeletedForEveryone) return [];
+    const full = item.content ?? '';
+    const shown = full.length > MAX_LENGTH && !expanded ? full.slice(0, MAX_LENGTH) : full;
+    return splitByUrls(shown).map((p) => ({
+      ...p,
+      // En una URL no hay menciones que buscar.
+      pieces: p.type === 'url' ? [] : splitMentions(p.value, mentionUsers ?? []),
+    }));
+  }, [item.type, item.content, item.isDeletedForEveryone, expanded, mentionUsers]);
 
   const deletedForMe = item.deletedFor?.includes(currentUserId);
   if (deletedForMe) return null;
@@ -291,23 +331,26 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isText = item.type === 'text';
   const isCall = item.type === 'call';
   const isContact = item.type === 'contact';
+  const isPoll = item.type === 'poll';
   const isMedia = isImage || isAudio || isDocument;
   // El nombre del remitente va encima de la burbuja (no dentro) en todo lo que
   // no es texto plano, porque esas burbujas no dejan hueco para la cabecera.
-  const showSenderLabel = isMedia || isContact;
+  const showSenderLabel = isMedia || isContact || isPoll;
   // Tipo que esta versión de la app no sabe pintar (el backend ya lo envía pero
   // el bundle es viejo). Sin esto la burbuja saldría vacía y el mensaje parecería
   // no haber llegado nunca; pasó al estrenar `contact`.
-  const isUnknownType = !isMedia && !isText && !isCall && !isContact;
+  //
+  // OJO: al añadir un tipo hay que registrarlo AQUÍ además de darle su rama. Si se
+  // olvida, el tipo nuevo cae en "desconocido" y el usuario ve "Actualiza la
+  // aplicación" aunque su app esté al día.
+  const isUnknownType = !isMedia && !isText && !isCall && !isContact && !isPoll;
 
   const emojiOnly = isText && !isDeleted && isEmojiOnly(item.content);
   // Recorte de texto largo (igual que la web): si supera MAX_LENGTH y no está
-  // expandido, se muestra solo el inicio + botón "Ver más".
-  const MAX_LENGTH = 250;
+  // expandido, se muestra solo el inicio + botón "Ver más". El troceado en sí ya
+  // está hecho arriba, en `parts` (memoizado).
   const fullText = isText && !isDeleted ? item.content : '';
   const shouldTruncate = isText && !isDeleted && !emojiOnly && fullText.length > MAX_LENGTH;
-  const displayText = shouldTruncate && !expanded ? fullText.slice(0, MAX_LENGTH) : fullText;
-  const parts = isText && !isDeleted ? splitByUrls(displayText) : [];
   const firstUrl = parts.find((p) => p.type === 'url')?.value;
 
   const senderLabel = isMine ? 'Tú' : item.senderId.name;
@@ -486,6 +529,38 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
           <View style={{ paddingHorizontal: 14, paddingBottom: 8 }}>{timestamp}</View>
         </Pressable>
       )}
+      {/* POLL — encuesta (pregunta + opciones votables con sus barras) */}
+      {isPoll && !isDeleted && item.poll && (
+        <Pressable
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={400}
+          style={[{
+            borderRadius: 18,
+            borderTopRightRadius: isMine ? 4 : 18,
+            borderTopLeftRadius: isMine ? 18 : 4,
+            backgroundColor: bubbleBg,
+            padding: 12,
+            maxWidth: 300,
+          }, bubbleShadow]}
+        >
+          <PollBubble
+            poll={item.poll}
+            currentUserId={currentUserId}
+            colors={colors}
+            textColor={bubbleText}
+            subtextColor={bubbleSubtext}
+            onVote={(optionIndex) => onVote?.(item, optionIndex)}
+            // Solo el autor cierra su encuesta. El backend lo vuelve a comprobar
+            // (autor o admin del grupo): la UI decide qué se ve, no quién puede.
+            canClose={isMine}
+            onClose={() => onClosePoll?.(item)}
+          />
+          <Text style={{ color: bubbleSubtext, fontSize: 10, alignSelf: 'flex-end', marginTop: 6 }}>
+            {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
+        </Pressable>
+      )}
+
       {/* CONTACT — tarjeta de contacto compartido (foto + nombre + "Mensaje") */}
       {isContact && !isDeleted && (
         <Pressable
@@ -639,19 +714,44 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
                       {part.value}
                     </Text>
                   ) : (
-                    // Formato tipo WhatsApp (*negrita*, _cursiva_, ~tachado~)
-                    parseFormatting(part.value).map((seg, j) => (
-                      <Text
-                        key={`${i}-${j}`}
-                        style={{
-                          fontWeight: seg.bold ? '700' : undefined,
-                          fontStyle: seg.italic ? 'italic' : undefined,
-                          textDecorationLine: seg.strike ? 'line-through' : undefined,
-                        }}
-                      >
-                        {seg.text}
-                      </Text>
-                    ))
+                    // Menciones primero y formato después: una mención es un
+                    // nombre, no lleva *negrita* dentro, y así el resaltado no se
+                    // parte por la mitad si el nombre contiene un guion bajo.
+                    // Ya troceado arriba (memoizado): aquí solo se pinta.
+                    part.pieces.map((piece, m) =>
+                      piece.mentionOf ? (
+                        <Text
+                          key={`${i}-m${m}`}
+                          style={{
+                            // A MÍ la mención me sale más marcada: el objetivo es
+                            // que la vea quien está mencionado, no decorar el texto.
+                            fontWeight: '700',
+                            color:
+                              piece.mentionOf === currentUserId
+                                ? isMine && isDark
+                                  ? '#fff'
+                                  : colors.accent
+                                : bubbleText,
+                          }}
+                        >
+                          {piece.text}
+                        </Text>
+                      ) : (
+                        // Formato tipo WhatsApp (*negrita*, _cursiva_, ~tachado~)
+                        parseFormatting(piece.text).map((seg, j) => (
+                          <Text
+                            key={`${i}-${m}-${j}`}
+                            style={{
+                              fontWeight: seg.bold ? '700' : undefined,
+                              fontStyle: seg.italic ? 'italic' : undefined,
+                              textDecorationLine: seg.strike ? 'line-through' : undefined,
+                            }}
+                          >
+                            {seg.text}
+                          </Text>
+                        ))
+                      )
+                    )
                   )
                 )}
               </Text>

@@ -22,6 +22,16 @@ export interface IConversation extends Document {
   admins: Types.ObjectId[];
   permissions: IGroupPermissions;
   tempMessageDuration: number | null;
+  // ¿Puede encontrarse este grupo desde "Descubrir grupos"?
+  //
+  // Por defecto NO (false): los grupos que ya existen se crearon con la
+  // expectativa de ser privados, y sus peticiones de oración suelen ser muy
+  // íntimas. Es el admin quien decide exponerlo. Hasta ahora solo se entraba a un
+  // grupo si un admin te metía o por un enlace compartido; no había forma de
+  // encontrarlos, y por eso los grupos no crecían.
+  isDiscoverable: boolean;
+  // Descripción corta que se ve en la lista de descubrir ("qué es este grupo").
+  groupDescription?: string;
   // Solicitudes de ingreso pendientes de aprobación (grupos con requireAdminApproval).
   pendingMembers: { userId: Types.ObjectId; requestedAt: Date }[];
   // Miembros aprobados recientemente (para derivar la notificación "fuiste aceptado").
@@ -50,6 +60,10 @@ const ConversationSchema = new Schema<IConversation>(
       requireAdminApproval: { type: Boolean, default: false },
     },
     tempMessageDuration: { type: Number, default: null },
+    // Los grupos que YA existen se crearon esperando ser privados: por defecto no
+    // se descubren. El admin decide exponerlos.
+    isDiscoverable: { type: Boolean, default: false },
+    groupDescription: { type: String, maxlength: 200 },
     pendingMembers: [
       {
         userId: { type: Schema.Types.ObjectId, ref: 'User' },

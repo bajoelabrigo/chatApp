@@ -7,7 +7,7 @@ export interface ChatUser {
   avatar?: string;
 }
 
-export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact';
+export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact' | 'poll';
 
 export interface MessageReplyTo {
   messageId: string;
@@ -46,6 +46,13 @@ export interface Message {
   callType?: 'audio' | 'video';
   callDuration?: number;
   contact?: SharedContact;
+  /** Encuesta (`type: 'poll'`). Los votos van dentro de cada opción. */
+  poll?: {
+    question: string;
+    options: { text: string; votes: string[] }[];
+    multiple: boolean;
+    closed: boolean;
+  };
   replyTo?: MessageReplyTo;
   reactions?: Reaction[];
   createdAt: string;
@@ -335,6 +342,36 @@ export async function deleteGroup(token: string, groupId: string) {
     headers: { Authorization: `Bearer ${token}` },
   });
   return data as { ok: boolean };
+}
+
+// Grupos que puedo encontrar y a los que puedo pedir unirme.
+//
+// Solo salen los que su admin marcó como visibles, y nunca los míos. La
+// maquinaria para ENTRAR (solicitud + aprobación) ya existía; lo que faltaba era
+// poder descubrirlos: hasta ahora solo se entraba si un admin te metía o si
+// alguien te pasaba un enlace.
+export interface DiscoverableGroup {
+  _id: string;
+  groupName: string;
+  groupAvatar: string | null;
+  groupDescription: string;
+  memberCount: number;
+  requiresApproval: boolean;
+  /** Ya pedí entrar y espero al admin: el botón debe decirlo, no invitar otra vez. */
+  requestPending: boolean;
+}
+
+export async function discoverGroups(token: string, q = ''): Promise<DiscoverableGroup[]> {
+  try {
+    const { data } = await api.get<DiscoverableGroup[]>('/groups/discover', {
+      headers: { Authorization: `Bearer ${token}` },
+      params: q ? { q } : {},
+    });
+    return data;
+  } catch {
+    // Sin conexión (o backend viejo): la lista de chats debe abrirse igual.
+    return [];
+  }
 }
 
 // Unirse a un grupo mediante un enlace compartido (chatapp://g/:id).

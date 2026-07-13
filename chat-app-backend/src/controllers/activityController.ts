@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { Conversation } from '../models/Conversation';
 import { GroupActivity, ACTIVITY_META, ActivityType } from '../models/GroupActivity';
 import { ActivityCommitment } from '../models/ActivityCommitment';
+import { PrayerRequest } from '../models/PrayerRequest';
+import { ReadingPlanSubscription } from '../models/ReadingPlanSubscription';
+import { getPlanForSub } from './readingPlanController';
+import { computeCurrentDay } from '../lib/readingPlans';
 import { User } from '../models/User';
 import { getIO } from '../socket/ioSingleton';
 import { sendCommitmentConfirmation, sendActivityNotification } from '../services/emailService';
@@ -11,6 +15,103 @@ import { isGlobalAdmin } from '../services/adminService';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
+}
+
+/**
+ * GET /groups/:groupId/activities/summary
+ *
+ * Lo que hay abierto en el grupo, para la franja del CHAT. Hasta ahora las
+ * actividades y las peticiones de oración vivían en pantallas aparte y la única
+ * puerta desde el chat eran dos iconos redondos de 34px sin etiqueta ni número:
+ * quien no supiera lo que eran, no los tocaba. Y la gente pasa el tiempo en el
+ * chat, no en esas pantallas.
+ *
+ * Devuelve también `iParticipate`: la franja NO debe insistir a quien ya está
+ * dentro. A ese solo se le informa; al que no participa se le invita.
+ */
+export async function getGroupSummary(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const { groupId } = req.params;
+
+    const conv = await assertMember(groupId, userId);
+    if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
+
+    const [activities, prayers, myCommitments, myPrayers, planSubs] = await Promise.all([
+      GroupActivity.countDocuments({ groupId }),
+      PrayerRequest.countDocuments({ groupId, isAnswered: false }),
+      ActivityCommitment.countDocuments({ groupId, userId, isActive: true }),
+      PrayerRequest.countDocuments({ groupId, isAnswered: false, 'prayingUsers.userId': userId }),
+      // Plan de lectura que lee el grupo (las suscripciones ligadas a él).
+      //
+      // ORDENADO por fecha de inicio: sin `sort`, MongoDB no garantiza el orden, y
+      // si el grupo lee DOS planes, `planSubs[0]` podía ser uno u otro según la
+      // consulta. Dos miembros —o el mismo, al recargar— veían el chip apuntando a
+      // planes distintos. Con el orden fijado, "el plan del grupo" es siempre el
+      // que empezaron primero.
+      ReadingPlanSubscription.find({ group: groupId }).sort({ startDate: 1, planKey: 1 }).lean(),
+    ]);
+
+    // ── Plan de lectura del grupo ─────────────────────────────
+    //
+    // Los planes de grupo existían pero solo se descubrían entrando a la pestaña
+    // Biblia → Planes: un grupo podía tener un plan activo y sus propios miembros
+    // no enterarse, porque viven en el CHAT. Este bloque los trae a la franja.
+    //
+    // El dato que engancha no es "hay un plan": es cuántos del grupo YA LEYERON
+    // HOY. Ver que tres de cinco van al día es lo que levanta del sofá; un título
+    // de plan, no.
+    let plan: any = null;
+    if (planSubs.length) {
+      // Si el grupo lee varios planes se muestra el que empezaron primero (la
+      // consulta va ordenada): la franja es una pista, no una lista.
+      const planKey = planSubs[0].planKey;
+      const subs = planSubs.filter((s: any) => s.planKey === planKey);
+      const def = getPlanForSub(subs[0]);
+
+      if (def) {
+        const mySub = subs.find((s: any) => s.user?.toString() === userId);
+
+        // El día en curso se calcula con la zona horaria de CADA miembro (en
+        // Madrid y en Lima el día no cambia a la vez), pero la fecha de inicio es
+        // la misma para todos: por eso "el día 12" significa lo mismo.
+        const readToday = subs.filter((s: any) => {
+          const day = computeCurrentDay(s.startDate, s.timezone, def.totalDays);
+          return (s.completedDays || []).includes(day);
+        }).length;
+
+        const myDay = computeCurrentDay(
+          (mySub ?? subs[0]).startDate,
+          (mySub ?? subs[0]).timezone ?? 'UTC',
+          def.totalDays
+        );
+
+        plan = {
+          planKey,
+          title: def.title,
+          currentDay: myDay,
+          totalDays: def.totalDays,
+          memberCount: subs.length,
+          readToday,
+          iJoined: !!mySub,
+          isTodayDone: !!mySub && (mySub.completedDays || []).includes(myDay),
+        };
+      }
+    }
+
+    res.json({
+      activities,
+      prayers,
+      myCommitments,
+      myPrayers,
+      plan,
+      // "Ya participo" incluye el plan: quien lee con el grupo está dentro, y la
+      // franja no debe insistirle.
+      iParticipate: myCommitments > 0 || myPrayers > 0 || !!plan?.iJoined,
+    });
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo el resumen del grupo' });
+  }
 }
 
 // Resuelve la conversación de grupo permitiendo al admin general (web role:'admin')

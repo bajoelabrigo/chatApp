@@ -14,7 +14,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { useFocusEffect, router } from 'expo-router';
+import { useFocusEffect, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -46,8 +46,22 @@ import {
   updateReadingPlan,
   toggleReadingPlanDay,
   unsubscribeReadingPlan,
+  fetchGroupPlans,
+  fetchMemorize,
+  addMemorize,
+  reviewMemorize,
+  removeMemorize,
+  fetchStreak,
+  markReadToday,
 } from '../../src/services/bibleService';
-import type { BibleVerse, BibleSearchResult, BibleVersion, DailyVerse } from '../../src/services/bibleService';
+import type {
+  BibleVerse,
+  BibleSearchResult,
+  BibleVersion,
+  DailyVerse,
+  MemorizeVerse,
+  ReadingStreak,
+} from '../../src/services/bibleService';
 import { getSettingsApi, updateSettingsApi } from '../../src/services/userService';
 import VerseImageSheet from '../../src/components/bible/VerseImageSheet';
 import { useSpeech } from '../../src/hooks/useSpeech';
@@ -77,13 +91,21 @@ import type { ScreenView, BookOrder, VerseItem } from '../../src/constants/bible
 import { DailyVerseCard } from '../../src/components/bible/DailyVerseCard';
 import { PrayerFeedCard } from '../../src/components/bible/PrayerFeedCard';
 import { ContinueReadingCard } from '../../src/components/bible/ContinueReadingCard';
+import { GroupPlanCard } from '../../src/components/bible/GroupPlanCard';
 import { DownloadBanner } from '../../src/components/bible/DownloadBanner';
 import { VerseTagsModal } from '../../src/components/bible/VerseTagsModal';
+import { CrossRefsModal } from '../../src/components/bible/CrossRefsModal';
+import type { CrossRef } from '../../src/services/bibleService';
 import { PrayerRequestModal } from '../../src/components/bible/PrayerRequestModal';
 import type { PrayerSubmission } from '../../src/components/bible/PrayerRequestModal';
 import { ReadingSettingsMenu } from '../../src/components/bible/ReadingSettingsMenu';
 import { VersionPickerModal, ComparePickerModal } from '../../src/components/bible/VersionPickerModal';
 import { ReadingPlansView } from '../../src/components/bible/ReadingPlansView';
+import { GroupPlanPickerModal } from '../../src/components/bible/GroupPlanPickerModal';
+import { MemorizeView } from '../../src/components/bible/MemorizeView';
+import { TopicsView } from '../../src/components/bible/TopicsView';
+import { VerseActionsSheet } from '../../src/components/bible/VerseActionsSheet';
+import { BookChapterPicker } from '../../src/components/bible/BookChapterPicker';
 import { CreatePlanModal } from '../../src/components/bible/CreatePlanModal';
 import type { CustomPlanDraft } from '../../src/components/bible/CreatePlanModal';
 
@@ -91,6 +113,15 @@ export default function BibleScreen() {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { token } = useAuthStore();
+
+  // Entrada desde otro tab: /(tabs)/bible?section=plans (lo usa el botón del plan
+  // de lectura en el chat del grupo). Sin esto, el botón dejaría al usuario en la
+  // portada de la Biblia, buscando dónde está el plan.
+  //
+  // El `useRef` evita reabrir la sección si el usuario vuelve al tab sin cambiar
+  // el parámetro (mismo patrón que en settings.tsx).
+  const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
+  const handledSection = useRef<string | null>(null);
   // Grupos del usuario: las peticiones de oración cuelgan de un grupo.
   const conversations = useChatsStore((s) => s.conversations);
   const {
@@ -160,6 +191,12 @@ export default function BibleScreen() {
   const [dailyPhoto, setDailyPhoto] = useState<string | null>(null);
   // null = aún no sabemos si tiene el aviso diario activo → no se pinta la campana.
   const [dailyReminder, setDailyReminder] = useState<boolean | null>(null);
+
+  // Fotos de fondo de las otras dos tarjetas de la portada (grupo y continuar
+  // leyendo). Se piden una sola vez; si no hay clave de Pexels o no hay red, se
+  // quedan en null y las tarjetas usan su color de fondo.
+  const [groupPhoto, setGroupPhoto] = useState<string | null>(null);
+  const [continuePhoto, setContinuePhoto] = useState<string | null>(null);
 
   // Petición de oración del Explorar: una al azar de mis grupos (la elige el
   // backend). Sin grupos o sin peticiones abiertas → null y no se pinta.
@@ -247,6 +284,22 @@ export default function BibleScreen() {
       tags
     );
     setTagsVerse(null);
+  };
+
+  // Referencias cruzadas: los pasajes que hablan de lo mismo que el versículo
+  // seleccionado. El dataset vive en el servidor, así que el modal las pide al
+  // abrirse (y se degrada a un aviso si no hay conexión).
+  const [xrefVerse, setXrefVerse] = useState<VerseItem | null>(null);
+
+  // Tocar una referencia navega al pasaje. Reutiliza `goToReference`, que ya
+  // acota capítulos inexistentes y resalta el versículo al llegar.
+  const openCrossRef = (ref: CrossRef) => {
+    // Con la nueva arquitectura el setter puede vaciar el state de forma síncrona
+    // antes de que termine el handler: se captura el destino ANTES de cerrar.
+    const target = { book: ref.book, chapter: ref.chapter, verse: ref.verse };
+    setXrefVerse(null);
+    setSelectedVerses(new Map());
+    goToReference(target);
   };
 
   // Pedir oración por un versículo (backlog de pulido). En el móvil las
@@ -417,12 +470,23 @@ export default function BibleScreen() {
     finally { setLoading(false); }
   };
 
-  const selectBook = async (book: string) => {
+  // Elegir libro desde el selector de arriba: carga los capítulos y se queda donde
+  // está, para que el botón "Cap." se encienda y el usuario elija sin salir de la
+  // pantalla (es el comportamiento de los desplegables de la web).
+  //
+  // Antes había además un `selectBook` para la lista de los 66 libros que se
+  // pintaba bajo las tarjetas; esa lista se quitó (el selector la sustituye, y
+  // encima tiene buscador), así que la función se fue con ella.
+  const selectBookInline = async (book: string) => {
     if (!token) return;
     setSelectedBook(book);
+    setSelectedChapter(null);
     setLoading(true);
-    try { setChapters(await fetchChapters(token, book, selectedVersion)); setView('chapters'); }
-    finally { setLoading(false); }
+    try {
+      setChapters(await fetchChapters(token, book, selectedVersion));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const selectChapter = async (chapter: string) => {
@@ -434,6 +498,7 @@ export default function BibleScreen() {
       setVerses(await fetchVerses(token, selectedBook, chapter, selectedVersion));
       setView('reading');
       setLastRead({ version: selectedVersion, book: selectedBook, chapter });
+      registerReadToday();
     }
     finally { setLoading(false); }
   };
@@ -599,6 +664,7 @@ export default function BibleScreen() {
       setVerses(vs);
       setView('reading');
       setLastRead({ version: selectedVersion, book: ref.book, chapter });
+      registerReadToday();
 
       const target = ref.verse && vs.some((v) => v.verse === ref.verse) ? ref.verse : null;
       if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -623,6 +689,35 @@ export default function BibleScreen() {
 
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
 
+  // Fotos de las tarjetas de la portada. Van aparte del versículo del día porque
+  // no dependen de la fecha: se piden una vez y punto. Si fallan (sin red, sin
+  // clave de Pexels), las tarjetas se quedan con su color de fondo.
+  useEffect(() => {
+    searchBackgroundPhotos('friends together bible study', 1)
+      .then((p) => p.length && setGroupPhoto(p[0].full))
+      .catch(() => {});
+    searchBackgroundPhotos('open book candle', 1)
+      .then((p) => p.length && setContinuePhoto(p[0].full))
+      .catch(() => {});
+  }, []);
+
+  // Racha y versículos a memorizar, al entrar.
+  //
+  // La racha solo se PINTA aquí; marcarla es cosa de leer un capítulo, no de
+  // abrir la pestaña. Y la lista de memorización se carga aunque no se abra su
+  // vista, porque el menú muestra cuántos repasos tocan hoy: sin esto el
+  // contador saldría siempre a cero y nadie descubriría la función.
+  useEffect(() => {
+    if (!token) return;
+    fetchStreak(token).then((s) => { if (s) setStreak(s); });
+    fetchMemorize(token).then(setMemorizeList);
+    // Los planes también, aunque no se abra la pestaña: la tarjeta de la portada
+    // necesita saber si ya lees uno con un grupo (y por dónde va el grupo).
+    loadPlans();
+  }, [token]);
+
+
+  const openTopics = () => { setPrevView(view); setView('topics'); };
   const openSearch = () => { setPrevView(view); setView('search'); setSearchQuery(''); setSearchResults([]); };
   const openFavorites = () => { setPrevView(view); setView('favorites'); };
   const openNotes = () => { setPrevView(view); setView('notes'); };
@@ -693,12 +788,23 @@ export default function BibleScreen() {
       ]);
       setPlanCatalog(cat);
       setMyPlans(mine);
+      // El progreso de los miembros va aparte (se pide por grupo) y no debe
+      // retrasar el pintado de los planes: se lanza sin esperarlo.
+      loadGroupProgress(mine);
     } finally {
       setPlansLoading(false);
     }
   };
 
   const openPlans = () => { setPrevView(view); setView('plans'); loadPlans(); };
+
+  // Llegada desde el chat del grupo (?section=plans): abre directamente los planes.
+  useEffect(() => {
+    if (!sectionParam || sectionParam === handledSection.current) return;
+    handledSection.current = sectionParam;
+    if (sectionParam === 'plans') openPlans();
+    else if (sectionParam === 'topics') openTopics();
+  }, [sectionParam]);
 
   // El formulario vive en CreatePlanModal; aquí solo se valida el rango y se
   // llama a la API.
@@ -720,14 +826,138 @@ export default function BibleScreen() {
     }
   };
 
-  const startPlan = async (planKey: string) => {
+  // ── Memorizar versículos + racha de lectura ─────────────────
+  const [memorizeList, setMemorizeList] = useState<MemorizeVerse[]>([]);
+  const [memorizeLoading, setMemorizeLoading] = useState(false);
+  const [streak, setStreak] = useState<ReadingStreak | null>(null);
+
+  const openMemorize = async () => {
+    setPrevView(view);
+    setView('memorize');
     if (!token) return;
+    setMemorizeLoading(true);
+    try {
+      setMemorizeList(await fetchMemorize(token));
+    } finally {
+      setMemorizeLoading(false);
+    }
+  };
+
+  const handleMemorizeAdd = async (v: VerseItem) => {
+    if (!token) return;
+    const added = await addMemorize(token, {
+      book: v.book,
+      chapter: v.chapter,
+      verse: v.verse,
+      text: v.text,
+    });
+    if (added) {
+      setMemorizeList((prev) => [added, ...prev.filter((m) => m.id !== added.id)]);
+      Alert.alert('Añadido', `${v.book} ${v.chapter}:${v.verse} está en tus versículos para memorizar.`);
+    } else {
+      Alert.alert('Error', 'No se pudo añadir el versículo.');
+    }
+  };
+
+  const handleMemorizeReview = async (v: MemorizeVerse, correct: boolean) => {
+    if (!token) return;
+    // Optimista: la tarjeta debe pasar YA, no cuando responda el servidor.
+    setMemorizeList((prev) =>
+      prev.map((m) => (m.id === v.id ? { ...m, isDue: false } : m))
+    );
+    const updated = await reviewMemorize(token, v.id, correct);
+    if (updated) {
+      setMemorizeList((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    }
+  };
+
+  const handleMemorizeRemove = async (v: MemorizeVerse) => {
+    if (!token) return;
+    setMemorizeList((prev) => prev.filter((m) => m.id !== v.id));
+    await removeMemorize(token, v.id);
+  };
+
+  // La racha se marca al LEER un capítulo (no al abrir la app): la recompensa
+  // tiene que corresponderse con el hábito, o deja de significar nada. Es
+  // idempotente, así que leer diez capítulos hoy sigue contando como un día.
+  const registerReadToday = async () => {
+    if (!token) return;
+    const s = await markReadToday(token);
+    if (s) setStreak(s);
+  };
+
+  // ── Planes en grupo ─────────────────────────────────────────
+  //
+  // El progreso de los miembros no viene con `myPlans` (esos son MIS
+  // suscripciones): se pide por grupo. Como un usuario suele leer con cero o un
+  // grupo, se piden solo los grupos que aparecen en sus planes.
+  const [groupProgress, setGroupProgress] = useState<
+    Record<string, { groupName: string; members: any[] }>
+  >({});
+
+  const loadGroupProgress = async (plans: any[]) => {
+    if (!token) return;
+    const groupIds = [...new Set(plans.map((p) => p.groupId).filter(Boolean))] as string[];
+    if (!groupIds.length) { setGroupProgress({}); return; }
+
+    const byPlan: Record<string, { groupName: string; members: any[] }> = {};
+    await Promise.all(
+      groupIds.map(async (gid) => {
+        const groupName =
+          conversations.find((c) => c._id === gid)?.groupName ?? 'Mi grupo';
+        for (const gp of await fetchGroupPlans(token, gid)) {
+          byPlan[gp.planKey] = { groupName, members: gp.members };
+        }
+      })
+    );
+    setGroupProgress(byPlan);
+  };
+
+  // El plan que el usuario lee CON un grupo, listo para la tarjeta de la portada.
+  // Solo uno: si leyera varios en grupo se muestra el primero — apilar tarjetas en
+  // la portada la convertiría en una lista, y para eso ya está la pestaña.
+  const activeGroupPlan = useMemo(() => {
+    const p = myPlans.find((x) => x.groupId && groupProgress[x.planKey]);
+    if (!p) return null;
+    const g = groupProgress[p.planKey];
+    return {
+      title: p.title,
+      currentDay: p.currentDay,
+      totalDays: p.totalDays,
+      completedCount: p.completedCount,
+      groupName: g.groupName,
+      members: g.members,
+    };
+  }, [myPlans, groupProgress]);
+
+  // Empezar un plan: primero se pregunta con quién (por mi cuenta o con un grupo).
+  // El plan pendiente de elección vive aquí; el modal solo devuelve el grupo.
+  const [planToStart, setPlanToStart] = useState<any | null>(null);
+
+  const startPlan = (planKey: string) => {
+    const plan = planCatalog.find((p) => p.key === planKey);
+    setPlanToStart(plan ?? { key: planKey, title: 'Plan de lectura' });
+  };
+
+  const confirmStartPlan = async (groupId: string | null) => {
+    // Nueva arquitectura: el setter puede vaciar el state de forma síncrona antes
+    // de que acabe el handler, así que se captura ANTES de cerrar el modal.
+    const plan = planToStart;
+    setPlanToStart(null);
+    if (!token || !plan) return;
+
+    const planKey = plan.key;
     setPlanBusy(planKey);
     try {
-      const sub = await subscribeReadingPlan(token, planKey);
-      setMyPlans((prev) => [...prev.filter((p) => p.planKey !== planKey), sub]);
-    } catch { /* ignora */ }
-    finally { setPlanBusy(null); }
+      const sub = await subscribeReadingPlan(token, planKey, groupId ? { groupId } : {});
+      const next = [...myPlans.filter((p) => p.planKey !== planKey), sub];
+      setMyPlans(next);
+      if (groupId) await loadGroupProgress(next);
+    } catch {
+      Alert.alert('Error', 'No se pudo empezar el plan.');
+    } finally {
+      setPlanBusy(null);
+    }
   };
 
   const togglePlanDay = async (plan: any) => {
@@ -815,6 +1045,7 @@ export default function BibleScreen() {
       setVerses(await fetchVerses(token, name, String(chapter), selectedVersion));
       setView('reading');
       setLastRead({ version: selectedVersion, book: name, chapter: String(chapter) });
+      registerReadToday();
     } finally {
       setLoading(false);
     }
@@ -832,20 +1063,28 @@ export default function BibleScreen() {
       setSelectedVerses(new Map());
       setVerses(await fetchVerses(token, lastRead.book, lastRead.chapter, lastRead.version));
       setView('reading');
+      registerReadToday();
     } finally {
       setLoading(false);
     }
   };
 
+  // Vistas "de sección" (no forman parte del recorrido libro → capítulo →
+  // lectura): se sale de ellas volviendo a de donde se vino, y si se vino de otra
+  // sección, a la lista de libros. Estaba escrito dos veces a mano y ya iban
+  // cinco; con la lista aquí, añadir una sección nueva es una línea.
+  const isSection = (v: ScreenView) =>
+    v === 'search' ||
+    v === 'favorites' ||
+    v === 'notes' ||
+    v === 'plans' ||
+    v === 'memorize' ||
+    v === 'topics';
+
   const goBack = () => {
     if (view === 'reading') setView('chapters');
     else if (view === 'chapters') setView('books');
-    else if (view === 'search' || view === 'favorites' || view === 'notes' || view === 'plans')
-      setView(
-        prevView === 'search' || prevView === 'favorites' || prevView === 'notes' || prevView === 'plans'
-          ? 'books'
-          : prevView
-      );
+    else if (isSection(view)) setView(isSection(prevView) ? 'books' : prevView);
   };
 
   const toggleVerse = (v: VerseItem) => {
@@ -999,6 +1238,8 @@ export default function BibleScreen() {
     if (view === 'favorites') title = 'Favoritos';
     if (view === 'notes') title = 'Notas y resaltados';
     if (view === 'plans') title = 'Planes de lectura';
+    if (view === 'memorize') title = 'Memorizar';
+    if (view === 'topics') title = 'Temas';
     const showBack = view !== 'books';
 
     return (
@@ -1167,94 +1408,52 @@ export default function BibleScreen() {
 
   // ─── Selection action bar ──────────────────────────────────
 
-  const renderActionBar = () => {
+  // Acciones del versículo. Era una BARRA de una sola fila (5 colores + hasta 9
+  // iconos) y en Android no cabía: las últimas acciones se salían por la derecha,
+  // sin scroll ni pista de que estaban ahí. Ahora es una hoja inferior con
+  // rejilla, como en la web — cabe todo y cada acción lleva su nombre.
+  const renderActionSheet = () => {
     if (selectedCount === 0) return null;
+    const id = firstSelected
+      ? `${firstSelected.book}:${firstSelected.chapter}:${firstSelected.verse}`
+      : '';
+
+    // Las acciones que abren OTRO modal (nota, imagen, etiquetas, referencias,
+    // oración) cierran antes esta hoja: en Android apilar dos Modals acaba con el
+    // segundo invisible o tapado. `v` llega por parámetro, así que vaciar la
+    // selección antes no lo pierde (con la nueva arquitectura el setter puede
+    // hacer flush síncrono y dejar `firstSelected` a null a media función).
+    const thenOpen = (fn: (v: VerseItem) => void) => (v: VerseItem) => {
+      setSelectedVerses(new Map());
+      fn(v);
+    };
+
     return (
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-        paddingHorizontal: 14, paddingVertical: 10,
-        paddingBottom: insets.bottom + 10,
-        backgroundColor: colors.bgSecondary,
-        borderTopWidth: 1, borderTopColor: colors.border,
-      }}>
-        {/* Color buttons */}
-        {HIGHLIGHT_COLORS.map((color) => (
-          <TouchableOpacity
-            key={color}
-            onPress={() => applyHighlight(color)}
-            style={{
-              width: 30, height: 30, borderRadius: 15,
-              backgroundColor: color,
-              borderWidth: 2, borderColor: colors.border,
-            }}
-          />
-        ))}
-        {anyHighlighted && (
-          <TouchableOpacity
-            onPress={clearHighlight}
-            style={{
-              width: 30, height: 30, borderRadius: 15,
-              backgroundColor: colors.bgTertiary,
-              borderWidth: 2, borderColor: colors.border,
-              alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="remove" size={16} color={colors.danger} />
-          </TouchableOpacity>
-        )}
-
-        <View style={{ flex: 1 }} />
-
-        {/* Annotation button — shows when exactly 1 verse is selected */}
-        {selectedCount === 1 && firstSelected && (
-          <TouchableOpacity onPress={() => openAnnotation(firstSelected)} style={{ padding: 8 }}>
-            <Ionicons
-              name="create-outline"
-              size={20}
-              color={getAnnotation(`${firstSelected.book}:${firstSelected.chapter}:${firstSelected.verse}`) ? colors.accent : colors.textMuted}
-            />
-          </TouchableOpacity>
-        )}
-
-        {/* Compartir como imagen — solo con 1 versículo seleccionado */}
-        {selectedCount === 1 && firstSelected && (
-          <TouchableOpacity onPress={() => setImageVerse(firstSelected)} style={{ padding: 8 }}>
-            <Ionicons name="image-outline" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-        )}
-
-        {/* Etiquetas del versículo */}
-        {selectedCount === 1 && firstSelected && (
-          <TouchableOpacity onPress={() => openTagsModal(firstSelected)} style={{ padding: 8 }}>
-            <Ionicons
-              name="pricetag-outline"
-              size={20}
-              color={
-                getVerseTags(`${firstSelected.book}:${firstSelected.chapter}:${firstSelected.verse}`).length
-                  ? colors.accent
-                  : colors.textSecondary
-              }
-            />
-          </TouchableOpacity>
-        )}
-
-        {/* Pedir oración por el versículo (se publica en un grupo) */}
-        {selectedCount === 1 && firstSelected && (
-          <TouchableOpacity onPress={() => openPrayerModal(firstSelected)} style={{ padding: 8 }}>
-            <FontAwesome5 name="pray" size={17} color={colors.textSecondary} />
-          </TouchableOpacity>
-        )}
-
-        <TouchableOpacity onPress={handleFavoriteToggle} style={{ padding: 8 }}>
-          <FontAwesome5 name="star" solid={allFav} size={18} color={allFav ? '#FBBF24' : colors.textMuted} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={handleShare} style={{ padding: 8 }}>
-          <Ionicons name="share-outline" size={20} color={colors.textSecondary} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setSelectedVerses(new Map())} style={{ padding: 8 }}>
-          <Ionicons name="close" size={20} color={colors.textMuted} />
-        </TouchableOpacity>
-      </View>
+      <VerseActionsSheet
+        count={selectedCount}
+        verse={firstSelected}
+        colors={colors}
+        bottomInset={insets.bottom}
+        highlightColors={HIGHLIGHT_COLORS}
+        allFav={allFav}
+        anyHighlighted={anyHighlighted}
+        hasNote={!!firstSelected && !!getAnnotation(id)}
+        hasTags={!!firstSelected && getVerseTags(id).length > 0}
+        isMemorized={!!firstSelected && memorizeList.some((m) => m.id === id)}
+        onClose={() => setSelectedVerses(new Map())}
+        // Resaltar, favorito y compartir NO cierran: son de un toque y el usuario
+        // suele encadenarlos (guardar y además resaltar).
+        onHighlight={applyHighlight}
+        onClearHighlight={clearHighlight}
+        onFavorite={handleFavoriteToggle}
+        onShare={handleShare}
+        onMemorize={handleMemorizeAdd} // muestra un Alert, no un Modal: puede quedarse abierta
+        onNote={thenOpen(openAnnotation)}
+        onImage={thenOpen(setImageVerse)}
+        onTags={thenOpen(openTagsModal)}
+        onXrefs={thenOpen(setXrefVerse)}
+        onPray={thenOpen(openPrayerModal)}
+      />
     );
   };
 
@@ -1296,18 +1495,30 @@ export default function BibleScreen() {
         onToggleReminder={toggleDailyReminder}
       />
 
+      {/* Lee con tu grupo. Antes esto solo se encontraba entrando al menú de los
+          tres puntos → Planes → Empezar, o sea: no se encontraba. */}
+      <GroupPlanCard
+        photo={groupPhoto}
+        plan={activeGroupPlan}
+        groupCount={myGroups.length}
+        colors={colors}
+        onOpen={openPlans}
+      />
+
+      <ContinueReadingCard
+        lastRead={lastRead}
+        photo={continuePhoto}
+        colors={colors}
+        onResume={resumeReading}
+        onDismiss={() => clearLastRead()}
+      />
+
+      {/* La petición de oración cierra la portada. */}
       <PrayerFeedCard
         prayer={prayerFeed}
         praying={prayerFeedDone}
         colors={colors}
         onPray={prayForFeed}
-      />
-
-      <ContinueReadingCard
-        lastRead={lastRead}
-        colors={colors}
-        onResume={resumeReading}
-        onDismiss={() => clearLastRead()}
       />
 
       <DownloadBanner
@@ -1323,26 +1534,36 @@ export default function BibleScreen() {
     </>
   );
 
+  // Portada de la Biblia: el selector Libro/Capítulo arriba (fijo) y las tarjetas
+  // debajo.
+  //
+  // La lista de los 66 libros ya NO se pinta aquí: se eligen desde el selector de
+  // arriba, que además tiene buscador. Tenerla también debajo de las tarjetas era
+  // repetir lo mismo dos veces y obligaba a un scroll larguísimo para llegar al
+  // final de la portada. El selector la sustituye por completo.
   const renderBooks = () => (
-    <FlatList
-      data={sortedBooks}
-      keyExtractor={(item) => item}
-      ListHeaderComponent={renderBooksHeader}
-      ListEmptyComponent={
-        loading
-          ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}><ActivityIndicator color={colors.accent} size="large" /></View>
-          : null
-      }
-      renderItem={({ item }) => (
-        <TouchableOpacity
-          onPress={() => selectBook(item)}
-          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.borderLight }}
-        >
-          <Text style={{ flex: 1, fontSize: 16, color: colors.textPrimary }}>{item}</Text>
-          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-        </TouchableOpacity>
+    <>
+      <BookChapterPicker
+        books={sortedBooks}
+        chapters={chapters}
+        selectedBook={selectedBook}
+        selectedChapter={selectedChapter}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onPickBook={selectBookInline}
+        onPickChapter={selectChapter}
+      />
+
+      {loading && sortedBooks.length === 0 ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}>
+          <ActivityIndicator color={colors.accent} size="large" />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
+          {renderBooksHeader()}
+        </ScrollView>
       )}
-    />
+    </>
   );
 
   const renderChapters = () => {
@@ -1998,6 +2219,37 @@ export default function BibleScreen() {
       case 'search': return renderSearch();
       case 'favorites': return renderFavorites();
       case 'notes': return renderNotes();
+      case 'topics':
+        return (
+          <TopicsView
+            version={selectedVersion}
+            colors={colors}
+            bottomInset={insets.bottom}
+            onOpenVerse={(v) =>
+              goToReference({ book: v.book, chapter: v.chapter, verse: v.verse })
+            }
+            // Mantener pulsado SELECCIONA el versículo, y con eso aparece la barra
+            // de acciones completa (favorito, colores, nota, etiquetas, imagen,
+            // referencias cruzadas, memorizar, oración): se pinta fuera del
+            // `switch` de vistas y solo pide que haya algo seleccionado.
+            //
+            // No uso `highlightTarget` (el gesto de la búsqueda) porque ese abre
+            // la hoja de RESALTAR, que solo trae colores y nota — sería prometer
+            // "todo" y entregar dos cosas.
+            onLongPressVerse={toggleVerse}
+          />
+        );
+      case 'memorize':
+        return (
+          <MemorizeView
+            loading={memorizeLoading}
+            verses={memorizeList}
+            colors={colors}
+            bottomInset={insets.bottom}
+            onReview={handleMemorizeReview}
+            onRemove={handleMemorizeRemove}
+          />
+        );
       case 'plans':
         return (
           <ReadingPlansView
@@ -2007,6 +2259,7 @@ export default function BibleScreen() {
             busyKey={planBusy}
             colors={colors}
             bottomInset={insets.bottom}
+            groupProgress={groupProgress}
             onOpenPassage={openPlanPassage}
             onToggleDay={togglePlanDay}
             onReminder={reminderMenu}
@@ -2347,7 +2600,7 @@ export default function BibleScreen() {
       {renderBookOrderBar()}
       {renderSpeechBar()}
       {renderChapterNav()}
-      {renderActionBar()}
+      {renderActionSheet()}
       {renderHighlightPicker()}
       {renderAnnotationModal()}
       <ReadingSettingsMenu
@@ -2364,6 +2617,10 @@ export default function BibleScreen() {
         onOpenFavorites={openFavorites}
         onOpenNotes={openNotes}
         onOpenPlans={openPlans}
+        onOpenMemorize={openMemorize}
+        onOpenTopics={openTopics}
+        dueCount={memorizeList.filter((m) => m.isDue).length}
+        streak={streak}
       />
 
       <VersionPickerModal
@@ -2424,6 +2681,33 @@ export default function BibleScreen() {
           bottomInset={insets.bottom}
           onClose={() => setTagsVerse(null)}
           onSave={saveTags}
+        />
+      )}
+
+      {/* Con quién leer el plan (por mi cuenta o con un grupo). Se monta al
+          abrirlo para que empiece limpio. */}
+      {planToStart && (
+        <GroupPlanPickerModal
+          planTitle={planToStart.title ?? 'Plan de lectura'}
+          groups={myGroups}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setPlanToStart(null)}
+          onPick={confirmStartPlan}
+        />
+      )}
+
+      {/* Referencias cruzadas. Se monta al abrirlo: el modal pide las referencias
+          en su useEffect, y montado en vano dispararía peticiones sin verse. */}
+      {xrefVerse && token && (
+        <CrossRefsModal
+          verse={xrefVerse}
+          token={token}
+          version={selectedVersion}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setXrefVerse(null)}
+          onOpenRef={openCrossRef}
         />
       )}
 

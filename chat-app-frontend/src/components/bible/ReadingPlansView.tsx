@@ -11,6 +11,10 @@ interface Props {
   busyKey: string | null;
   colors: any;
   bottomInset: number;
+  // Planes que se leen en grupo: planKey → { groupName, members }. Lo que hace
+  // que un plan de grupo se note es VER a los demás; sin esto sería un plan
+  // normal con una etiqueta.
+  groupProgress: Record<string, { groupName: string; members: any[] }>;
   onOpenPassage: (bookIndex: number, chapter: number) => void;
   onToggleDay: (plan: any) => void;
   onReminder: (plan: any) => void;
@@ -27,6 +31,7 @@ export function ReadingPlansView({
   busyKey,
   colors,
   bottomInset,
+  groupProgress,
   onOpenPassage,
   onToggleDay,
   onReminder,
@@ -67,6 +72,7 @@ export function ReadingPlansView({
 
   const renderPlan = (plan: any) => {
     const pct = plan.totalDays ? Math.round((plan.completedCount / plan.totalDays) * 100) : 0;
+    const group = plan.groupId ? groupProgress[plan.planKey] : undefined;
 
     return (
       <View key={plan.planKey} style={card}>
@@ -76,6 +82,14 @@ export function ReadingPlansView({
             <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
               Día {plan.currentDay} de {plan.totalDays} · {plan.completedCount} leídos
             </Text>
+            {group && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6 }}>
+                <Ionicons name="people" size={12} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>
+                  {group.groupName}
+                </Text>
+              </View>
+            )}
           </View>
           <TouchableOpacity onPress={() => onReminder(plan)} style={{ padding: 4 }}>
             <Ionicons
@@ -140,6 +154,65 @@ export function ReadingPlansView({
             </View>
           </View>
         ) : null}
+
+        {/* El grupo: quién va por dónde. Es lo que hace que nadie abandone en
+            silencio — y lo que diferencia esto de un plan cualquiera. */}
+        {group && group.members.length > 0 && (
+          <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: colors.border }}>
+            <Text
+              style={{
+                color: colors.textMuted,
+                fontSize: 11,
+                fontWeight: '700',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+                marginBottom: 10,
+              }}
+            >
+              El grupo va por aquí
+            </Text>
+
+            {group.members.map((m: any) => {
+              const mpct = plan.totalDays
+                ? Math.round((m.completedCount / plan.totalDays) * 100)
+                : 0;
+              return (
+                <View
+                  key={m.userId}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={{ color: colors.textSecondary, fontSize: 13, width: 90 }}
+                  >
+                    {m.name}
+                  </Text>
+                  <View
+                    style={{
+                      flex: 1,
+                      height: 5,
+                      backgroundColor: colors.bgTertiary,
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <View
+                      style={{
+                        height: '100%',
+                        width: `${mpct}%`,
+                        backgroundColor: m.isTodayDone ? '#22c55e' : colors.accent,
+                        borderRadius: 3,
+                      }}
+                    />
+                  </View>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, width: 52, textAlign: 'right' }}>
+                    {m.completedCount}/{plan.totalDays}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         <View style={{ flexDirection: 'row', gap: 20, marginTop: 12 }}>
           <TouchableOpacity onPress={() => onRestart(plan)}>

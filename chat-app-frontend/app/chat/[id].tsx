@@ -24,11 +24,10 @@ import {
 
 const CHAT_BG_LIGHT = require('../../assets/chat-bg-light.png');
 const CHAT_BG_DARK = require('../../assets/chat-bg-dark.png');
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { useAudioRecorder, requestRecordingPermissionsAsync, setAudioModeAsync, RecordingPresets } from 'expo-audio';
 import { Feather, FontAwesome5, Ionicons } from '@expo/vector-icons';
 import EmojiPicker, { type EmojiType } from 'rn-emoji-keyboard';
 import { useAuthStore } from '../../src/store/useAuthStore';
@@ -37,6 +36,10 @@ import { useCallStore } from '../../src/store/useCallStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import { getSocket } from '../../src/services/socketService';
 import GroupPendingBar from '../../src/components/GroupPendingBar';
+import { GroupCommunityBar } from '../../src/components/chat/GroupCommunityBar';
+import { CreatePollModal } from '../../src/components/chat/CreatePollModal';
+import { useMentions } from '../../src/hooks/useMentions';
+import { getGroupSummary, type GroupSummary } from '../../src/services/activityService';
 import {
   getMessages,
   createOrGetConversation,
@@ -45,9 +48,24 @@ import {
   apiToggleMute,
 } from '../../src/services/conversationService';
 import { uploadFile } from '../../src/services/uploadService';
-import { MessageBubble, docIcon } from '../../src/components/chat/MessageBubble';
+import { MessageBubble } from '../../src/components/chat/MessageBubble';
 import BibleModal from '../../src/components/chat/BibleModal';
 import type { Message, ChatUser, SharedContact } from '../../src/services/conversationService';
+// Helpers puros (agrupar por día, etiquetas de fecha, iconos) y piezas visuales de
+// la lista. Vivían aquí dentro; la pantalla ya solo orquesta.
+import {
+  docIconFor,
+  formatDateLabel,
+  buildListData,
+  type ListItem,
+} from '../../src/utils/chatList';
+import {
+  DateSeparator,
+  TypingIndicator,
+  SwipeableMessage,
+} from '../../src/components/chat/ChatListParts';
+import { useVoiceRecorder } from '../../src/hooks/useVoiceRecorder';
+import { GroupMemberSheet } from '../../src/components/chat/GroupMemberSheet';
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🙏'];
 
@@ -98,189 +116,6 @@ function BouncingEmoji({
   );
 }
 
-function docIconFor(type?: string, fileName?: string): string {
-  if (type === 'image') return '🖼️';
-  if (type === 'audio') return '🎤';
-  return docIcon(fileName);
-}
-
-// ── Date-separator helpers ───────────────────────────────
-type ListItem =
-  | { kind: 'message'; data: Message }
-  | { kind: 'separator'; key: string; label: string };
-
-function toDateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function formatDateLabel(iso: string): string {
-  const d = new Date(iso);
-  const key = toDateKey(d);
-  const now = new Date();
-  if (key === toDateKey(now)) return 'Hoy';
-  const yd = new Date(now);
-  yd.setDate(yd.getDate() - 1);
-  if (key === toDateKey(yd)) return 'Ayer';
-  return d.toLocaleDateString('es-ES', {
-    day: 'numeric',
-    month: 'long',
-    ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
-  });
-}
-
-function buildListData(messages: Message[]): ListItem[] {
-  const items: ListItem[] = [];
-  let lastKey = '';
-  for (const msg of messages) {
-    const key = toDateKey(new Date(msg.createdAt));
-    if (key !== lastKey) {
-      items.push({ kind: 'separator', key: `sep_${key}`, label: formatDateLabel(msg.createdAt) });
-      lastKey = key;
-    }
-    items.push({ kind: 'message', data: msg });
-  }
-  return items;
-}
-
-function DateSeparator({ label, colors }: { label: string; colors: any }) {
-  return (
-    <View style={{ alignItems: 'center', marginVertical: 8 }}>
-      <View style={{ backgroundColor: colors.bgTertiary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 5, borderWidth: 1, borderColor: colors.border }}>
-        <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '500' }}>{label}</Text>
-      </View>
-    </View>
-  );
-}
-
-function TypingIndicator({ colors, avatar, name }: { colors: any; avatar?: string; name?: string }) {
-  const dots = useRef([
-    new Animated.Value(0),
-    new Animated.Value(0),
-    new Animated.Value(0),
-  ]).current;
-
-  useEffect(() => {
-    const anims = dots.map((dot, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 160),
-          Animated.timing(dot, { toValue: 1, duration: 280, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-          Animated.timing(dot, { toValue: 0, duration: 280, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-          Animated.delay((2 - i) * 160 + 100),
-        ])
-      )
-    );
-    Animated.parallel(anims).start();
-    return () => anims.forEach((a) => a.stop());
-  }, []);
-
-  return (
-    <View style={{ paddingHorizontal: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'flex-end' }}>
-      {/* Avatar */}
-      {avatar ? (
-        <Image source={{ uri: avatar }} style={{ width: 30, height: 30, borderRadius: 8, marginRight: 6 }} />
-      ) : (
-        <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
-          <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>{name?.[0]?.toUpperCase() ?? '?'}</Text>
-        </View>
-      )}
-      {/* Bubble with dots */}
-      <View style={{
-        paddingHorizontal: 16, paddingVertical: 14,
-        borderRadius: 18, borderTopLeftRadius: 4,
-        backgroundColor: colors.bubbleTheirs,
-        flexDirection: 'row', alignItems: 'center', gap: 5,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06, shadowRadius: 4, elevation: 1,
-        borderWidth: 1, borderColor: colors.borderLight,
-      }}>
-        {dots.map((dot, i) => (
-          <Animated.View
-            key={i}
-            style={{
-              width: 8, height: 8, borderRadius: 4,
-              backgroundColor: colors.bubbleTheirsText,
-              opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.25, 1] }),
-              transform: [{
-                translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -5] }),
-              }],
-            }}
-          />
-        ))}
-      </View>
-    </View>
-  );
-}
-// ────────────────────────────────────────────────────────
-
-const REPLY_THRESHOLD = 64;
-
-function SwipeableMessage({ children, onSwipeRight }: {
-  children: React.ReactNode;
-  onSwipeRight: () => void;
-}) {
-  const translateX = useRef(new Animated.Value(0)).current;
-  const iconOpacity = useRef(new Animated.Value(0)).current;
-  const triggered = useRef(false);
-
-  const snapBack = () => {
-    Animated.parallel([
-      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 4 }),
-      Animated.timing(iconOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-        dx > 5 && Math.abs(dx) > Math.abs(dy),
-      onPanResponderMove: (_, { dx }) => {
-        if (dx > 0) {
-          const clamped = Math.min(dx, REPLY_THRESHOLD + 16);
-          translateX.setValue(clamped);
-          iconOpacity.setValue(Math.min(clamped / REPLY_THRESHOLD, 1));
-          if (clamped >= REPLY_THRESHOLD && !triggered.current) {
-            triggered.current = true;
-          }
-        }
-      },
-      onPanResponderRelease: (_, { dx }) => {
-        const shouldReply = triggered.current;
-        triggered.current = false;
-        snapBack();
-        if (shouldReply || dx >= REPLY_THRESHOLD) {
-          onSwipeRight();
-        }
-      },
-      onPanResponderTerminate: () => {
-        triggered.current = false;
-        snapBack();
-      },
-    })
-  ).current;
-
-  return (
-    <View>
-      <Animated.View style={{
-        position: 'absolute', left: 16, top: 0, bottom: 0,
-        alignItems: 'center', justifyContent: 'center',
-        opacity: iconOpacity,
-      }}>
-        <View style={{
-          width: 32, height: 32, borderRadius: 16,
-          backgroundColor: 'rgba(120,120,120,0.35)',
-          alignItems: 'center', justifyContent: 'center',
-        }}>
-          <Ionicons name="return-up-back" size={17} color="#fff" />
-        </View>
-      </Animated.View>
-      <Animated.View style={{ transform: [{ translateX }] }} {...panResponder.panHandlers}>
-        {children}
-      </Animated.View>
-    </View>
-  );
-}
-
 const TYPING_DEBOUNCE = 1500;
 
 export default function ChatScreen() {
@@ -308,6 +143,7 @@ export default function ChatScreen() {
   }, [conversations, conversationId, user?.id]);
 
   const [text, setText] = useState('');
+
   const [loading, setLoading] = useState(() => {
     const cached = useChatsStore.getState().messages[conversationId];
     return !cached || cached.length === 0;
@@ -317,6 +153,10 @@ export default function ChatScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+
+  // Encuestas (solo grupos). Las funciones que las envían y votan viven más abajo,
+  // detrás de `socket`.
+  const [pollOpen, setPollOpen] = useState(false);
   const [bibleOpen, setBibleOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -331,16 +171,6 @@ export default function ChatScreen() {
   const [reactionEmojiPickerOpen, setReactionEmojiPickerOpen] = useState(false);
   const [memberModal, setMemberModal] = useState<ChatUser | null>(null);
   const [memberActionLoading, setMemberActionLoading] = useState(false);
-
-  // Grabación de voz (con metering para el medidor de volumen en vivo, como en web)
-  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
-  const [isRecording, setIsRecording] = useState(false);
-  const isRecordingRef = useRef(false); // ref para leer el estado sincrónico en onPressOut
-  const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [recordSeconds, setRecordSeconds] = useState(0);
-  // Medidor de volumen en vivo (ondas estilo WhatsApp): niveles recientes 0..1.
-  const [recordBars, setRecordBars] = useState<number[]>([]);
-  const meterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const flatListRef = useRef<FlatList<ListItem>>(null);
   const inputRef = useRef<TextInput>(null);
@@ -405,6 +235,53 @@ export default function ChatScreen() {
   // DEBUG — eliminar después del diagnóstico
   if (__DEV__) console.log('[socket] connected=', socket?.connected, 'exists=', !!socket);
 
+  // ── Encuestas (solo grupos) ─────────────────────────────────
+  //
+  // Nacen de lo que los grupos ya hacen a mano: coordinar ayunos, vigilias y
+  // escalas de oración contando mensajes ("¿quién puede el jueves de 6 a 7?").
+  const sendPoll = (poll: { question: string; options: string[]; multiple: boolean }) => {
+    if (!socket) return;
+    setPollOpen(false);
+    // NO se pinta optimista, al revés que un mensaje de texto: al servidor le toca
+    // NORMALIZAR la encuesta (recorta opciones, descarta vacías) y el voto va
+    // contra el `_id` real del mensaje. Una copia local llevaría a votar sobre un
+    // mensaje que todavía no existe.
+    socket.emit('message:send', {
+      conversationId,
+      content: poll.question, // vista previa en la lista de chats y en el push
+      type: 'poll',
+      poll,
+    });
+  };
+
+  const votePoll = useCallback(
+    (msg: Message, optionIndex: number) => {
+      socket?.emit('poll:vote', { messageId: msg._id, conversationId, optionIndex });
+    },
+    [socket, conversationId]
+  );
+
+  // Cerrar la votación: deja de admitir votos. Sin esto, el autor cuadraba los
+  // turnos y la gente seguía votando y moviéndoselos. El backend comprueba que
+  // quien cierra sea el autor o un admin del grupo.
+  const closePoll = useCallback(
+    (msg: Message) => {
+      Alert.alert(
+        'Cerrar votación',
+        'Nadie podrá votar ni cambiar su voto. Los resultados se quedan como están.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Cerrar',
+            style: 'destructive',
+            onPress: () => socket?.emit('poll:close', { messageId: msg._id, conversationId }),
+          },
+        ]
+      );
+    },
+    [socket, conversationId]
+  );
+
   const reactionDetailMessage = useMemo(() => {
     if (!reactionDetail) return null;
     return conversationMessages.find((m) => m._id === reactionDetail.messageId) ?? null;
@@ -427,6 +304,18 @@ export default function ChatScreen() {
     [currentConv, user?.id],
   );
   const isMuted = currentConv?.isMuted ?? false;
+
+  // Lo que hay abierto en el grupo (actividades y peticiones), para la franja de
+  // debajo de la cabecera. Se pide al abrir el chat y al volver a él: si acabas de
+  // apuntarte a una actividad, la franja debe dejar de insistirte.
+  const [groupSummary, setGroupSummary] = useState<GroupSummary | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!token || !isGroupChat) return;
+      getGroupSummary(token, conversationId).then(setGroupSummary);
+    }, [token, isGroupChat, conversationId])
+  );
 
   const handleToggleMute = async () => {
     if (!token) return;
@@ -641,8 +530,23 @@ export default function ChatScreen() {
     if (typingTimeout.current) clearTimeout(typingTimeout.current);
   };
 
+  // Menciones (@nombre). Todo el estado y las reglas viven en `useMentions`; aquí
+  // solo se enchufa al input.
+  const mentions = useMentions(isGroupChat, currentConv?.participants, user?.id);
+
+  const pickMention = (u: { _id: string; name: string; avatar?: string }) => {
+    const next = mentions.pick(text, u);
+    if (next) setText(next.text);
+  };
+
   const handleChangeText = (value: string) => {
     setText(value);
+
+    // El cursor todavía no se ha movido cuando llega este evento, así que se
+    // supone al final de lo escrito. Es exacto al teclear (el caso normal); si el
+    // usuario edita en medio, `onSelectionChange` lo corrige justo después.
+    mentions.update(value, value.length);
+
     if (!isTyping.current) {
       socket?.emit('typing:start', { conversationId });
       isTyping.current = true;
@@ -688,8 +592,13 @@ export default function ChatScreen() {
       content,
       type: 'text',
       replyToMessageId: replyingTo?._id,
+      // Se recalculan sobre el texto FINAL, no se van apuntando al elegirlos: el
+      // usuario pudo borrar el "@Pedro" después de escribirlo, y avisar a Pedro de
+      // un mensaje donde ya no aparece sería desconcertante.
+      mentions: mentions.resolve(content),
     });
     setText('');
+    mentions.close();
     setReplyingTo(null);
   };
 
@@ -792,72 +701,18 @@ export default function ChatScreen() {
   };
 
   // ── Grabación de voz ────────────────────────────────────
-  const startRecording = async () => {
-    if (isRecordingRef.current) return;
-    try {
-      const perm = await requestRecordingPermissionsAsync();
-      if (!perm.granted) { Alert.alert('Permiso denegado', 'Activa el micrófono en Ajustes.'); return; }
-
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      await recorder.record();
-
-      isRecordingRef.current = true;
-      setIsRecording(true);
-      setRecordSeconds(0);
-      recordingTimer.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
-
-      // Medidor de volumen en vivo: leemos `metering` (dBFS) y lo mapeamos a 0..1,
-      // empujando el nivel a un histórico de barras que se desplaza (nuevas a la
-      // derecha), igual que el waveform del chat web.
-      const BAR_COUNT = 28;
-      setRecordBars(new Array(BAR_COUNT).fill(0));
-      meterTimer.current = setInterval(() => {
-        let level: number;
-        try {
-          const m = recorder.getStatus?.()?.metering;
-          if (typeof m === 'number' && isFinite(m)) {
-            level = Math.max(0.03, Math.min(1, (m + 50) / 50)); // -50dB→0, 0dB→1
-          } else {
-            level = 0.15 + Math.random() * 0.5; // sin metering: onda suave
-          }
-        } catch {
-          level = 0.15 + Math.random() * 0.5;
-        }
-        setRecordBars((prev) => {
-          const base = prev.length ? prev : new Array(BAR_COUNT).fill(0);
-          const next = base.slice(1);
-          next.push(level);
-          return next;
-        });
-      }, 80);
-    } catch {
-      Alert.alert('Error', 'No se pudo iniciar la grabación');
-    }
-  };
-
-  const stopRecording = async (cancel = false) => {
-    if (!isRecordingRef.current) return;
-    if (recordingTimer.current) { clearInterval(recordingTimer.current); recordingTimer.current = null; }
-    if (meterTimer.current) { clearInterval(meterTimer.current); meterTimer.current = null; }
-
-    isRecordingRef.current = false;
-    setIsRecording(false);
-    setRecordSeconds(0);
-    setRecordBars([]);
-
-    try {
-      await recorder.stop();
-      if (!cancel) {
-        const uri = recorder.uri;
-        if (uri) await sendFileMessage(uri, 'audio/m4a', `voice_${Date.now()}.m4a`, 'audio');
-      }
-    } catch {
-      // silencioso
-    } finally {
-      await setAudioModeAsync({ allowsRecording: false });
-    }
-  };
+  //
+  // La lógica (permisos, temporizadores, medidor de volumen, limpieza al salir)
+  // vive en `useVoiceRecorder`. Aquí solo se dice qué hacer con lo grabado.
+  const {
+    isRecording,
+    seconds: recordSeconds,
+    bars: recordBars,
+    start: startRecording,
+    stop: stopRecording,
+  } = useVoiceRecorder({
+    onRecorded: (uri, mime, name) => sendFileMessage(uri, mime, name, "audio"),
+  });
 
   // ── Descarga y compartir ────────────────────────────────
   const handleDownload = useCallback((msg: Message) => {
@@ -1082,6 +937,18 @@ export default function ChatScreen() {
               >
                 <Ionicons name="flame" size={16} color="#fff" />
               </TouchableOpacity>
+
+              {/* Plan de lectura del grupo. Junto a los otros dos: son las tres
+                  cosas que un grupo hace además de hablar. */}
+              <TouchableOpacity
+                onPress={() =>
+                  router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans' } } as any)
+                }
+                style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}
+                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              >
+                <Ionicons name="book" size={16} color="#fff" />
+              </TouchableOpacity>
             </>
           )}
           {!isGroupChat && otherParticipant && (
@@ -1165,6 +1032,30 @@ export default function ChatScreen() {
         <GroupPendingBar groupId={conversationId} token={token} isAdmin={iAmAdmin} />
       )}
 
+      {/* Lo que hay abierto en el grupo (actividades y peticiones de oración).
+          Antes solo se llegaba por dos iconos redondos de 34px sin etiqueta ni
+          número en la cabecera: quien no supiera lo que eran, no los tocaba. */}
+      {isGroupChat && groupSummary && (
+        <GroupCommunityBar
+          activities={groupSummary.activities}
+          prayers={groupSummary.prayers}
+          plan={groupSummary.plan}
+          iParticipate={groupSummary.iParticipate}
+          colors={colors}
+          onOpenActivities={() =>
+            router.push({ pathname: '/group-activities/[id]' as any, params: { id: conversationId } })
+          }
+          onOpenPrayers={() =>
+            router.push({ pathname: '/group-prayer/[id]' as any, params: { id: conversationId } })
+          }
+          // El plan vive en la pestaña Biblia → Planes: se abre ahí directamente.
+          // Sin esto, el chip diría "hay un plan" y dejaría al usuario buscándolo.
+          onOpenPlan={() =>
+            router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans' } } as any)
+          }
+        />
+      )}
+
       {/* Messages */}
       <ImageBackground
         source={isDark ? CHAT_BG_DARK : CHAT_BG_LIGHT}
@@ -1235,6 +1126,12 @@ export default function ChatScreen() {
                   isMine={isMine(item.data)}
                   currentUserId={user?.id ?? ''}
                   isGroup={isGroupChat}
+                  // Para resaltar las menciones: TODOS los participantes, no los
+                  // "mencionables" (que me excluyen a mí). En un mensaje ajeno que
+                  // me menciona, el nombre a resaltar es justamente el mío.
+                  mentionUsers={mentions.all}
+                  onVote={votePoll}
+                  onClosePoll={closePoll}
                   highlighted={item.data._id === highlightedId}
                   onLongPress={handleLongPress}
                   onDownload={handleDownload}
@@ -1355,6 +1252,55 @@ export default function ChatScreen() {
         </View>
       </ImageBackground>
 
+      {/* Menciones: los miembros que encajan con lo que se lleva escrito tras la @.
+          Va pegada al input (donde está mirando el usuario) y por encima de la
+          barra de respuesta. */}
+      {mentions.query && mentions.candidates.length > 0 && (
+        <View
+          style={{
+            backgroundColor: colors.bgSecondary,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            maxHeight: 210,
+          }}
+        >
+          <ScrollView keyboardShouldPersistTaps="handled">
+            {mentions.candidates.map((u) => (
+              <TouchableOpacity
+                key={u._id}
+                onPress={() => pickMention(u)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  gap: 10,
+                }}
+              >
+                {u.avatar ? (
+                  <Image source={{ uri: u.avatar }} style={{ width: 34, height: 34, borderRadius: 17 }} />
+                ) : (
+                  <View
+                    style={{
+                      width: 34, height: 34, borderRadius: 17,
+                      backgroundColor: colors.avatarBg,
+                      alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ color: colors.accent, fontWeight: 'bold' }}>
+                      {u.name[0]?.toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>
+                  {u.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
       {/* Reply banner */}
       {replyingTo && !editingMessage && (
         <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.bgSecondary, paddingHorizontal: 16, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.accent }}>
@@ -1463,6 +1409,9 @@ export default function ChatScreen() {
                 placeholderTextColor={colors.inputPlaceholder}
                 value={text}
                 onChangeText={handleChangeText}
+                // Si el usuario mueve el cursor a mitad del texto, la mención se
+                // recalcula desde ahí (al teclear basta con el final).
+                onSelectionChange={(e) => mentions.update(text, e.nativeEvent.selection.start)}
                 onFocus={() => setEmojiOpen(false)}
                 multiline
               />
@@ -1556,11 +1505,22 @@ export default function ChatScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => { setAttachOpen(false); setBibleOpen(true); setEmojiOpen(false); Keyboard.dismiss(); }}
-                style={{ ...sheetRowStyle, borderBottomWidth: 0 }}
+                style={isGroupChat ? sheetRowStyle : { ...sheetRowStyle, borderBottomWidth: 0 }}
               >
                 <Text style={{ fontSize: 24, marginRight: 16 }}>📖</Text>
                 <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Biblia</Text>
               </TouchableOpacity>
+
+              {/* Encuesta: solo en grupos. En un 1:1 no hay nada que votar. */}
+              {isGroupChat && (
+                <TouchableOpacity
+                  onPress={() => { setAttachOpen(false); setPollOpen(true); setEmojiOpen(false); Keyboard.dismiss(); }}
+                  style={{ ...sheetRowStyle, borderBottomWidth: 0 }}
+                >
+                  <Text style={{ fontSize: 24, marginRight: 16 }}>📊</Text>
+                  <Text style={{ color: colors.textPrimary, fontSize: 16 }}>Encuesta</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 onPress={() => setAttachOpen(false)}
                 style={{ marginHorizontal: 16, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
@@ -1571,6 +1531,17 @@ export default function ChatScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Crear encuesta. Se monta al abrirlo para que el formulario empiece en
+          blanco (si no, arrastraría las opciones de la encuesta anterior). */}
+      {pollOpen && (
+        <CreatePollModal
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setPollOpen(false)}
+          onCreate={sendPoll}
+        />
+      )}
 
       {/* Modal acciones mensaje */}
       <Modal visible={!!actionMessage} transparent animationType="fade" onRequestClose={() => setActionMessage(null)}>
@@ -1832,140 +1803,30 @@ export default function ChatScreen() {
       />
 
       {/* ── Modal: perfil de miembro del grupo ── */}
-      <Modal
-        visible={!!memberModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setMemberModal(null)}
-      >
-        <Pressable
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}
-          onPress={() => !memberActionLoading && setMemberModal(null)}
-        >
-          <Pressable onPress={() => {}}>
-            {(() => {
-              const member = memberModal;
-              if (!member) return null;
-              const memberIsAdmin = currentConv?.admins?.includes(member._id) ?? false;
-              const isMe = member._id === user?.id;
-              return (
-                <View style={{
-                  backgroundColor: colors.actionSheetBg,
-                  borderTopLeftRadius: 28, borderTopRightRadius: 28,
-                  paddingBottom: insets.bottom + 12,
-                }}>
-                  {/* Drag handle + X */}
-                  <View style={{ alignItems: 'center', paddingTop: 10 }}>
-                    <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border }} />
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setMemberModal(null)}
-                    style={{ position: 'absolute', top: 16, right: 16, zIndex: 10, width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bgTertiary, alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <Ionicons name="close" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
-
-                  {/* Avatar con anillo */}
-                  <View style={{ alignItems: 'center', paddingTop: 20, paddingBottom: 12 }}>
-                    <View style={{ padding: 3, borderRadius: 50, borderWidth: 2.5, borderColor: colors.accent }}>
-                      {member.avatar ? (
-                        <Image source={{ uri: member.avatar }} style={{ width: 72, height: 72, borderRadius: 36 }} />
-                      ) : (
-                        <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
-                          <Text style={{ color: colors.accent, fontSize: 28, fontWeight: '700' }}>
-                            {member.name[0]?.toUpperCase() ?? '?'}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={{ color: colors.textPrimary, fontSize: 20, fontWeight: '700', marginTop: 14 }}>
-                      {member.name}
-                    </Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 3 }}>
-                      {member.email}
-                    </Text>
-                    {memberIsAdmin && (
-                      <View style={{ marginTop: 6, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10, backgroundColor: colors.accent + '20', borderWidth: 1, borderColor: colors.accent + '40' }}>
-                        <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '700' }}>Admin</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* 3 botones: Mensaje / Llamar / Video */}
-                  {!isMe && (
-                    <View style={{ flexDirection: 'row', marginHorizontal: 16, gap: 10, marginBottom: 12 }}>
-                      {([
-                        { icon: 'chatbubble-outline' as const, label: 'Mensaje', onPress: handleMemberMessage },
-                        { icon: 'call-outline' as const, label: 'Llamar', onPress: () => handleMemberCall('audio') },
-                        { icon: 'videocam-outline' as const, label: 'Video', onPress: () => handleMemberCall('video') },
-                      ] as const).map(({ icon, label, onPress }) => (
-                        <TouchableOpacity
-                          key={label}
-                          onPress={onPress}
-                          disabled={memberActionLoading}
-                          style={{
-                            flex: 1, alignItems: 'center', justifyContent: 'center',
-                            paddingVertical: 14, borderRadius: 16,
-                            backgroundColor: colors.bgTertiary,
-                            borderWidth: 1, borderColor: colors.border,
-                            gap: 6,
-                          }}
-                        >
-                          {memberActionLoading
-                            ? <ActivityIndicator size="small" color={colors.accent} />
-                            : <Ionicons name={icon} size={22} color={colors.accent} />}
-                          <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '500' }}>{label}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Fila: Info */}
-                  {!isMe && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        setMemberModal(null);
-                        router.push({ pathname: '/contact/[id]' as any, params: { id: member._id, conversationId } });
-                      }}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: colors.border }}
-                    >
-                      <Ionicons name="information-circle-outline" size={22} color={colors.textPrimary} style={{ marginRight: 14 }} />
-                      <Text style={{ color: colors.textPrimary, fontSize: 16, flex: 1 }}>Info.</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Fila: Designar / Quitar admin — solo visible para admins sobre otros miembros */}
-                  {iAmAdmin && !isMe && (
-                    <TouchableOpacity
-                      onPress={handleToggleMemberAdmin}
-                      disabled={memberActionLoading}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: colors.border }}
-                    >
-                      <Ionicons name="shield-checkmark-outline" size={22} color={colors.textPrimary} style={{ marginRight: 14 }} />
-                      <Text style={{ color: colors.textPrimary, fontSize: 16, flex: 1 }}>
-                        {memberIsAdmin ? 'Quitar como admin' : 'Designar como admin. del grupo'}
-                      </Text>
-                      {memberActionLoading && <ActivityIndicator size="small" color={colors.accent} />}
-                    </TouchableOpacity>
-                  )}
-
-                  {/* Fila: Quitar del grupo — solo admins sobre no-admins o sobre cualquiera si es el único admin */}
-                  {iAmAdmin && !isMe && (
-                    <TouchableOpacity
-                      onPress={handleRemoveMember}
-                      disabled={memberActionLoading}
-                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderTopWidth: 1, borderTopColor: colors.border }}
-                    >
-                      <Ionicons name="remove-circle-outline" size={22} color={colors.danger} style={{ marginRight: 14 }} />
-                      <Text style={{ color: colors.danger, fontSize: 16, flex: 1 }}>Quitar del grupo</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })()}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Ficha de un miembro del grupo: sus datos y lo que se puede hacer con él.
+          Las reglas de quién ve qué (moderación solo para admins, y nunca sobre uno
+          mismo) viven dentro del componente. */}
+      {memberModal && (
+        <GroupMemberSheet
+          member={memberModal}
+          memberIsAdmin={currentConv?.admins?.includes(memberModal._id) ?? false}
+          iAmAdmin={iAmAdmin}
+          isMe={memberModal._id === user?.id}
+          loading={memberActionLoading}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onClose={() => setMemberModal(null)}
+          onMessage={handleMemberMessage}
+          onCall={handleMemberCall}
+          onInfo={() => {
+            const id = memberModal._id;
+            setMemberModal(null);
+            router.push({ pathname: "/contact/[id]" as any, params: { id, conversationId } });
+          }}
+          onToggleAdmin={handleToggleMemberAdmin}
+          onRemove={handleRemoveMember}
+        />
+      )}
 
     </KeyboardAvoidingView>
   );

@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { Conversation } from '../models/Conversation';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
+import { escapeRegex } from '../lib/regex';
 import { isGlobalAdmin } from '../services/adminService';
 
 export async function getConversations(req: Request, res: Response) {
@@ -256,9 +257,13 @@ export async function searchMessages(req: Request, res: Response) {
 export async function searchUsers(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
-    const { q } = req.query;
 
-    if (!q || (q as string).trim().length < 2) {
+    // La query NO siempre es un string: `?q=a&q=b` llega como array, y antes se
+    // casteaba a `string` a la fuerza (`q as string`), así que `.trim()` reventaba.
+    // Se acota además la longitud: nadie busca a alguien con 300 caracteres.
+    const q = (typeof req.query.q === 'string' ? req.query.q : '').trim().slice(0, 60);
+
+    if (q.length < 2) {
       return res.status(400).json({ error: 'Búsqueda mínima de 2 caracteres' });
     }
 
@@ -266,12 +271,17 @@ export async function searchUsers(req: Request, res: Response) {
     const me = await User.findById(userId).select('blockedUsers').lean();
     const myBlocked = (me?.blockedUsers ?? []).map((b: any) => b.toString());
 
+    // `escapeRegex`: lo que escribe el usuario va como LITERAL. Antes entraba
+    // crudo, así que buscar "(" devolvía un 500 y un patrón como "(a+)+$" dejaba a
+    // MongoDB en backtracking catastrófico — cualquiera podía tumbar el servidor
+    // desde el buscador de usuarios.
+    const rx = escapeRegex(q);
     const users = await User.find({
       _id: { $ne: userId, $nin: myBlocked },
       blockedUsers: { $ne: userId },
       $or: [
-        { name: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } },
+        { name: { $regex: rx, $options: 'i' } },
+        { email: { $regex: rx, $options: 'i' } },
       ],
     })
       .select('name avatar email')
@@ -321,7 +331,9 @@ export async function getSuggestedUsers(req: Request, res: Response) {
 export async function getAllUsersSearch(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
-    const { q } = req.query;
+    // Igual que en `searchUsers`: la query puede llegar como array, así que se
+    // normaliza en vez de castearla a la fuerza.
+    const q = (typeof req.query.q === 'string' ? req.query.q : '').trim().slice(0, 60);
 
     const me = await User.findById(userId).select('blockedUsers').lean();
     const myBlocked = (me?.blockedUsers ?? []).map((b: any) => b.toString());
@@ -330,10 +342,12 @@ export async function getAllUsersSearch(req: Request, res: Response) {
       _id: { $ne: userId, $nin: myBlocked },
       blockedUsers: { $ne: userId },
     };
-    if (q && (q as string).trim().length >= 2) {
+    if (q.length >= 2) {
+      // Igual que en la búsqueda: el texto del usuario va ESCAPADO, como literal.
+      const rx = escapeRegex(q);
       filter.$or = [
-        { name: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } },
+        { name: { $regex: rx, $options: 'i' } },
+        { email: { $regex: rx, $options: 'i' } },
       ];
     }
 
