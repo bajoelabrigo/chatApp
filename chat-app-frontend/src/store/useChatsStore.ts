@@ -36,6 +36,9 @@ interface ChatsState {
   unarchiveConversation: (id: string) => void;
   favoriteConversation: (id: string, favorited: boolean) => void;
   muteConversation: (id: string, muted: boolean) => void;
+  setConversationUnread: (id: string, unread: boolean) => void;
+  clearConversation: (id: string) => void;
+  removeConversation: (id: string) => void;
   blockConversation: (id: string) => void;
   unblockConversation: (id: string) => void;
 
@@ -260,6 +263,47 @@ export const useChatsStore = create<ChatsState>()(
       conversations: s.conversations.map((c) => c._id === id ? { ...c, isMuted: muted } : c),
       archivedConversations: s.archivedConversations.map((c) => c._id === id ? { ...c, isMuted: muted } : c),
     })),
+
+  // "Marcar como no leído": el globo se fuerza a 1 (no hay mensajes pendientes
+  // de verdad). Al marcar como leído se limpian ambos.
+  setConversationUnread: (id, unread) =>
+    set((s) => {
+      const apply = (c: Conversation) =>
+        c._id === id
+          ? { ...c, isUnreadMarked: unread, unreadCount: unread ? Math.max(c.unreadCount ?? 0, 1) : 0 }
+          : c;
+      return {
+        conversations: s.conversations.map(apply),
+        archivedConversations: s.archivedConversations.map(apply),
+      };
+    }),
+
+  // "Vaciar chat": la conversación se queda, pero sin mensajes ni vista previa.
+  clearConversation: (id) =>
+    set((s) => {
+      const apply = (c: Conversation) =>
+        c._id === id
+          ? { ...c, lastMessage: undefined, unreadCount: 0, isUnreadMarked: false }
+          : c;
+      const { [id]: _drop, ...restMessages } = s.messages;
+      return {
+        conversations: s.conversations.map(apply),
+        archivedConversations: s.archivedConversations.map(apply),
+        messages: restMessages,
+      };
+    }),
+
+  // "Eliminar chat (solo para mí)": fuera de la lista. Si el otro escribe, el
+  // backend emite `conversation:new` y vuelve a entrar.
+  removeConversation: (id) =>
+    set((s) => {
+      const { [id]: _drop, ...restMessages } = s.messages;
+      return {
+        conversations: s.conversations.filter((c) => c._id !== id),
+        archivedConversations: s.archivedConversations.filter((c) => c._id !== id),
+        messages: restMessages,
+      };
+    }),
 
   blockConversation: (id) =>
     set((s) => {

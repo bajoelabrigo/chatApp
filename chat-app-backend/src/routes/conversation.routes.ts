@@ -12,6 +12,9 @@ import {
   toggleArchive,
   toggleFavorite,
   toggleMute,
+  setUnread,
+  clearConversation,
+  deleteConversationForMe,
   markAllRead,
   searchAllMessages,
 } from '../controllers/conversationController';
@@ -31,6 +34,10 @@ router.patch('/:id/pin', togglePin);
 router.patch('/:id/archive', toggleArchive);
 router.patch('/:id/favorite', toggleFavorite);
 router.patch('/:id/mute', toggleMute);
+router.patch('/:id/unread', setUnread);
+// "Vaciar chat" (solo mis mensajes) y "Eliminar chat" (además lo saca de mi lista).
+router.delete('/:id/messages', clearConversation);
+router.delete('/:id', deleteConversationForMe);
 router.patch('/mark-all-read', markAllRead);
 
 router.get('/users/search', searchUsers);

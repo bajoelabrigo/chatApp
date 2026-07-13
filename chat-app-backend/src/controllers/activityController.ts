@@ -236,8 +236,15 @@ export async function createActivity(req: Request, res: Response) {
     const startStr = startDate ? new Date(startDate).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined;
     const endStr = endDate ? new Date(endDate).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' }) : undefined;
 
-    const members = await User.find({ _id: { $in: conv.participants } }).select('name email expoPushToken').lean();
-    const pushTokens = members.map((m) => (m as any).expoPushToken).filter(Boolean) as string[];
+    const members = await User.find({ _id: { $in: conv.participants } })
+      .select('name email expoPushToken notificationSettings')
+      .lean();
+    // El push nativo respeta `activityReminders` (ausente = activada), igual que
+    // el push web y los recordatorios del cron.
+    const pushTokens = members
+      .filter((m) => (m as any).notificationSettings?.activityReminders !== false)
+      .map((m) => (m as any).expoPushToken)
+      .filter(Boolean) as string[];
 
     sendPushNotifications(
       pushTokens,

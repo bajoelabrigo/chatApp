@@ -15,6 +15,15 @@ export interface IConversation extends Document {
   archivedBy: Types.ObjectId[];
   favoritedBy: Types.ObjectId[];
   mutedBy: Types.ObjectId[];
+  // "Marcar como no leído": bandera por usuario, NO se toca `Message.readBy`.
+  // Quitar al usuario de `readBy` marcaría el chat como pendiente, pero también
+  // le borraría al REMITENTE el doble check azul de sus mensajes. Se limpia sola
+  // al abrir la conversación.
+  unreadBy: Types.ObjectId[];
+  // "Eliminar chat (solo para mí)": la conversación desaparece de MI lista, pero
+  // sigue existiendo para el otro. Al llegar un mensaje nuevo se quita la marca y
+  // el chat reaparece (igual que WhatsApp: borrar el chat no impide que te escriban).
+  hiddenBy: Types.ObjectId[];
   // Group fields
   isGroup: boolean;
   groupName?: string;
@@ -49,6 +58,8 @@ const ConversationSchema = new Schema<IConversation>(
     archivedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     favoritedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     mutedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    unreadBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    hiddenBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     isGroup: { type: Boolean, default: false },
     groupName: { type: String },
     groupAvatar: { type: String },

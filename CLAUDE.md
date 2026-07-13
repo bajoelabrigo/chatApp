@@ -405,6 +405,35 @@ Sitios a actualizar al añadir un tipo: `Message.ts` (enum + campos), `message:s
 
 ---
 
+## Lista de chats — opciones (móvil y web)
+
+Las 8 acciones sobre un chat (marcar no leído, fijar, favorito, silenciar, archivar, vaciar, eliminar, bloquear) están en los dos clientes: móvil en la hoja de acciones al mantener pulsado (`app/(tabs)/chats.tsx`), web en el menú de 3 puntos de `sidebar/Conversation.jsx` (mismo componente para las pestañas Todos/No leídos/Favoritos/Grupos/Archivados).
+
+- **"Marcar como no leído" NO toca `Message.readBy`.** Quitarse de `readBy` marcaría el chat como pendiente, pero le borraría al REMITENTE el doble check azul. Se usa una bandera aparte, `Conversation.unreadBy`, y el globo se fuerza a 1 (`unreadCount: max(real, 1)`). Se limpia al abrir el chat (`getMessages`, solo primera página) y con `markAllRead`.
+- **"Vaciar chat"** = `$addToSet` del usuario en `Message.deletedFor` de todos los mensajes (el mecanismo de "eliminar mensaje para mí" que ya existía). **"Eliminar chat"** = vaciar + `$addToSet` en `Conversation.hiddenBy` (se cae de mis listas). Endpoints `DELETE /conversations/:id/messages` y `DELETE /conversations/:id`.
+- **Un mensaje nuevo resucita el chat eliminado**: `message:send` hace `$pull` de `hiddenBy` y emite `conversation:new` a quien lo tenía oculto (su cliente ya no conocía la conversación; sin esto el mensaje llegaría a la nada). Borrar el chat no bloquea a nadie — para eso está bloquear.
+- **En grupos NO se ofrece "Eliminar chat"** (el backend responde 400): seguirías recibiendo mensajes y reaparecería al instante. Igual que WhatsApp: primero salir del grupo.
+- Al vaciar hay que cuidar tres efectos colaterales, ya resueltos en `getConversations`: los mensajes vaciados **no cuentan como pendientes** (`deletedFor` excluido del agregado de no leídos) y **no se muestran como vista previa** (`lastMessage` se omite si lo borré).
+
+**Gotcha `createPortal` + daisyUI (web)**: el `data-theme` vive en un `<div>` de `App.jsx`, no en `<html>`. Todo lo que se pinte con `createPortal(..., document.body)` queda fuera y sale con el tema por defecto (oscuro) aunque el usuario esté en claro. Hay que envolver el contenido en `<div data-theme={theme}>` (`useThemeStore`). Ya pasó en `PostDetailModal`, `ChatNavRail` y el menú de `Conversation.jsx`. Ese menú va en portal a propósito: la lista de chats es `overflow-auto` y recortaba el dropdown de daisyUI.
+
+## Formato de texto del chat (*negrita*, _cursiva_, ~tachado~)
+
+Parser espejo en `chat-app-frontend/src/utils/chatFormat.ts` (app) y `holy_app/frontend/src/utils/extraLinkChat.js` (web) — al tocar las reglas, editar los dos. Soporta `*negrita*` y `**negrita**`, `_cursiva_`, `~tachado~`, anidados; el interior no puede empezar/terminar en espacio ni contener saltos de línea (igual que WhatsApp).
+
+**El recorte de "Ver más" (250 caracteres) se aplica DESPUÉS de formatear, nunca antes.** Recortar el texto crudo partía en dos un `*negrita*` largo: el delimitador de cierre caía detrás del corte, se perdía la pareja y el mensaje se veía sin formato hasta expandirlo. Ahora se formatea el texto completo y se gasta un presupuesto de caracteres **visibles** al emitir los trozos (`takeText`), así las etiquetas siempre acaban cerradas. Las URLs y las menciones no se parten: entran enteras o no entran.
+
+## Popups de inicio — configurables desde el dashboard
+
+El popup de la esquina inferior (web y app) **ya no está hardcodeado**: lo gobierna un documento único `PopupConfig` (`chat-app-backend/src/models/PopupConfig.ts`) que edita el admin general en **`/users` → pestaña "Popups"** (`holy_app/frontend/src/pages/userlist/PopupsAdmin.jsx`).
+
+- **Backend**: `GET /public/popup-config` (SIN auth — la página pública `/descargar` también la lee para los videos), `PUT /popup/config` + `GET /popup/stats` + `POST /popup/stats/reset` (solo `isGlobalAdmin`), `POST /popup/event` (auth; `$inc` atómico de vistas/clics/cierres).
+- **Categorías (`kind`)**: `material`, `prayer`, `activity`, `app` (descarga/actualización, con QR), `custom` (anuncio libre). El **orden del arreglo `kinds` es el orden de rotación**; cada una tiene `enabled`, `audience` (`all|web|app`) y ventana `startsAt`/`endsAt`.
+- **Política duplicada en los dos clientes — al tocarla, editar los dos**: `chat-app-frontend/src/services/dailyPopupService.ts` y `holy_app/frontend/src/lib/popupPolicy.js` (rotación por día + veces mostradas hoy, `timesPerDay`, `minGapMinutes`, `durationSeconds` de autocierre, `quietHours` en hora local). Estado local: clave `dailyPopupState` (AsyncStorage / localStorage) con `{date,count,lastAt,kinds}` — sustituye a la vieja `dailyPopupDate`.
+- **`kind: 'app'`**: en la web sale siempre que esté activo (QR + botón de APK); en la app **solo si `version` de `app.json` < `appUpdate.latestVersion`** (`isOlderVersion`, comparación numérica). Para avisar de una actualización basta con subir ese número en el dashboard — no hace falta desplegar nada.
+- **Videos de `/descargar`**: `helpVideos` de la misma config (playlist; el 1º es el destacado). Se renderizan con el facade `LiteYouTube`. El admin pega la URL de YouTube y el backend extrae el ID.
+- **Orden de despliegue**: primero el backend. Si `/public/popup-config` no existe, `fetchPopupConfig` devuelve `null` y **no se muestra ningún popup** en ninguno de los dos clientes (falla en seguro, pero silencioso).
+
 ## Posts (`holy_app`) — el editor vacío no es una cadena vacía
 
 El contenido de un post es HTML de Quill: un editor vacío devuelve `<p><br></p>`, así que `content.trim()` **nunca** detecta un post en blanco (así se colaban posts vacíos). Usar `hasVisibleText()` — espejo en `frontend/src/lib/postContent.js` y `backend/utils/postContent.js` — que quita etiquetas y `&nbsp;`. Validar en cliente (deshabilitar el botón) **y** en servidor (`createPost`/`updatePost` → 400). Quitar etiquetas es seguro mientras el editor no admita `<img>`/`<iframe>` (ver formatos de `PostEditor.jsx`).

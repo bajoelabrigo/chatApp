@@ -76,6 +76,8 @@ export interface Conversation {
   isFavorite?: boolean;
   isMuted?: boolean;
   isBlocked?: boolean;
+  // Marcado como no leído a mano (sin mensajes pendientes de verdad).
+  isUnreadMarked?: boolean;
   unreadCount?: number;
   // Group
   isGroup?: boolean;
@@ -229,6 +231,32 @@ export async function apiToggleFavorite(token: string, conversationId: string) {
     headers: { Authorization: `Bearer ${token}` },
   });
   return data as { favorited: boolean };
+}
+
+// Marcar/desmarcar el chat como no leído. `unread: false` además marca como
+// leídos los mensajes pendientes de verdad (equivale a abrir el chat).
+export async function apiSetUnread(token: string, conversationId: string, unread: boolean) {
+  const { data } = await api.patch(`/conversations/${conversationId}/unread`, { unread }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as { unread: boolean };
+}
+
+// Vacía el chat solo para mí (la conversación sigue en la lista, sin mensajes).
+export async function apiClearConversation(token: string, conversationId: string) {
+  const { data } = await api.delete(`/conversations/${conversationId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as { cleared: number };
+}
+
+// Elimina el chat solo para mí: lo vacía y lo saca de mi lista. Si el otro vuelve
+// a escribir, reaparece. En grupos el backend responde 400 (hay que salir primero).
+export async function apiDeleteConversation(token: string, conversationId: string) {
+  const { data } = await api.delete(`/conversations/${conversationId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data as { deleted: boolean };
 }
 
 export async function apiToggleMute(token: string, conversationId: string) {

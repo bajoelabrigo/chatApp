@@ -25,12 +25,17 @@ async function assertMember(groupId: string, userId: string): Promise<any | null
  *
  * Las actividades (`activityController`) siempre lo hicieron bien, desde `User`:
  * de ahí que la asimetría pasara desapercibida.
+ *
+ * Respeta la preferencia `notificationSettings.prayerRequests` (ausente = activada),
+ * igual que el push web. Antes no la miraba: quien la apagaba en la app seguía
+ * recibiendo los avisos igual.
  */
 async function groupPushTokens(memberIds: string[]): Promise<string[]> {
   if (!memberIds.length) return [];
   return User.find({
     _id: { $in: memberIds },
     expoPushToken: { $exists: true, $ne: null },
+    'notificationSettings.prayerRequests': { $ne: false },
   }).distinct('expoPushToken');
 }
 

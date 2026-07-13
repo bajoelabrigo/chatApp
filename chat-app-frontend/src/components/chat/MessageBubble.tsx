@@ -5,7 +5,7 @@ import type { Message, MessageReplyTo, Reaction, ChatUser, SharedContact } from 
 import { VoicePlayer } from './VoicePlayer';
 import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
-import { parseFormatting } from '../../utils/chatFormat';
+import { parseFormatting, type FmtSegment } from '../../utils/chatFormat';
 import { splitMentions } from '../../utils/mentions';
 import { PollBubble } from './PollBubble';
 
@@ -45,12 +45,27 @@ const labelNameColor = nameColor;
 const MAX_LENGTH = 250;
 
 // Un trozo del texto ya preparado para pintar: o es una URL, o es texto con sus
-// menciones ya marcadas. Se calcula una vez (memoizado) en vez de en cada render.
+// menciones ya marcadas y, dentro de cada una, sus segmentos de formato.
+// Se calcula una vez (memoizado) en vez de en cada render.
+type TextPiece = { text: string; mentionOf?: string; segs?: FmtSegment[] };
 type TextPart = {
   type: string;
   value: string;
-  pieces: ReturnType<typeof splitMentions>;
+  pieces: TextPiece[];
 };
+
+// Presupuesto de caracteres del recorte ("Ver más"). Se consume mientras se pinta
+// el texto YA formateado, nunca antes: si se recortara el texto crudo, un
+// *negrita* cuyo asterisco de cierre cayera detrás del corte perdería su pareja y
+// el mensaje entero se vería sin formato hasta pulsar "Ver más".
+type Budget = { left: number };
+
+function takeText(text: string, budget: Budget): string {
+  if (budget.left <= 0) return '';
+  const taken = text.slice(0, budget.left);
+  budget.left -= taken.length;
+  return taken;
+}
 
 function isEmojiOnly(text: string): boolean {
   return EMOJI_ONLY_REGEX.test(text.trim()) && text.trim().length > 0;
@@ -313,12 +328,41 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const parts = useMemo<TextPart[]>(() => {
     if (item.type !== 'text' || item.isDeletedForEveryone) return [];
     const full = item.content ?? '';
-    const shown = full.length > MAX_LENGTH && !expanded ? full.slice(0, MAX_LENGTH) : full;
-    return splitByUrls(shown).map((p) => ({
-      ...p,
-      // En una URL no hay menciones que buscar.
-      pieces: p.type === 'url' ? [] : splitMentions(p.value, mentionUsers ?? []),
-    }));
+    // El formato se calcula sobre el texto COMPLETO y el recorte se aplica
+    // después, gastando el presupuesto a medida que se emiten los trozos.
+    const budget: Budget = {
+      left: full.length > MAX_LENGTH && !expanded ? MAX_LENGTH : Infinity,
+    };
+
+    const out: TextPart[] = [];
+    for (const p of splitByUrls(full)) {
+      if (budget.left <= 0) break;
+      if (p.type === 'url') {
+        // Una URL no se parte por la mitad: o entra entera o no entra.
+        budget.left -= p.value.length;
+        out.push({ ...p, pieces: [] });
+        continue;
+      }
+      const pieces: TextPiece[] = [];
+      for (const piece of splitMentions(p.value, mentionUsers ?? [])) {
+        if (budget.left <= 0) break;
+        if (piece.mentionOf) {
+          // Una mención tampoco se parte: es un nombre.
+          budget.left -= piece.text.length;
+          pieces.push({ text: piece.text, mentionOf: piece.mentionOf });
+          continue;
+        }
+        const segs: FmtSegment[] = [];
+        for (const seg of parseFormatting(piece.text)) {
+          if (budget.left <= 0) break;
+          const text = takeText(seg.text, budget);
+          if (text) segs.push({ ...seg, text });
+        }
+        if (segs.length) pieces.push({ text: piece.text, segs });
+      }
+      if (pieces.length) out.push({ ...p, pieces });
+    }
+    return out;
   }, [item.type, item.content, item.isDeletedForEveryone, expanded, mentionUsers]);
 
   const deletedForMe = item.deletedFor?.includes(currentUserId);
@@ -737,8 +781,9 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
                           {piece.text}
                         </Text>
                       ) : (
-                        // Formato tipo WhatsApp (*negrita*, _cursiva_, ~tachado~)
-                        parseFormatting(piece.text).map((seg, j) => (
+                        // Formato tipo WhatsApp (*negrita*, _cursiva_, ~tachado~),
+                        // ya calculado (y recortado) en el memo de arriba.
+                        (piece.segs ?? []).map((seg, j) => (
                           <Text
                             key={`${i}-${m}-${j}`}
                             style={{

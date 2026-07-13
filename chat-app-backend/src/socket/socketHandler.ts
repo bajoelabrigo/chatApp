@@ -243,9 +243,15 @@ export function setupSocketHandlers(io: Server) {
         // receptor todavía no lo tiene en su lista.
         const isFirstMessage = !conversation.lastMessage;
 
+        // Quien había eliminado el chat "solo para él" vuelve a verlo al llegar un
+        // mensaje nuevo (igual que WhatsApp: borrar el chat no bloquea a nadie).
+        // Se lee ANTES del update para saber a quién hay que reenviarle la
+        // conversación: ya no la tiene en su lista.
+        const hiddenFor = ((conversation as any).hiddenBy ?? []).map((id: any) => id.toString());
+
         await Conversation.findByIdAndUpdate(conversationId, {
-          lastMessage: message._id,
-          lastMessageAt: message.createdAt,
+          $set: { lastMessage: message._id, lastMessageAt: message.createdAt },
+          $pull: { hiddenBy: { $in: conversation.participants } },
         });
 
         const populated = await message.populate('senderId', 'name avatar');
@@ -266,12 +272,20 @@ export function setupSocketHandlers(io: Server) {
         // Si es el primer mensaje de un chat 1:1, el receptor aún no tiene la
         // conversación en su lista. Le enviamos la conversación poblada a su room
         // personal ANTES del mensaje, para que la tarjeta aparezca al instante.
-        if (isFirstMessage && !conversation.isGroup) {
+        // Lo mismo para quien había eliminado el chat de su lista: sin esto, el
+        // mensaje llegaría a una conversación que su cliente ya no conoce y no se
+        // vería hasta refrescar.
+        const needConv = new Set<string>(
+          otherParticipants.filter(
+            (pid) => hiddenFor.includes(pid) || (isFirstMessage && !conversation.isGroup)
+          )
+        );
+        if (needConv.size > 0) {
           const fullConv = await Conversation.findById(conversationId)
             .populate('participants', 'name avatar email lastSeen showLastSeen')
             .lean();
           if (fullConv) {
-            for (const pid of otherParticipants) {
+            for (const pid of needConv) {
               io.to(`user:${pid}`).emit('conversation:new', fullConv);
             }
           }

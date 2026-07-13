@@ -42,6 +42,9 @@ import {
   apiToggleFavorite,
   apiToggleBlock,
   apiToggleMute,
+  apiSetUnread,
+  apiClearConversation,
+  apiDeleteConversation,
   markAllConversationsRead,
   discoverGroups,
   joinGroup,
@@ -129,6 +132,10 @@ function MessageSnippet({ text, query, colors }: { text: string; query: string; 
   );
 }
 
+// Un chat cuenta como "sin leer" si tiene mensajes pendientes de verdad o si el
+// usuario lo marcó a mano (bandera `isUnreadMarked` del backend).
+const hasUnread = (c: Conversation) => (c.unreadCount ?? 0) > 0 || !!c.isUnreadMarked;
+
 export default function ChatsScreen() {
   const { token, user } = useAuthStore();
   const { colors } = useTheme();
@@ -137,6 +144,9 @@ export default function ChatsScreen() {
     setConversations, upsertConversation,
     pinConversation, archiveConversation, unarchiveConversation,
     favoriteConversation, blockConversation, unblockConversation, muteConversation,
+    setConversationUnread,
+    clearConversation: clearConversationMessages,
+    removeConversation,
     addMessage,
   } = useChatsStore();
   const { unreadCount: notifCount, fetchNotifications: fetchNotifs } = useNotificationsStore();
@@ -557,6 +567,58 @@ export default function ChatsScreen() {
       await apiToggleMute(token, actionConv._id);
       muteConversation(actionConv._id, next);
     });
+  };
+
+  // Un chat "está sin leer" si tiene mensajes pendientes de verdad o si el
+  // usuario lo marcó a mano. En ambos casos la acción que ofrecemos es la
+  // contraria: marcarlo como leído.
+  const handleToggleUnread = () => {
+    if (!actionConv || !token) return;
+    const next = !hasUnread(actionConv);
+    runAction(async () => {
+      await apiSetUnread(token, actionConv._id, next);
+      setConversationUnread(actionConv._id, next);
+    });
+  };
+
+  // Vaciar: borra los mensajes SOLO para mí; el chat se queda en la lista.
+  const handleClearChat = () => {
+    if (!actionConv || !token) return;
+    const conv = actionConv;
+    Alert.alert(
+      '¿Vaciar el chat?',
+      'Se borrarán los mensajes solo para ti. La otra persona conservará los suyos.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Vaciar', style: 'destructive',
+          onPress: () => runAction(async () => {
+            await apiClearConversation(token, conv._id);
+            clearConversationMessages(conv._id);
+          }),
+        },
+      ]
+    );
+  };
+
+  // Eliminar: vacía y saca el chat de mi lista. Reaparece si me vuelven a escribir.
+  const handleDeleteChat = () => {
+    if (!actionConv || !token) return;
+    const conv = actionConv;
+    Alert.alert(
+      '¿Eliminar el chat?',
+      'Se eliminará de tu lista y se borrarán sus mensajes solo para ti. Si te vuelven a escribir, el chat aparecerá de nuevo.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar', style: 'destructive',
+          onPress: () => runAction(async () => {
+            await apiDeleteConversation(token, conv._id);
+            removeConversation(conv._id);
+          }),
+        },
+      ]
+    );
   };
 
   const handleSearch = useCallback(async (q: string) => {
@@ -1045,20 +1107,42 @@ export default function ChatsScreen() {
                   <>
                     {!actionConv.isArchived && (
                       <>
+                        <ActionItem
+                          icon={hasUnread(actionConv) ? '📖' : '🔵'}
+                          label={hasUnread(actionConv) ? 'Marcar como leído' : 'Marcar como no leído'}
+                          onPress={handleToggleUnread}
+                          colors={colors}
+                        />
                         <ActionItem icon="📌" label={actionConv.isPinned ? 'Desfijar chat' : 'Fijar chat'} onPress={handlePin} colors={colors} />
                         <ActionItem icon="⭐" label={actionConv.isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'} onPress={handleFavorite} colors={colors} />
                         <ActionItem icon={actionConv.isMuted ? '🔔' : '🔕'} label={actionConv.isMuted ? 'Activar notificaciones' : 'Silenciar'} onPress={handleMute} colors={colors} />
                         <ActionItem icon="📂" label="Archivar chat" onPress={handleArchive} colors={colors} />
+                        <ActionItem icon="🧹" label="Vaciar chat" onPress={handleClearChat} colors={colors} danger />
                         {!actionConv.isGroup && (
-                          <ActionItem icon="🚫" label="Bloquear usuario" onPress={handleBlock} colors={colors} danger />
+                          <>
+                            {/* En un grupo no se puede eliminar el chat sin salir antes
+                                (seguirían llegando mensajes y reaparecería al instante). */}
+                            <ActionItem icon="🗑️" label="Eliminar chat" onPress={handleDeleteChat} colors={colors} danger />
+                            <ActionItem icon="🚫" label="Bloquear usuario" onPress={handleBlock} colors={colors} danger />
+                          </>
                         )}
                       </>
                     )}
                     {actionConv.isArchived && !actionConv.isBlocked && (
                       <>
+                        <ActionItem
+                          icon={hasUnread(actionConv) ? '📖' : '🔵'}
+                          label={hasUnread(actionConv) ? 'Marcar como leído' : 'Marcar como no leído'}
+                          onPress={handleToggleUnread}
+                          colors={colors}
+                        />
                         <ActionItem icon="⭐" label={actionConv.isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'} onPress={handleFavorite} colors={colors} />
                         <ActionItem icon={actionConv.isMuted ? '🔔' : '🔕'} label={actionConv.isMuted ? 'Activar notificaciones' : 'Silenciar'} onPress={handleMute} colors={colors} />
                         <ActionItem icon="📥" label="Desarchivar chat" onPress={handleUnarchive} colors={colors} />
+                        <ActionItem icon="🧹" label="Vaciar chat" onPress={handleClearChat} colors={colors} danger />
+                        {!actionConv.isGroup && (
+                          <ActionItem icon="🗑️" label="Eliminar chat" onPress={handleDeleteChat} colors={colors} danger />
+                        )}
                       </>
                     )}
                     {actionConv.isBlocked && (

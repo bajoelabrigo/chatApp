@@ -18,6 +18,9 @@ export async function getConversations(req: Request, res: Response) {
     const query: any = admin
       ? { $or: [{ participants: userId }, { isGroup: true }] }
       : { participants: userId };
+    // Chats eliminados "solo para mí": fuera de todas las listas hasta que llegue
+    // un mensaje nuevo (message:send limpia la marca).
+    query.hiddenBy = { $ne: userId };
     if (favorite) {
       query.favoritedBy = userId; // all favorites regardless of archive state
     } else if (archived) {
@@ -45,6 +48,8 @@ export async function getConversations(req: Request, res: Response) {
           senderId: { $ne: new Types.ObjectId(userId) },
           readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
           isDeletedForEveryone: { $ne: true },
+          // Un mensaje que vacié del chat no puede seguir contando como pendiente.
+          deletedFor: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
         },
       },
       { $group: { _id: '$conversationId', count: { $sum: 1 } } },
@@ -57,14 +62,27 @@ export async function getConversations(req: Request, res: Response) {
       const otherUser = (conv.participants as any[]).find(
         (p: any) => p._id.toString() !== userId
       );
+      // "Marcado como no leído" a mano: no hay mensajes pendientes de verdad, así
+      // que se fuerza el globo a 1 para que el chat se vea igual que uno con un
+      // mensaje sin leer (y entre en el filtro "No leídos").
+      const markedUnread = (conv.unreadBy ?? []).some((id: any) => id.toString() === userId);
+      const realUnread = unreadMap.get(conv._id.toString()) ?? 0;
+      // Si vacié el chat, el último mensaje ya no existe PARA MÍ: la lista no puede
+      // seguir enseñando su vista previa (el otro sí lo conserva).
+      const lastMsg: any = conv.lastMessage;
+      const lastDeletedForMe =
+        !!lastMsg &&
+        (lastMsg.deletedFor ?? []).some((id: any) => id.toString() === userId);
       return {
         ...conv,
+        lastMessage: lastDeletedForMe ? undefined : conv.lastMessage,
         isPinned: (conv.pinnedBy ?? []).some((id: any) => id.toString() === userId),
         isArchived: archived,
         isFavorite: (conv.favoritedBy ?? []).some((id: any) => id.toString() === userId),
         isMuted: (conv.mutedBy ?? []).some((id: any) => id.toString() === userId),
         isBlocked: otherUser ? blockedSet.has(otherUser._id.toString()) : false,
-        unreadCount: unreadMap.get(conv._id.toString()) ?? 0,
+        isUnreadMarked: markedUnread,
+        unreadCount: markedUnread ? Math.max(realUnread, 1) : realUnread,
       };
     });
 
@@ -115,19 +133,122 @@ export async function toggleMute(req: Request, res: Response) {
   catch { res.status(500).json({ error: 'Error al silenciar conversación' }); }
 }
 
+// PATCH /conversations/:id/unread — { unread: boolean }.
+// true  → marca el chat como no leído (bandera propia, ver Conversation.unreadBy).
+// false → lo marca como leído: quita la bandera Y marca los mensajes pendientes.
+export async function setUnread(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const unread = req.body?.unread !== false; // por defecto, marcar como NO leído
+    const conv = await Conversation.findOne({ _id: req.params.id, participants: userId })
+      .select('_id')
+      .lean();
+    if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
+
+    if (unread) {
+      await Conversation.updateOne({ _id: conv._id }, { $addToSet: { unreadBy: userId } });
+    } else {
+      await Promise.all([
+        Conversation.updateOne({ _id: conv._id }, { $pull: { unreadBy: userId } }),
+        Message.updateMany(
+          {
+            conversationId: conv._id,
+            senderId: { $ne: new Types.ObjectId(userId) },
+            readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
+          },
+          { $addToSet: { readBy: new Types.ObjectId(userId) }, $set: { status: 'read' } }
+        ),
+      ]);
+    }
+
+    res.json({ unread });
+  } catch {
+    res.status(500).json({ error: 'Error al cambiar el estado de lectura' });
+  }
+}
+
+// Vacía el chat SOLO PARA MÍ: me añade a `deletedFor` de todos sus mensajes (el
+// mismo mecanismo que "eliminar mensaje para mí", ya existente). El otro conserva
+// la conversación intacta. Devuelve cuántos mensajes se ocultaron.
+async function hideAllMessagesFor(conversationId: string, userId: string) {
+  const result = await Message.updateMany(
+    {
+      conversationId,
+      deletedFor: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
+    },
+    { $addToSet: { deletedFor: new Types.ObjectId(userId) } }
+  );
+  return result.modifiedCount ?? 0;
+}
+
+// DELETE /conversations/:id/messages — "Vaciar chat". La conversación sigue en la
+// lista, pero sin mensajes para mí.
+export async function clearConversation(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const conv = await Conversation.findOne({ _id: req.params.id, participants: userId })
+      .select('_id')
+      .lean();
+    if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
+
+    const cleared = await hideAllMessagesFor(String(conv._id), userId);
+    // Vaciar deja el chat "visto": no tendría sentido dejar pendientes de mensajes
+    // que acabo de ocultar.
+    await Conversation.updateOne({ _id: conv._id }, { $pull: { unreadBy: userId } });
+    res.json({ cleared });
+  } catch {
+    res.status(500).json({ error: 'Error al vaciar la conversación' });
+  }
+}
+
+// DELETE /conversations/:id — "Eliminar chat (solo para mí)": vacía y además lo
+// saca de mi lista. No borra nada del otro lado ni impide que me vuelvan a
+// escribir: si llega un mensaje nuevo, el chat reaparece (ver message:send).
+export async function deleteConversationForMe(req: Request, res: Response) {
+  try {
+    const userId = (req as any).userId;
+    const conv = await Conversation.findOne({ _id: req.params.id, participants: userId })
+      .select('_id isGroup')
+      .lean();
+    if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
+
+    // En un grupo del que sigo siendo miembro, "eliminar el chat" no significa
+    // nada: seguiría llegándome cada mensaje y reapareciendo al instante. Igual
+    // que WhatsApp: primero se sale del grupo.
+    if ((conv as any).isGroup) {
+      return res.status(400).json({
+        error: 'Para eliminar el chat de un grupo, primero sal del grupo.',
+      });
+    }
+
+    await hideAllMessagesFor(String(conv._id), userId);
+    await Conversation.updateOne(
+      { _id: conv._id },
+      { $addToSet: { hiddenBy: userId }, $pull: { unreadBy: userId } }
+    );
+    res.json({ deleted: true });
+  } catch {
+    res.status(500).json({ error: 'Error al eliminar la conversación' });
+  }
+}
+
 export async function markAllRead(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const userConvs = await Conversation.find({ participants: userId }).select('_id').lean();
     const convIds = userConvs.map((c) => c._id);
-    await Message.updateMany(
-      {
-        conversationId: { $in: convIds },
-        senderId: { $ne: new Types.ObjectId(userId) },
-        readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
-      },
-      { $addToSet: { readBy: new Types.ObjectId(userId) }, $set: { status: 'read' } }
-    );
+    await Promise.all([
+      Message.updateMany(
+        {
+          conversationId: { $in: convIds },
+          senderId: { $ne: new Types.ObjectId(userId) },
+          readBy: { $not: { $elemMatch: { $eq: new Types.ObjectId(userId) } } },
+        },
+        { $addToSet: { readBy: new Types.ObjectId(userId) }, $set: { status: 'read' } }
+      ),
+      // "Marcar todo como leído" también borra los marcados a mano como no leídos.
+      Conversation.updateMany({ _id: { $in: convIds } }, { $pull: { unreadBy: userId } }),
+    ]);
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Error al marcar como leído' });
@@ -176,6 +297,12 @@ export async function getMessages(req: Request, res: Response) {
       conversation = await Conversation.findOne({ _id: conversationId, isGroup: true });
     }
     if (!conversation) return res.status(404).json({ error: 'Conversación no encontrada' });
+
+    // Abrir el chat deshace el "marcar como no leído" (igual que en WhatsApp).
+    // Solo en la primera página: al paginar hacia atrás no se está "abriendo".
+    if (!before) {
+      await Conversation.updateOne({ _id: conversationId }, { $pull: { unreadBy: userId } });
+    }
 
     const query: any = { conversationId };
     if (before) query.createdAt = { $lt: new Date(before as string) };

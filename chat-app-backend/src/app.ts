@@ -19,6 +19,7 @@ import notificationRoutes from './routes/notification.routes';
 import adminRoutes from './routes/admin.routes';
 import materialRoutes from './routes/material.routes';
 import publicRoutes from './routes/public.routes';
+import popupRoutes from './routes/popup.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 import { setIO } from './socket/ioSingleton';
 import { startCronJobs } from './services/cronService';
@@ -49,6 +50,7 @@ app.use('/notifications', notificationRoutes);
 app.use('/admin', adminRoutes);
 app.use('/materials', materialRoutes);
 app.use('/public', publicRoutes);
+app.use('/popup', popupRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
