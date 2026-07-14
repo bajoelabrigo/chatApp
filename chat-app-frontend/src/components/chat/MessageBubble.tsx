@@ -443,6 +443,15 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
     </View>
   );
 
+  // Pie de foto: el texto que acompaña al archivo va DENTRO de la burbuja, debajo
+  // de la imagen/video (como WhatsApp), no en una burbuja de texto aparte.
+  const caption = item.caption?.trim();
+  const captionBlock = caption ? (
+    <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+      <Text style={{ color: bubbleText, fontSize: 15, lineHeight: 20 }}>{caption}</Text>
+    </View>
+  ) : null;
+
   const bubbleContent = (
     <>
       {/* IMAGE */}
@@ -464,9 +473,10 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             </View>
           )}
           <Image source={{ uri: item.content }} style={{ width: 224, height: 224 }} resizeMode="cover" />
+          {captionBlock}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: bubbleBg }}>
             <Text style={{ color: bubbleSubtext, fontSize: 12, flex: 1, marginRight: 8 }} numberOfLines={1}>
-              {item.fileName ?? 'Imagen'}
+              {caption ? '' : item.fileName ?? 'Imagen'}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {timestamp}
@@ -520,9 +530,10 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
               </View>
             </View>
           </View>
+          {captionBlock}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: bubbleBg }}>
             <Text style={{ color: bubbleSubtext, fontSize: 12, flex: 1, marginRight: 8 }} numberOfLines={1}>
-              {item.fileName ?? 'Video'}
+              {caption ? '' : item.fileName ?? 'Video'}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {timestamp}
@@ -581,6 +592,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
               ) : null}
             </View>
           </View>
+          {captionBlock}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: isMine ? 'rgba(0,0,0,0.06)' : colors.borderLight }}>
             {timestamp}
             <TouchableOpacity

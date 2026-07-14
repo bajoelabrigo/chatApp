@@ -46,10 +46,11 @@ function previewOf(msg: any, isGroup: boolean, currentUserId: string): string {
   if (!msg) return '';
   if (msg.isDeletedForEveryone) return '🚫 Mensaje eliminado';
   let content = '';
-  if (msg.type === 'image') content = '📷 Imagen';
+  // Con pie de foto se muestra el pie (como WhatsApp): dice mucho más que "Imagen".
+  if (msg.type === 'image') content = `📷 ${msg.caption ?? 'Imagen'}`;
   else if (msg.type === 'audio') content = '🎤 Nota de voz';
-  else if (msg.type === 'video') content = '🎬 Video';
-  else if (msg.type === 'document') content = `📎 ${msg.fileName ?? 'Documento'}`;
+  else if (msg.type === 'video') content = `🎬 ${msg.caption ?? 'Video'}`;
+  else if (msg.type === 'document') content = `📎 ${msg.caption ?? msg.fileName ?? 'Documento'}`;
   else if (msg.type === 'call') content = '📞 Llamada';
   else if (msg.type === 'contact') content = `👤 ${msg.contact?.name ?? 'Contacto'}`;
   else if (msg.type === 'poll') content = `📊 ${msg.poll?.question ?? msg.content ?? 'Encuesta'}`;

@@ -114,6 +114,7 @@ export function setupSocketHandlers(io: Server) {
       conversationId: string;
       content: string;
       type?: string;
+      caption?: string;
       fileName?: string;
       fileSize?: number;
       cloudinaryPublicId?: string;
@@ -183,6 +184,13 @@ export function setupSocketHandlers(io: Server) {
           };
         }
 
+        // Pie de foto: solo tiene sentido en un archivo (en un texto, el texto ES
+        // el `content`). Se recorta como en WhatsApp para que no crezca sin fin.
+        const isFileMessage = ['image', 'video', 'audio', 'document'].includes(type);
+        const caption = isFileMessage
+          ? (data.caption ?? '').trim().slice(0, 1000) || undefined
+          : undefined;
+
         const otherParticipants = conversation.participants
           .map((p) => p.toString())
           .filter((p) => p !== userId);
@@ -225,6 +233,7 @@ export function setupSocketHandlers(io: Server) {
           // tienen algo que mostrar sin tener que leer `contact` ni `poll`.
           content: contact ? contact.name : poll ? poll.question : content,
           type,
+          caption,
           fileName,
           fileSize,
           cloudinaryPublicId: cloudinaryPublicId ?? undefined,
@@ -310,11 +319,11 @@ export function setupSocketHandlers(io: Server) {
           const preview =
             type !== 'text'
               ? type === 'image'
-                ? '📷 Foto'
+                ? `📷 ${caption ?? 'Foto'}`
                 : type === 'audio'
                 ? '🎤 Mensaje de voz'
                 : type === 'video'
-                ? '🎬 Video'
+                ? `🎬 ${caption ?? 'Video'}`
                 : type === 'contact'
                 ? `👤 ${contact?.name ?? 'Contacto'}`
                 : type === 'poll'

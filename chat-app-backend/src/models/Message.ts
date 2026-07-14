@@ -59,6 +59,11 @@ export interface IMessage extends Document {
   senderId: Types.ObjectId;
   content: string;
   type: MessageType;
+  /** Pie de foto: el texto que acompaña a una imagen/video/documento. Va DENTRO
+   *  de la misma burbuja (como WhatsApp), no como un mensaje de texto aparte.
+   *  En los mensajes de media el `content` es la URL del archivo, así que el
+   *  texto necesita su propio campo. */
+  caption?: string;
   fileName?: string;
   fileSize?: number;
   cloudinaryPublicId?: string;
@@ -92,6 +97,7 @@ const MessageSchema = new Schema<IMessage>(
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true },
     type: { type: String, enum: ['text', 'image', 'audio', 'video', 'document', 'call', 'contact', 'poll'], default: 'text' },
+    caption: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
     cloudinaryPublicId: { type: String },

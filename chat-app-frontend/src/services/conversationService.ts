@@ -36,6 +36,9 @@ export interface Message {
   senderId: ChatUser;
   content: string;
   type: MessageType;
+  /** Pie de foto: el texto que acompaña a una imagen/video/documento y se pinta
+   *  DENTRO de la misma burbuja, debajo del archivo (como WhatsApp). */
+  caption?: string;
   fileName?: string;
   fileSize?: number;
   status: 'sent' | 'delivered' | 'read';

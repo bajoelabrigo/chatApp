@@ -951,10 +951,10 @@ function lastMsgPreview(conv: Conversation): string {
   const lm = conv.lastMessage;
   if (!lm) return '';
   if (lm.isDeletedForEveryone) return '🚫 Mensaje eliminado';
-  if (lm.type === 'image') return '📷 Imagen';
+  if (lm.type === 'image') return `📷 ${lm.caption ?? 'Imagen'}`;
   if (lm.type === 'audio') return '🎤 Nota de voz';
-  if (lm.type === 'video') return '🎬 Video';
-  if (lm.type === 'document') return `📎 ${lm.fileName ?? 'Documento'}`;
+  if (lm.type === 'video') return `🎬 ${lm.caption ?? 'Video'}`;
+  if (lm.type === 'document') return `📎 ${lm.caption ?? lm.fileName ?? 'Documento'}`;
   return lm.content;
 }
 

@@ -65,10 +65,11 @@ function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   if (!lm) return '';
   if (lm.isDeletedForEveryone) return '🚫 Mensaje eliminado';
   let content = '';
-  if (lm.type === 'image') content = '📷 Imagen';
+  // Con pie de foto se muestra el pie (como WhatsApp): dice más que "Imagen".
+  if (lm.type === 'image') content = `📷 ${lm.caption ?? 'Imagen'}`;
   else if (lm.type === 'audio') content = '🎤 Nota de voz';
-  else if (lm.type === 'video') content = '🎬 Video';
-  else if (lm.type === 'document') content = `📎 ${lm.fileName ?? 'Documento'}`;
+  else if (lm.type === 'video') content = `🎬 ${lm.caption ?? 'Video'}`;
+  else if (lm.type === 'document') content = `📎 ${lm.caption ?? lm.fileName ?? 'Documento'}`;
   else if (lm.type === 'contact') content = `👤 ${lm.contact?.name ?? lm.content}`;
   else if (lm.type === 'poll') content = `📊 ${lm.poll?.question ?? lm.content}`;
   else content = lm.content;
