@@ -48,6 +48,7 @@ function previewOf(msg: any, isGroup: boolean, currentUserId: string): string {
   let content = '';
   if (msg.type === 'image') content = '📷 Imagen';
   else if (msg.type === 'audio') content = '🎤 Nota de voz';
+  else if (msg.type === 'video') content = '🎬 Video';
   else if (msg.type === 'document') content = `📎 ${msg.fileName ?? 'Documento'}`;
   else if (msg.type === 'call') content = '📞 Llamada';
   else if (msg.type === 'contact') content = `👤 ${msg.contact?.name ?? 'Contacto'}`;

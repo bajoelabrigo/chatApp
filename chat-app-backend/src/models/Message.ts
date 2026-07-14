@@ -1,7 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
-export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact' | 'poll';
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll';
 
 /**
  * Encuesta (tipo `poll`).
@@ -91,7 +91,7 @@ const MessageSchema = new Schema<IMessage>(
     conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true },
-    type: { type: String, enum: ['text', 'image', 'audio', 'document', 'call', 'contact', 'poll'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'audio', 'video', 'document', 'call', 'contact', 'poll'], default: 'text' },
     fileName: { type: String },
     fileSize: { type: Number },
     cloudinaryPublicId: { type: String },

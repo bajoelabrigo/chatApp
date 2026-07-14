@@ -953,6 +953,7 @@ function lastMsgPreview(conv: Conversation): string {
   if (lm.isDeletedForEveryone) return '🚫 Mensaje eliminado';
   if (lm.type === 'image') return '📷 Imagen';
   if (lm.type === 'audio') return '🎤 Nota de voz';
+  if (lm.type === 'video') return '🎬 Video';
   if (lm.type === 'document') return `📎 ${lm.fileName ?? 'Documento'}`;
   return lm.content;
 }

@@ -7,7 +7,7 @@ export interface ChatUser {
   avatar?: string;
 }
 
-export type MessageType = 'text' | 'image' | 'audio' | 'document' | 'call' | 'contact' | 'poll';
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll';
 
 export interface MessageReplyTo {
   messageId: string;
@@ -331,7 +331,7 @@ export async function getGroupInfo(token: string, groupId: string): Promise<Grou
 export interface GroupMediaFile {
   _id: string;
   url: string;
-  type: 'image' | 'audio' | 'document';
+  type: 'image' | 'audio' | 'video' | 'document';
   fileName?: string;
   fileSize?: number;
   createdAt: string;

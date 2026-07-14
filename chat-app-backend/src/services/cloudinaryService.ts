@@ -1,10 +1,11 @@
 import cloudinary from '../config/cloudinary';
 
-type MsgType = 'text' | 'image' | 'audio' | 'document';
+type MsgType = 'text' | 'image' | 'audio' | 'video' | 'document';
 
 function toResourceType(msgType: MsgType): 'image' | 'video' | 'raw' {
   if (msgType === 'image') return 'image';
-  if (msgType === 'audio') return 'video';
+  // En Cloudinary el audio vive bajo el resource_type "video".
+  if (msgType === 'audio' || msgType === 'video') return 'video';
   return 'raw';
 }
 

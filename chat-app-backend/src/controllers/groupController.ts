@@ -158,7 +158,7 @@ export async function getGroupMedia(req: Request, res: Response) {
 
     const [mediaMessages, textMessages] = await Promise.all([
       Message.find(
-        { ...baseFilter, type: { $in: ['image', 'audio', 'document'] } },
+        { ...baseFilter, type: { $in: ['image', 'audio', 'video', 'document'] } },
         { type: 1, content: 1, fileName: 1, fileSize: 1, senderId: 1, createdAt: 1 }
       )
         .sort({ createdAt: -1 })

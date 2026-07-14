@@ -85,6 +85,16 @@ function splitByUrls(text: string): Array<{ type: 'text' | 'url'; value: string 
   return parts;
 }
 
+// Miniatura de un video de Cloudinary: el primer fotograma (so_0) servido como
+// JPG. Cloudinary la genera al vuelo, así que no hay que subir nada aparte. Si la
+// URL no es suya (o no es un video), no hay póster y se pinta una caja negra.
+export function videoPoster(url: string): string | null {
+  if (!url?.includes('/video/upload/')) return null;
+  return url
+    .replace('/video/upload/', '/video/upload/so_0,w_448,h_448,c_fill/')
+    .replace(/\.[^./?]+$/, '.jpg');
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -104,6 +114,7 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
   const previewContent = () => {
     if (reply.type === 'image') return '🖼️ Imagen';
     if (reply.type === 'audio') return '🎤 Nota de voz';
+    if (reply.type === 'video') return '🎬 Video';
     if (reply.type === 'document') return `📄 ${reply.fileName ?? 'Documento'}`;
     if (reply.type === 'call') return '📞 Llamada';
     if (reply.type === 'contact') return `👤 ${reply.content}`;
@@ -371,12 +382,13 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isDeleted = item.isDeletedForEveryone;
   const isImage = item.type === 'image';
   const isAudio = item.type === 'audio';
+  const isVideo = item.type === 'video';
   const isDocument = item.type === 'document';
   const isText = item.type === 'text';
   const isCall = item.type === 'call';
   const isContact = item.type === 'contact';
   const isPoll = item.type === 'poll';
-  const isMedia = isImage || isAudio || isDocument;
+  const isMedia = isImage || isAudio || isVideo || isDocument;
   // El nombre del remitente va encima de la burbuja (no dentro) en todo lo que
   // no es texto plano, porque esas burbujas no dejan hueco para la cabecera.
   const showSenderLabel = isMedia || isContact || isPoll;
@@ -455,6 +467,62 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: bubbleBg }}>
             <Text style={{ color: bubbleSubtext, fontSize: 12, flex: 1, marginRight: 8 }} numberOfLines={1}>
               {item.fileName ?? 'Imagen'}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {timestamp}
+              <TouchableOpacity onPress={() => onDownload(item)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Text style={{ color: bubbleSubtext, fontSize: 16 }}>⬇</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Pressable>
+      )}
+
+      {/* VIDEO */}
+      {isVideo && !isDeleted && (
+        <Pressable
+          onPress={() => Linking.openURL(item.content)}
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={400}
+          style={[{
+            borderRadius: 18, overflow: 'hidden',
+            borderTopRightRadius: isMine ? 4 : 18,
+            borderTopLeftRadius: isMine ? 18 : 4,
+            backgroundColor: bubbleBg,
+          }, bubbleShadow, { width: 224 }]}
+        >
+          {item.replyTo && (
+            <View style={{ paddingHorizontal: 8, paddingTop: 8 }}>
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
+            </View>
+          )}
+          <View style={{ width: 224, height: 224, backgroundColor: '#000' }}>
+            {videoPoster(item.content) && (
+              <Image
+                source={{ uri: videoPoster(item.content)! }}
+                style={{ width: 224, height: 224 }}
+                resizeMode="cover"
+              />
+            )}
+            {/* Botón de play sobre la miniatura: al tocarlo se abre el video en el
+                reproductor del sistema (no se reproduce dentro de la lista, que
+                con varios videos a la vez se arrastraría). */}
+            <View style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <View style={{
+                width: 56, height: 56, borderRadius: 28,
+                backgroundColor: 'rgba(0,0,0,0.55)',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Ionicons name="play" size={28} color="#FFFFFF" style={{ marginLeft: 3 }} />
+              </View>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: bubbleBg }}>
+            <Text style={{ color: bubbleSubtext, fontSize: 12, flex: 1, marginRight: 8 }} numberOfLines={1}>
+              {item.fileName ?? 'Video'}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {timestamp}

@@ -350,7 +350,7 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
       const directMedia = await Message.find({
         conversationId: { $in: directIds },
         cloudinaryPublicId: { $exists: true, $ne: null },
-        type: { $in: ['image', 'audio', 'document'] },
+        type: { $in: ['image', 'audio', 'video', 'document'] },
       }).select('cloudinaryPublicId type').lean();
       if (directMedia.length > 0) {
         await deleteCloudinaryAssets(
@@ -366,7 +366,7 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
       senderId: userId,
       conversationId: { $nin: directIds },
       cloudinaryPublicId: { $exists: true, $ne: null },
-      type: { $in: ['image', 'audio', 'document'] },
+      type: { $in: ['image', 'audio', 'video', 'document'] },
     }).select('cloudinaryPublicId type').lean();
     if (groupMedia.length > 0) {
       await deleteCloudinaryAssets(

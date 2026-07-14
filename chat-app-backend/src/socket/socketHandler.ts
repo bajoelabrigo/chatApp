@@ -313,6 +313,8 @@ export function setupSocketHandlers(io: Server) {
                 ? '📷 Foto'
                 : type === 'audio'
                 ? '🎤 Mensaje de voz'
+                : type === 'video'
+                ? '🎬 Video'
                 : type === 'contact'
                 ? `👤 ${contact?.name ?? 'Contacto'}`
                 : type === 'poll'

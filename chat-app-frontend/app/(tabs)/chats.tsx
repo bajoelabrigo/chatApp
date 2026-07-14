@@ -67,6 +67,7 @@ function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   let content = '';
   if (lm.type === 'image') content = '📷 Imagen';
   else if (lm.type === 'audio') content = '🎤 Nota de voz';
+  else if (lm.type === 'video') content = '🎬 Video';
   else if (lm.type === 'document') content = `📎 ${lm.fileName ?? 'Documento'}`;
   else if (lm.type === 'contact') content = `👤 ${lm.contact?.name ?? lm.content}`;
   else if (lm.type === 'poll') content = `📊 ${lm.poll?.question ?? lm.content}`;

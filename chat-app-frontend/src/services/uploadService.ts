@@ -3,7 +3,7 @@ import api from './authService';
 export interface UploadResult {
   url: string;
   publicId: string;
-  messageType: 'image' | 'audio' | 'document';
+  messageType: 'image' | 'audio' | 'video' | 'document';
   originalName: string;
   size: number;
   mimeType: string;

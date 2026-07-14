@@ -607,12 +607,17 @@ export default function ChatScreen() {
     fileUri: string,
     mimeType: string,
     fileName: string,
-    messageType: 'image' | 'audio' | 'document'
+    messageType: 'image' | 'audio' | 'video' | 'document'
   ) => {
     if (!token || !socket || !user) return;
     setUploading(true);
     try {
       const result = await uploadFile(token, fileUri, mimeType, fileName);
+
+      // El tipo lo decide el SERVIDOR a partir del mimetype real: por el selector
+      // de documentos se puede elegir un .mp4, y mandarlo como 'document' lo
+      // dejaría sin reproductor. `messageType` es solo el respaldo.
+      const finalType = result.messageType ?? messageType;
 
       // Si se está respondiendo a un mensaje, la cita se adjunta al archivo
       // (como en WhatsApp: la foto/audio/doc lleva la respuesta).
@@ -622,7 +627,7 @@ export default function ChatScreen() {
         conversationId,
         senderId: { _id: user.id, name: user.name, email: user.email ?? '', avatar: user.avatar },
         content: result.url,
-        type: messageType,
+        type: finalType,
         fileName: result.originalName,
         fileSize: result.size,
         status: 'sent',
@@ -641,7 +646,7 @@ export default function ChatScreen() {
       socket.emit('message:send', {
         conversationId,
         content: result.url,
-        type: messageType,
+        type: finalType,
         fileName: result.originalName,
         fileSize: result.size,
         cloudinaryPublicId: result.publicId,
