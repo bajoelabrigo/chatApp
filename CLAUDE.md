@@ -448,6 +448,16 @@ El popup de la esquina inferior (web y app) **ya no está hardcodeado**: lo gobi
 - **Videos de `/descargar`**: `helpVideos` de la misma config (playlist; el 1º es el destacado). Se renderizan con el facade `LiteYouTube`. El admin pega la URL de YouTube y el backend extrae el ID.
 - **Orden de despliegue**: primero el backend. Si `/public/popup-config` no existe, `fetchPopupConfig` devuelve `null` y **no se muestra ningún popup** en ninguno de los dos clientes (falla en seguro, pero silencioso).
 
+## Feed de posts (`holy_app`) — Descubrir / Amigos
+
+Hasta 2026-07-14 el feed de alguien con sesión se limitaba a `[él + sus amigos + los admins + a quien sigue]`: para ver a una persona había que ser YA su amigo, y no había forma de descubrir a nadie (el invitado sin sesión, en cambio, veía todo).
+
+- **`GET /posts?scope=discover|friends`** (`postController.getFeedPosts`). `discover` (por defecto) trae a toda la comunidad; `friends` es el feed antiguo. La pestaña se recuerda en `localStorage` (`feed_scope`).
+- **Variedad de autores** (`orderFeedIds`): cada post EXTRA del mismo autor compite como si fuera 24 h más antiguo (`$setWindowFields` + `$documentNumber` → `feedScore`). Sin esto, quien publica mucho se queda la portada (una sola persona firma 79 de los 303 posts). Es determinista → la paginación por `skip/limit` sigue siendo estable. Hay respaldo cronológico si Mongo < 5.0. Las 24 h están medidas: en los 40 primeros posts pasan de 17 a 22 autores distintos, y 22 son TODOS los que han publicado en el último mes (subir el castigo no mejora nada).
+- **`authorRelation`** viaja con cada post (`getRelationsToAuthors`, una sola consulta por página): `self | connected | pending (+requestId) | received (+requestId) | not_connected`. Lo pinta `FriendButton` junto al nombre. **No consultar el estado post a post** — sería una petición por tarjeta en un scroll infinito.
+- **La clave de caché es `["posts", scope]`**, así que todo lo que actualiza el feed usa `setQueriesData({ queryKey: ["posts"] })` (prefijo), NO `setQueryData(["posts"])`, que ya no encaja con nada y sería un no-op silencioso: comentarios, reacciones, shares y el socket `newPost` dejarían de verse en vivo.
+- Realidad de los datos (2026-07-14): 509 usuarios registrados, **53 han publicado alguna vez** y solo 22 en el último mes. Enseñar "40 personas" en la portada no es cuestión de ordenar mejor — ese contenido no existe. Por eso la tira `SuggestedPeopleStrip` (perfiles de `/users/suggestions`, ya cacheados por `usePost`) se intercala tras el 3er post: es lo que trae caras nuevas de los otros ~456 usuarios que nunca publicaron.
+
 ## Posts (`holy_app`) — el editor vacío no es una cadena vacía
 
 El contenido de un post es HTML de Quill: un editor vacío devuelve `<p><br></p>`, así que `content.trim()` **nunca** detecta un post en blanco (así se colaban posts vacíos). Usar `hasVisibleText()` — espejo en `frontend/src/lib/postContent.js` y `backend/utils/postContent.js` — que quita etiquetas y `&nbsp;`. Validar en cliente (deshabilitar el botón) **y** en servidor (`createPost`/`updatePost` → 400). Quitar etiquetas es seguro mientras el editor no admita `<img>`/`<iframe>` (ver formatos de `PostEditor.jsx`).
