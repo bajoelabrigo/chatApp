@@ -38,10 +38,26 @@ interface SelectedVerse {
   text: string;
 }
 
+import type { SharedBible } from '../../services/conversationService';
+
 interface Props {
   visible: boolean;
   onClose: () => void;
-  onSendVerses: (text: string) => void;
+  // Envía el pasaje como mensaje `bible` (tarjeta con "Abrir en la Biblia"), no
+  // como texto plano.
+  onSendBible: (passage: SharedBible) => void;
+}
+
+// "Juan 3:16" para uno; "Juan 3:16-18" para un rango del mismo capítulo; si abarca
+// varios capítulos/libros, la referencia del primero + cuántos más.
+function buildReference(list: SelectedVerse[]): string {
+  if (!list.length) return '';
+  const first = list[0];
+  if (list.length === 1) return `${first.book} ${first.chapter}:${first.verse}`;
+  const last = list[list.length - 1];
+  const sameBookCh = list.every((v) => v.book === first.book && v.chapter === first.chapter);
+  if (sameBookCh) return `${first.book} ${first.chapter}:${first.verse}-${last.verse}`;
+  return `${first.book} ${first.chapter}:${first.verse} (+${list.length - 1})`;
 }
 
 const MIN_FONT = 13;
@@ -68,7 +84,7 @@ function formatVersesForShare(verses: SelectedVerse[], versionName: string): str
   );
 }
 
-export default function BibleModal({ visible, onClose, onSendVerses }: Props) {
+export default function BibleModal({ visible, onClose, onSendBible }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
   const { token } = useAuthStore();
@@ -238,11 +254,26 @@ export default function BibleModal({ visible, onClose, onSendVerses }: Props) {
   }, []);
 
   const handleSend = useCallback(() => {
-    const list = Array.from(selectedVerses.values());
+    const list = Array.from(selectedVerses.values())
+      .slice()
+      .sort((a, b) => Number(a.chapter) - Number(b.chapter) || Number(a.verse) - Number(b.verse));
     if (list.length === 0) return;
-    const vName = VERSION_META[selectedVersion]?.name ?? selectedVersion;
-    onSendVerses(formatVersesForShare(list, vName));
-  }, [selectedVerses, onSendVerses, selectedVersion]);
+    const first = list[0];
+    onSendBible({
+      reference: buildReference(list),
+      version: selectedVersion,
+      versionName: VERSION_META[selectedVersion]?.name ?? selectedVersion,
+      book: first.book,
+      chapter: Number(first.chapter),
+      verse: Number(first.verse),
+      verses: list.map((v) => ({
+        book: v.book,
+        chapter: Number(v.chapter),
+        verse: Number(v.verse),
+        text: v.text,
+      })),
+    });
+  }, [selectedVerses, onSendBible, selectedVersion]);
 
   const handleShare = useCallback(async () => {
     const list = Array.from(selectedVerses.values());

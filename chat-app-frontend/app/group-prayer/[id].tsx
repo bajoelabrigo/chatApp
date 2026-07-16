@@ -208,6 +208,8 @@ export default function GroupPrayerScreen() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
   const [isAnon, setIsAnon] = useState(false);
+  // Por defecto la petición aparece en la comunidad (posts); las anónimas nunca.
+  const [newShareToFeed, setNewShareToFeed] = useState(true);
   const [posting, setPosting] = useState(false);
   const [showAnswerModal, setShowAnswerModal] = useState<string | null>(null);
   const [answerNote, setAnswerNote] = useState('');
@@ -465,7 +467,8 @@ export default function GroupPrayerScreen() {
         isAnon,
         imageUrl,
         cloudinaryPublicId,
-        newDeadline
+        newDeadline,
+        newShareToFeed
       );
       setPrayerRequests(groupId, [req, ...open]);
       setShowAdd(false);
@@ -473,6 +476,7 @@ export default function GroupPrayerScreen() {
       setNewDeadline(undefined);
       setNewImage(null);
       setIsAnon(false);
+      setNewShareToFeed(true);
     } catch {
       Alert.alert('Error', 'No se pudo crear la petición');
     } finally {
@@ -487,6 +491,7 @@ export default function GroupPrayerScreen() {
     setNewDeadline(undefined);
     setNewImage(null);
     setIsAnon(false);
+    setNewShareToFeed(true);
   }
 
   if (loading) {
@@ -695,11 +700,28 @@ export default function GroupPrayerScreen() {
                 ) : null}
 
                 {/* Anonymous toggle */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingHorizontal: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, paddingHorizontal: 4 }}>
                   <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Publicar anónimamente</Text>
                   <Switch
                     value={isAnon}
                     onValueChange={setIsAnon}
+                    trackColor={{ false: colors.border, true: colors.accent }}
+                    thumbColor="#fff"
+                  />
+                </View>
+
+                {/* Aparecer en la comunidad (posts). Las anónimas no se publican. */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingHorizontal: 4, opacity: isAnon ? 0.5 : 1 }}>
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 14 }}>Que aparezca en la comunidad</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
+                      {isAnon ? 'Las anónimas no se publican' : 'Crea un post para que más personas oren'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={newShareToFeed && !isAnon}
+                    onValueChange={setNewShareToFeed}
+                    disabled={isAnon}
                     trackColor={{ false: colors.border, true: colors.accent }}
                     thumbColor="#fff"
                   />

@@ -47,6 +47,7 @@ import {
   toggleReadingPlanDay,
   unsubscribeReadingPlan,
   fetchGroupPlans,
+  fetchMyGroupPlans,
   fetchMemorize,
   addMemorize,
   reviewMemorize,
@@ -105,6 +106,9 @@ import { GroupPlanPickerModal } from '../../src/components/bible/GroupPlanPicker
 import { MemorizeView } from '../../src/components/bible/MemorizeView';
 import { TopicsView } from '../../src/components/bible/TopicsView';
 import { VerseActionsSheet } from '../../src/components/bible/VerseActionsSheet';
+import { SendToChatModal } from '../../src/components/bible/SendToChatModal';
+import { getSocket } from '../../src/services/socketService';
+import type { SharedBible, Conversation } from '../../src/services/conversationService';
 import { BookChapterPicker } from '../../src/components/bible/BookChapterPicker';
 import { CreatePlanModal } from '../../src/components/bible/CreatePlanModal';
 import type { CustomPlanDraft } from '../../src/components/bible/CreatePlanModal';
@@ -120,8 +124,16 @@ export default function BibleScreen() {
   //
   // El `useRef` evita reabrir la sección si el usuario vuelve al tab sin cambiar
   // el parámetro (mismo patrón que en settings.tsx).
-  const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
+  const { section: sectionParam, groupId: groupIdParam, openRef: openRefParam, refVersion: refVersionParam } = useLocalSearchParams<{
+    section?: string;
+    groupId?: string;
+    openRef?: string;
+    refVersion?: string;
+  }>();
   const handledSection = useRef<string | null>(null);
+  // Pasaje a abrir desde un mensaje bíblico del chat ("Abrir en la Biblia").
+  const handledRef = useRef<string | null>(null);
+  const pendingRef = useRef<{ book: string; chapter: number; verse: number; version: string } | null>(null);
   // Grupos del usuario: las peticiones de oración cuelgan de un grupo.
   const conversations = useChatsStore((s) => s.conversations);
   const {
@@ -180,6 +192,12 @@ export default function BibleScreen() {
   const [planCatalog, setPlanCatalog] = useState<any[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [planBusy, setPlanBusy] = useState<string | null>(null);
+  // Planes que leen mis grupos (aunque no me haya unido) → sección "Planes de los
+  // miembros de {grupo}". Es lo que hace que el botón del chat ("N de M leyeron
+  // hoy") lleve a algo: sin esto, un plan que empieza un compañero es invisible.
+  const [groupPlansDiscover, setGroupPlansDiscover] = useState<any[]>([]);
+  // Grupo desde el que se llegó (botón del chat): sus planes se muestran primero.
+  const [highlightGroupId, setHighlightGroupId] = useState<string | null>(null);
 
   // Crear mi plan (#D)
   const [createPlanOpen, setCreatePlanOpen] = useState(false);
@@ -342,7 +360,8 @@ export default function BibleScreen() {
         data.isAnonymous,
         imageUrl,
         cloudinaryPublicId,
-        data.deadline
+        data.deadline,
+        data.shareToFeed
       );
       setPrayerVerse(null);
       Alert.alert('Petición publicada', 'Tu grupo ya puede orar contigo.');
@@ -782,12 +801,14 @@ export default function BibleScreen() {
     if (!token) return;
     setPlansLoading(true);
     try {
-      const [cat, mine] = await Promise.all([
+      const [cat, mine, groupPlans] = await Promise.all([
         fetchReadingPlans(token).catch(() => []),
         fetchMyReadingPlans(token).catch(() => []),
+        fetchMyGroupPlans(token).catch(() => []),
       ]);
       setPlanCatalog(cat);
       setMyPlans(mine);
+      setGroupPlansDiscover(groupPlans);
       // El progreso de los miembros va aparte (se pide por grupo) y no debe
       // retrasar el pintado de los planes: se lanza sin esperarlo.
       loadGroupProgress(mine);
@@ -798,17 +819,51 @@ export default function BibleScreen() {
 
   const openPlans = () => { setPrevView(view); setView('plans'); loadPlans(); };
 
-  // Llegada desde el chat del grupo (?section=plans): abre directamente los planes.
+  // Llegada desde el chat del grupo (?section=plans&groupId=...): abre directamente
+  // los planes y, si viene groupId, coloca los de ESE grupo primero — así el botón
+  // "N de M leyeron hoy" aterriza justo en el plan del que venía.
   useEffect(() => {
     if (!sectionParam || sectionParam === handledSection.current) return;
     handledSection.current = sectionParam;
+    setHighlightGroupId(typeof groupIdParam === 'string' ? groupIdParam : null);
     if (sectionParam === 'plans') openPlans();
     else if (sectionParam === 'topics') openTopics();
-  }, [sectionParam]);
+  }, [sectionParam, groupIdParam]);
+
+  // Abrir un pasaje compartido desde el chat ("Abrir en la Biblia"). El libro va
+  // nombrado en la versión con la que se compartió, así que se cambia a esa
+  // versión ANTES de saltar (si no, "John" no existiría en la RVA). Como cambiar
+  // de versión es asíncrono (re-render), se guarda el pasaje pendiente y se abre
+  // cuando la versión ya coincide.
+  const openPendingRef = useCallback(() => {
+    const p = pendingRef.current;
+    if (!p) return;
+    pendingRef.current = null;
+    setView('books');
+    // BibleRef usa strings para capítulo/versículo (así los pide el backend).
+    goToReference({ book: p.book, chapter: String(p.chapter), verse: String(p.verse) });
+  }, [goToReference]);
+
+  useEffect(() => {
+    if (!openRefParam || openRefParam === handledRef.current) return;
+    handledRef.current = openRefParam;
+    const [book, ch, vs] = String(openRefParam).split('|');
+    if (!book) return;
+    const version = typeof refVersionParam === 'string' && refVersionParam ? refVersionParam : selectedVersion;
+    pendingRef.current = { book, chapter: Number(ch), verse: Number(vs), version };
+    if (version !== selectedVersion) setSelectedVersion(version);
+    else openPendingRef();
+  }, [openRefParam, refVersionParam]);
+
+  // Cuando la versión ya es la del pasaje pendiente, abre.
+  useEffect(() => {
+    const p = pendingRef.current;
+    if (p && p.version === selectedVersion) openPendingRef();
+  }, [selectedVersion, openPendingRef]);
 
   // El formulario vive en CreatePlanModal; aquí solo se valida el rango y se
   // llama a la API.
-  const submitCustomPlan = async (draft: CustomPlanDraft) => {
+  const submitCustomPlan = async (draft: CustomPlanDraft, groupId: string | null) => {
     if (!token) return;
     if (draft.bookEnd < draft.bookStart) {
       Alert.alert('Revisa el rango', 'El libro final debe ir después (o igual) del inicial.');
@@ -816,8 +871,13 @@ export default function BibleScreen() {
     }
     setCreatingPlan(true);
     try {
-      const sub = await createCustomReadingPlan(token, draft);
+      const sub = await createCustomReadingPlan(token, draft, groupId);
       setMyPlans((prev) => [...prev, sub]);
+      // Si es un plan de grupo, el resto del grupo debe poder verlo y unirse.
+      if (groupId) {
+        await loadGroupProgress([...myPlans, sub]);
+        fetchMyGroupPlans(token).then(setGroupPlansDiscover).catch(() => {});
+      }
       setCreatePlanOpen(false);
     } catch {
       Alert.alert('Error', 'No se pudo crear el plan.');
@@ -959,6 +1019,51 @@ export default function BibleScreen() {
       setPlanBusy(null);
     }
   };
+
+  // Unirse a un plan que ya lee un grupo (desde la sección "Planes de los
+  // miembros de {grupo}"). El backend hereda la fecha de inicio del grupo, así que
+  // caigo en el mismo día que los demás — y, si es personalizado, hereda también
+  // su definición.
+  // Iniciar una lectura EN VIVO con el grupo sobre la lectura de hoy del plan.
+  const startGroupReadingFromPlan = (plan: any) => {
+    const r = plan.today?.references?.[0];
+    if (!r || !plan.groupId) return;
+    const book = getCanonicalOrder(selectedVersion)[r.book];
+    if (!book) return;
+    router.push({
+      pathname: '/live-reading/[id]',
+      params: { id: plan.groupId, host: '1', book, chapter: String(r.startChapter), version: selectedVersion },
+    } as any);
+  };
+
+  const joinGroupPlan = async (planKey: string, groupId: string) => {
+    if (!token) return;
+    setPlanBusy(planKey);
+    try {
+      const sub = await subscribeReadingPlan(token, planKey, { groupId });
+      const next = [...myPlans.filter((p) => p.planKey !== planKey), sub];
+      setMyPlans(next);
+      await loadGroupProgress(next);
+      // Ya aparezco como miembro → se cae de "descubrir".
+      fetchMyGroupPlans(token).then(setGroupPlansDiscover).catch(() => {});
+      Alert.alert('¡Te uniste!', 'Ya lees este plan con tu grupo.');
+    } catch {
+      Alert.alert('Error', 'No se pudo unirte al plan.');
+    } finally {
+      setPlanBusy(null);
+    }
+  };
+
+  // Planes de mis grupos a los que aún NO me he unido (los que ya sigo salen en
+  // "Mis planes"). Si llegué desde un grupo concreto, los suyos van primero.
+  const discoverGroupPlans = useMemo(() => {
+    const list = groupPlansDiscover.filter((g) => !g.isJoined);
+    if (!highlightGroupId) return list;
+    return [...list].sort(
+      (a, b) =>
+        (b.groupId === highlightGroupId ? 1 : 0) - (a.groupId === highlightGroupId ? 1 : 0)
+    );
+  }, [groupPlansDiscover, highlightGroupId]);
 
   const togglePlanDay = async (plan: any) => {
     if (!token) return;
@@ -1127,6 +1232,73 @@ export default function BibleScreen() {
     const vName = VERSION_META[selectedVersion]?.name ?? selectedVersion;
     await Share.share({ message: formatForShare(list, vName, selectedVersion) });
     setSelectedVerses(new Map());
+  };
+
+  // ── Enviar el pasaje a un chat (tarjeta `bible`) ────────────
+  // "Juan 3:16" / "Juan 3:16-18" para un rango del mismo capítulo / el primero +
+  // cuántos más si abarca varios.
+  const [sendChatPassage, setSendChatPassage] = useState<SharedBible | null>(null);
+  // Elegir grupo para leer EN VIVO el capítulo actual.
+  const [liveReadPickerOpen, setLiveReadPickerOpen] = useState(false);
+
+  const startGroupReadingFromBible = (conv: Conversation) => {
+    setLiveReadPickerOpen(false);
+    if (!selectedBook || !selectedChapter) return;
+    router.push({
+      pathname: '/live-reading/[id]',
+      params: { id: conv._id, host: '1', book: selectedBook, chapter: selectedChapter, version: selectedVersion },
+    } as any);
+  };
+
+  const buildBibleReference = (list: VerseItem[]): string => {
+    const first = list[0];
+    if (list.length === 1) return `${first.book} ${first.chapter}:${first.verse}`;
+    const last = list[list.length - 1];
+    const sameBookCh = list.every(
+      (v) => v.book === first.book && String(v.chapter) === String(first.chapter)
+    );
+    if (sameBookCh) return `${first.book} ${first.chapter}:${first.verse}-${last.verse}`;
+    return `${first.book} ${first.chapter}:${first.verse} (+${list.length - 1})`;
+  };
+
+  const handleSendToChat = () => {
+    const list = Array.from(selectedVerses.values())
+      .slice()
+      .sort((a, b) => Number(a.chapter) - Number(b.chapter) || Number(a.verse) - Number(b.verse));
+    if (!list.length) return;
+    const first = list[0];
+    setSendChatPassage({
+      reference: buildBibleReference(list),
+      version: selectedVersion,
+      versionName: VERSION_META[selectedVersion]?.name ?? selectedVersion,
+      book: first.book,
+      chapter: Number(first.chapter),
+      verse: Number(first.verse),
+      verses: list.map((v) => ({
+        book: v.book,
+        chapter: Number(v.chapter),
+        verse: Number(v.verse),
+        text: v.text,
+      })),
+    });
+    setSelectedVerses(new Map());
+  };
+
+  const sendPassageToConversation = (conv: Conversation) => {
+    const passage = sendChatPassage;
+    setSendChatPassage(null);
+    const socket = getSocket();
+    if (!passage || !socket) {
+      Alert.alert('Sin conexión', 'No se pudo enviar. Abre el chat e intenta de nuevo.');
+      return;
+    }
+    socket.emit('message:send', {
+      conversationId: conv._id,
+      content: passage.reference,
+      type: 'bible',
+      bible: passage,
+    });
+    Alert.alert('Enviado', `Pasaje enviado a ${conv.isGroup ? conv.groupName ?? 'el grupo' : 'el chat'}.`);
   };
 
   const openAnnotation = (v: VerseItem) => {
@@ -1304,6 +1476,13 @@ export default function BibleScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Leer este capítulo EN VIVO con un grupo (si el usuario tiene grupos). */}
+          {view === 'reading' && myGroups.length > 0 && (
+            <TouchableOpacity onPress={() => setLiveReadPickerOpen(true)} style={iconBtn}>
+              <Ionicons name="people-outline" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          )}
+
           {/* Vista paralela (#5): solo tiene sentido leyendo un capítulo. */}
           {view === 'reading' && (
             <TouchableOpacity onPress={() => setComparePickerOpen(true)} style={iconBtn}>
@@ -1447,6 +1626,7 @@ export default function BibleScreen() {
         onClearHighlight={clearHighlight}
         onFavorite={handleFavoriteToggle}
         onShare={handleShare}
+        onSendToChat={handleSendToChat}
         onMemorize={handleMemorizeAdd} // muestra un Alert, no un Modal: puede quedarse abierta
         onNote={thenOpen(openAnnotation)}
         onImage={thenOpen(setImageVerse)}
@@ -2260,12 +2440,16 @@ export default function BibleScreen() {
             colors={colors}
             bottomInset={insets.bottom}
             groupProgress={groupProgress}
+            groupPlans={discoverGroupPlans}
+            highlightGroupId={highlightGroupId}
             onOpenPassage={openPlanPassage}
             onToggleDay={togglePlanDay}
             onReminder={reminderMenu}
             onRestart={restartPlan}
             onAbandon={abandonPlan}
             onStart={startPlan}
+            onJoinGroupPlan={joinGroupPlan}
+            onStartGroupReading={startGroupReadingFromPlan}
             onCreate={() => setCreatePlanOpen(true)}
           />
         );
@@ -2652,11 +2836,37 @@ export default function BibleScreen() {
       <CreatePlanModal
         visible={createPlanOpen}
         books={getCanonicalOrder(selectedVersion)}
+        groups={myGroups}
         saving={creatingPlan}
         colors={colors}
         bottomInset={insets.bottom}
         onClose={() => setCreatePlanOpen(false)}
         onCreate={submitCustomPlan}
+      />
+
+      {/* Elegir a qué chat enviar el pasaje (mensaje `bible`). */}
+      <SendToChatModal
+        visible={!!sendChatPassage}
+        conversations={conversations}
+        currentUserId={useAuthStore.getState().user?.id}
+        reference={sendChatPassage?.reference ?? ''}
+        colors={colors}
+        bottomInset={insets.bottom}
+        onClose={() => setSendChatPassage(null)}
+        onPick={sendPassageToConversation}
+      />
+
+      {/* Elegir con qué GRUPO leer este capítulo en vivo. */}
+      <SendToChatModal
+        visible={liveReadPickerOpen}
+        conversations={myGroups}
+        currentUserId={useAuthStore.getState().user?.id}
+        reference={selectedBook && selectedChapter ? `${selectedBook} ${selectedChapter}` : ''}
+        colors={colors}
+        bottomInset={insets.bottom}
+        title="Leer en grupo"
+        onClose={() => setLiveReadPickerOpen(false)}
+        onPick={startGroupReadingFromBible}
       />
       {imageVerse && (
         <VerseImageSheet

@@ -72,6 +72,7 @@ function lastMsgPreview(conv: Conversation, currentUserId?: string): string {
   else if (lm.type === 'document') content = `📎 ${lm.caption ?? lm.fileName ?? 'Documento'}`;
   else if (lm.type === 'contact') content = `👤 ${lm.contact?.name ?? lm.content}`;
   else if (lm.type === 'poll') content = `📊 ${lm.poll?.question ?? lm.content}`;
+  else if (lm.type === 'bible') content = `📖 ${lm.bible?.reference ?? lm.content}`;
   else content = lm.content;
   if (conv.isGroup && lm.senderId && typeof lm.senderId === 'object') {
     const isMe = lm.senderId._id === currentUserId;

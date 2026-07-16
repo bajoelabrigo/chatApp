@@ -18,10 +18,15 @@ import {
   markAllRead,
   searchAllMessages,
 } from '../controllers/conversationController';
+import { getGroupDailyVerse, reactGroupDailyVerse } from '../controllers/dailyVerseChatController';
 
 const router = Router();
 
 router.use(authMiddleware);
+
+// Versículo del día en el chat del grupo (tarjeta fija + reacciones compartidas).
+router.get('/:id/daily-verse', getGroupDailyVerse);
+router.post('/:id/daily-verse/react', reactGroupDailyVerse);
 
 router.get('/', getConversations);
 router.post('/', createOrGetConversation);

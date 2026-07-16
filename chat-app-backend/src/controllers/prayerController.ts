@@ -8,6 +8,7 @@ import { sendPushNotifications } from '../services/pushService';
 import { sendWebPushToUsers } from '../services/webPushService';
 import { isGlobalAdmin } from '../services/adminService';
 import { deleteCloudinaryAssets } from '../services/cloudinaryService';
+import { createLinkedPost } from '../services/linkedPost';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
@@ -83,7 +84,7 @@ export async function createPrayerRequest(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
     const { groupId } = req.params;
-    const { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline } = req.body;
+    const { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline, shareToFeed } = req.body;
 
     const conv = await assertMember(groupId, userId);
     if (!conv) return res.status(404).json({ error: 'Grupo no encontrado' });
@@ -135,6 +136,24 @@ export async function createPrayerRequest(req: Request, res: Response) {
     );
 
     res.status(201).json({ ...populated, prayingCount: 0, isPraying: false, isMyRequest: true, prayingUsers: [] });
+
+    // Post automático en el feed SOLO si: (1) NO es anónima (una anónima no debe
+    // exponerse a la comunidad) y (2) el autor lo permitió (`shareToFeed`, por
+    // defecto sí). Al pulsar el post lleva al grupo, donde se puede orar y unirse.
+    if (!isAnonymous && shareToFeed !== false) {
+      const groupName = (conv as any).groupName ?? 'un grupo';
+      createLinkedPost({
+        authorId: userId,
+        type: 'prayer',
+        refId: String(request._id),
+        groupId,
+        groupName,
+        groupImage: (conv as any).groupAvatar ?? null,
+        title: `Petición de oración · ${groupName}`,
+        body: `🙏 ${user?.name ?? 'Alguien'} pide oración en ${groupName}: "${content.trim().slice(0, 140)}"`,
+        url: `/g/${groupId}`,
+      });
+    }
   } catch {
     res.status(500).json({ error: 'Error creando petición' });
   }
@@ -414,6 +433,27 @@ export async function markAnswered(req: Request, res: Response) {
     );
 
     res.json(updated);
+
+    // Testimonio en el feed: una oración respondida es lo más animante y lo menos
+    // sensible (la respuesta, no la súplica). Solo si la petición NO era anónima,
+    // para no revelar al autor de una anónima. Al pulsar, lleva al grupo.
+    if (!request.isAnonymous) {
+      const groupName = (conv as any).groupName ?? 'un grupo';
+      const note = answeredNote?.trim();
+      createLinkedPost({
+        authorId: request.authorId.toString(),
+        type: 'answered',
+        refId: String(request._id),
+        groupId,
+        groupName,
+        groupImage: (conv as any).groupAvatar ?? null,
+        title: `Oración respondida · ${groupName}`,
+        body: note
+          ? `🎉 ¡Oración respondida en ${groupName}! "${note.slice(0, 200)}"`
+          : `🎉 ¡Una oración fue respondida en ${groupName}! Gloria a Dios.`,
+        url: `/g/${groupId}`,
+      });
+    }
   } catch {
     res.status(500).json({ error: 'Error marcando como respondida' });
   }

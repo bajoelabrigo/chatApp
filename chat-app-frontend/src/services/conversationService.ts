@@ -7,7 +7,25 @@ export interface ChatUser {
   avatar?: string;
 }
 
-export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll';
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll' | 'bible';
+
+/** Pasaje bíblico compartido (mensaje `type: 'bible'`): snapshot de los versículos
+ *  para leerse en la burbuja sin conexión + referencia del primero para el deep link. */
+export interface SharedBibleVerse {
+  book: string;
+  chapter: number;
+  verse: number;
+  text: string;
+}
+export interface SharedBible {
+  reference: string;
+  version: string;
+  versionName: string;
+  book: string;
+  chapter: number;
+  verse: number;
+  verses: SharedBibleVerse[];
+}
 
 export interface MessageReplyTo {
   messageId: string;
@@ -56,6 +74,7 @@ export interface Message {
     multiple: boolean;
     closed: boolean;
   };
+  bible?: SharedBible;
   replyTo?: MessageReplyTo;
   reactions?: Reaction[];
   createdAt: string;

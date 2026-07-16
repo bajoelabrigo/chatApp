@@ -32,6 +32,7 @@ export interface PrayerSubmission {
   groupId: string;
   text: string;
   isAnonymous: boolean;
+  shareToFeed: boolean;
   deadline?: string;
   image: ImagePicker.ImagePickerAsset | null;
 }
@@ -56,6 +57,9 @@ export function PrayerRequestModal({
   const [text, setText] = useState('');
   const [groupId, setGroupId] = useState<string | null>(groups[0]?._id ?? null);
   const [anonymous, setAnonymous] = useState(false);
+  // Por defecto la petición aparece en la comunidad (posts). Una petición anónima
+  // nunca se publica, así que ahí la opción no aplica.
+  const [shareToFeed, setShareToFeed] = useState(true);
   const [deadline, setDeadline] = useState<string | undefined>(undefined);
   const [datePicker, setDatePicker] = useState(false);
   const [image, setImage] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -81,7 +85,7 @@ export function PrayerRequestModal({
     if (!groupId || !text.trim() || saving) return;
     setSaving(true);
     try {
-      await onSubmit({ groupId, text: text.trim(), isAnonymous: anonymous, deadline, image });
+      await onSubmit({ groupId, text: text.trim(), isAnonymous: anonymous, shareToFeed, deadline, image });
     } finally {
       setSaving(false);
     }
@@ -238,6 +242,30 @@ export function PrayerRequestModal({
                     <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
                       Publicar como anónimo
                     </Text>
+                  </TouchableOpacity>
+
+                  {/* Aparecer en la comunidad (posts). Por defecto sí; se
+                      desactiva si la petición es anónima (esas no se publican). */}
+                  <TouchableOpacity
+                    onPress={() => !anonymous && setShareToFeed((s) => !s)}
+                    disabled={anonymous}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 14, opacity: anonymous ? 0.5 : 1 }}
+                  >
+                    <Ionicons
+                      name={shareToFeed && !anonymous ? 'checkbox' : 'square-outline'}
+                      size={20}
+                      color={shareToFeed && !anonymous ? colors.accent : colors.textMuted}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+                        Que aparezca en la comunidad
+                      </Text>
+                      <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
+                        {anonymous
+                          ? 'Las peticiones anónimas no se publican'
+                          : 'Se crea un post para que más personas oren contigo'}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
 
                   <TouchableOpacity

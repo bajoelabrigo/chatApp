@@ -118,6 +118,8 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
     if (reply.type === 'document') return `📄 ${reply.fileName ?? 'Documento'}`;
     if (reply.type === 'call') return '📞 Llamada';
     if (reply.type === 'contact') return `👤 ${reply.content}`;
+    if (reply.type === 'poll') return `📊 ${reply.content}`;
+    if (reply.type === 'bible') return `📖 ${reply.content}`;
     return reply.content;
   };
 
@@ -315,10 +317,12 @@ interface Props {
   onClosePoll?: (msg: Message) => void;
   /** Botón "Mensaje" de una tarjeta de contacto compartido. */
   onContactPress?: (contact: SharedContact) => void;
+  /** "Abrir en la Biblia" de una tarjeta de pasaje bíblico compartido. */
+  onBiblePress?: (bible: NonNullable<Message['bible']>) => void;
   highlighted?: boolean;
 }
 
-function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, mentionUsers, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, onVote, onClosePoll, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, mentionUsers, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, onBiblePress, onVote, onClosePoll, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId.name;
@@ -388,10 +392,11 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   const isCall = item.type === 'call';
   const isContact = item.type === 'contact';
   const isPoll = item.type === 'poll';
+  const isBible = item.type === 'bible';
   const isMedia = isImage || isAudio || isVideo || isDocument;
   // El nombre del remitente va encima de la burbuja (no dentro) en todo lo que
   // no es texto plano, porque esas burbujas no dejan hueco para la cabecera.
-  const showSenderLabel = isMedia || isContact || isPoll;
+  const showSenderLabel = isMedia || isContact || isPoll || isBible;
   // Tipo que esta versión de la app no sabe pintar (el backend ya lo envía pero
   // el bundle es viejo). Sin esto la burbuja saldría vacía y el mensaje parecería
   // no haber llegado nunca; pasó al estrenar `contact`.
@@ -399,7 +404,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
   // OJO: al añadir un tipo hay que registrarlo AQUÍ además de darle su rama. Si se
   // olvida, el tipo nuevo cae en "desconocido" y el usuario ve "Actualiza la
   // aplicación" aunque su app esté al día.
-  const isUnknownType = !isMedia && !isText && !isCall && !isContact && !isPoll;
+  const isUnknownType = !isMedia && !isText && !isCall && !isContact && !isPoll && !isBible;
 
   const emojiOnly = isText && !isDeleted && isEmojiOnly(item.content);
   // Recorte de texto largo (igual que la web): si supera MAX_LENGTH y no está
@@ -739,6 +744,66 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             {/* En dark la burbuja ya es azul/morada: el acento índigo no contrasta. */}
             <Text style={{ color: isDark ? '#fff' : colors.accent, fontSize: 14, fontWeight: '600' }}>
               Mensaje
+            </Text>
+          </TouchableOpacity>
+        </Pressable>
+      )}
+
+      {/* BIBLE — pasaje bíblico compartido (referencia + versículos + "Abrir"). */}
+      {isBible && !isDeleted && item.bible && (
+        <Pressable
+          onLongPress={() => onLongPress(item)}
+          delayLongPress={400}
+          style={[{
+            borderRadius: 18, overflow: 'hidden',
+            borderTopRightRadius: isMine ? 4 : 18,
+            borderTopLeftRadius: isMine ? 18 : 4,
+            backgroundColor: bubbleBg, width: 280,
+          }, bubbleShadow]}
+        >
+          {item.replyTo && (
+            <View style={{ paddingHorizontal: 8, paddingTop: 8 }}>
+              <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
+            </View>
+          )}
+
+          <View style={{ paddingHorizontal: 12, paddingTop: 11, paddingBottom: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Ionicons name="book" size={14} color={isDark ? '#fff' : colors.accent} />
+              <Text style={{ color: isDark ? '#fff' : colors.accent, fontWeight: '700', fontSize: 14, flex: 1 }} numberOfLines={1}>
+                {item.bible.reference}
+              </Text>
+            </View>
+
+            {item.bible.verses.slice(0, 6).map((v, i) => (
+              <Text key={i} style={{ color: bubbleText, fontSize: 14, lineHeight: 20, marginBottom: 3 }}>
+                <Text style={{ color: bubbleSubtext, fontSize: 11, fontWeight: '700' }}>{v.verse} </Text>
+                {v.text}
+              </Text>
+            ))}
+            {item.bible.verses.length > 6 && (
+              <Text style={{ color: bubbleSubtext, fontSize: 12, fontStyle: 'italic', marginTop: 2 }}>
+                +{item.bible.verses.length - 6} versículo{item.bible.verses.length - 6 === 1 ? '' : 's'} más
+              </Text>
+            )}
+
+            {!!item.bible.versionName && (
+              <Text style={{ color: bubbleSubtext, fontSize: 11, marginTop: 4 }}>— {item.bible.versionName}</Text>
+            )}
+            <View style={{ alignSelf: 'flex-end' }}>{timestamp}</View>
+          </View>
+
+          <TouchableOpacity
+            onPress={() => item.bible && onBiblePress?.(item.bible)}
+            disabled={!onBiblePress}
+            style={{
+              paddingVertical: 11, alignItems: 'center',
+              borderTopWidth: 1,
+              borderTopColor: isMine && !isDark ? 'rgba(0,0,0,0.06)' : isDark ? 'rgba(255,255,255,0.18)' : colors.borderLight,
+            }}
+          >
+            <Text style={{ color: isDark ? '#fff' : colors.accent, fontSize: 14, fontWeight: '600' }}>
+              Abrir en la Biblia
             </Text>
           </TouchableOpacity>
         </Pressable>

@@ -15,12 +15,19 @@ interface Props {
   // que un plan de grupo se note es VER a los demás; sin esto sería un plan
   // normal con una etiqueta.
   groupProgress: Record<string, { groupName: string; members: any[] }>;
+  // Planes que leen mis grupos y a los que AÚN no me he unido (ya vienen
+  // filtrados y ordenados). Es la puerta de entrada desde el botón del chat.
+  groupPlans: any[];
+  highlightGroupId: string | null;
   onOpenPassage: (bookIndex: number, chapter: number) => void;
   onToggleDay: (plan: any) => void;
   onReminder: (plan: any) => void;
   onRestart: (plan: any) => void;
   onAbandon: (planKey: string) => void;
   onStart: (planKey: string) => void;
+  onJoinGroupPlan: (planKey: string, groupId: string) => void;
+  // Iniciar una lectura EN VIVO con el grupo sobre la lectura de hoy del plan.
+  onStartGroupReading: (plan: any) => void;
   onCreate: () => void;
 }
 
@@ -32,12 +39,16 @@ export function ReadingPlansView({
   colors,
   bottomInset,
   groupProgress,
+  groupPlans,
+  highlightGroupId,
   onOpenPassage,
   onToggleDay,
   onReminder,
   onRestart,
   onAbandon,
   onStart,
+  onJoinGroupPlan,
+  onStartGroupReading,
   onCreate,
 }: Props) {
   if (loading) {
@@ -152,6 +163,23 @@ export function ReadingPlansView({
                 </Text>
               </TouchableOpacity>
             </View>
+
+            {/* Leer hoy EN VIVO con el grupo (solo planes de grupo). */}
+            {plan.groupId && (
+              <TouchableOpacity
+                onPress={() => onStartGroupReading(plan)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  marginTop: 8, paddingVertical: 9, borderRadius: 20,
+                  borderWidth: 1, borderColor: colors.accent,
+                }}
+              >
+                <Ionicons name="people" size={14} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontWeight: '600', fontSize: 13 }}>
+                  Leer hoy juntos
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         ) : null}
 
@@ -226,6 +254,90 @@ export function ReadingPlansView({
     );
   };
 
+  // Un plan que lee un grupo y al que aún no me he unido. Muestra quién va
+  // leyendo (lo que engancha) y un botón "Unirme".
+  const renderGroupPlan = (plan: any) => {
+    const alDia = (plan.members ?? []).filter((m: any) => m.isTodayDone).length;
+    const highlighted = highlightGroupId && plan.groupId === highlightGroupId;
+    return (
+      <View
+        key={`${plan.groupId}:${plan.planKey}`}
+        style={{
+          ...card,
+          borderColor: highlighted ? colors.accent : colors.border,
+          borderWidth: highlighted ? 2 : 1,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Ionicons name="people" size={13} color={colors.accent} />
+          <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }} numberOfLines={1}>
+            {plan.groupName}
+          </Text>
+          {plan.isCustom && (
+            <Text style={{ color: colors.textMuted, fontSize: 11 }}>· personalizado</Text>
+          )}
+        </View>
+
+        <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, marginTop: 6 }}>
+          {plan.title}
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
+          Van por el día {plan.currentDay} de {plan.totalDays} · {plan.memberCount}{' '}
+          {plan.memberCount === 1 ? 'miembro' : 'miembros'} · {alDia}{' '}
+          {alDia === 1 ? 'leyó' : 'leyeron'} hoy
+        </Text>
+
+        {(plan.members ?? []).length > 0 && (
+          <View style={{ marginTop: 12, gap: 8 }}>
+            {plan.members.slice(0, 5).map((m: any) => {
+              const mpct = plan.totalDays
+                ? Math.round((m.completedCount / plan.totalDays) * 100)
+                : 0;
+              return (
+                <View
+                  key={m.userId}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                >
+                  <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 13, width: 90 }}>
+                    {m.name}
+                  </Text>
+                  <View style={{ flex: 1, height: 5, backgroundColor: colors.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
+                    <View
+                      style={{
+                        height: '100%',
+                        width: `${mpct}%`,
+                        backgroundColor: m.isTodayDone ? '#22c55e' : colors.accent,
+                        borderRadius: 3,
+                      }}
+                    />
+                  </View>
+                  <Text style={{ color: colors.textMuted, fontSize: 11, width: 52, textAlign: 'right' }}>
+                    {m.completedCount}/{plan.totalDays}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        <TouchableOpacity
+          onPress={() => onJoinGroupPlan(plan.planKey, plan.groupId)}
+          disabled={busyKey === plan.planKey}
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+            marginTop: 14, paddingVertical: 11, borderRadius: 22, backgroundColor: colors.accent,
+            opacity: busyKey === plan.planKey ? 0.6 : 1,
+          }}
+        >
+          <Ionicons name="add" size={16} color="#fff" />
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
+            Unirme y leer con el grupo
+          </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   const renderCatalogPlan = (plan: any) => (
     <View
       key={plan.key}
@@ -257,6 +369,14 @@ export function ReadingPlansView({
         <Text style={{ ...sectionTitle, paddingTop: 16 }}>Mis planes</Text>
       )}
       {myPlans.map(renderPlan)}
+
+      {/* Planes que leen mis grupos y a los que aún no me he unido. Es a donde
+          lleva el botón del chat ("N de M leyeron hoy"): sin esta sección, ese
+          plan no aparecía por ningún lado. */}
+      {groupPlans.length > 0 && (
+        <Text style={{ ...sectionTitle, paddingTop: 24 }}>Planes de tus grupos</Text>
+      )}
+      {groupPlans.map(renderGroupPlan)}
 
       {/* Crear mi plan (#D) */}
       <TouchableOpacity

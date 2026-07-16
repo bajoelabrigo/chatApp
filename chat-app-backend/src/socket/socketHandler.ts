@@ -21,6 +21,60 @@ interface ActiveCall {
 
 const activeCalls = new Map<string, ActiveCall>();
 
+// ── Lectura en vivo (guiada por un anfitrión) ──────────────────────────────
+// Sesión efímera por grupo (en memoria, como las llamadas): el grupo lee el mismo
+// pasaje a la vez y el anfitrión va marcando el versículo que se lee. Si el
+// servidor reinicia, las sesiones se pierden — es "en vivo", no persistente.
+interface ReadingParticipant {
+  userId: string;
+  name: string;
+  avatar?: string | null;
+}
+interface ReadingSession {
+  groupId: string;
+  hostId: string;
+  book: string;
+  chapter: string;
+  version: string;
+  currentVerse: number;
+  participants: Map<string, ReadingParticipant>;
+}
+const readingSessions = new Map<string, ReadingSession>();
+
+// Resumen ligero (para el banner del chat) y estado completo (para el lector).
+function readingSummary(s: ReadingSession) {
+  return {
+    groupId: s.groupId,
+    hostId: s.hostId,
+    book: s.book,
+    chapter: s.chapter,
+    version: s.version,
+    currentVerse: s.currentVerse,
+    count: s.participants.size,
+  };
+}
+function readingState(s: ReadingSession) {
+  return { ...readingSummary(s), participants: [...s.participants.values()] };
+}
+
+// Quita a un usuario de la sesión de su grupo; si era el anfitrión o queda vacía,
+// la termina. Se usa al salir explícitamente y al desconectar.
+function leaveReadingSession(io: Server, groupId: string, userId: string) {
+  const s = readingSessions.get(groupId);
+  if (!s || !s.participants.has(userId)) return;
+  s.participants.delete(userId);
+  if (s.hostId === userId || s.participants.size === 0) {
+    readingSessions.delete(groupId);
+    io.to(groupId).emit('reading:ended', { groupId });
+  } else {
+    io.to(groupId).emit('reading:presence', {
+      groupId,
+      count: s.participants.size,
+      participants: [...s.participants.values()],
+    });
+  }
+}
+
 async function saveCallMessage(
   io: Server,
   conversationId: string,
@@ -122,6 +176,12 @@ export function setupSocketHandlers(io: Server) {
       contactUserId?: string;
       mentions?: string[];
       poll?: { question?: string; options?: string[]; multiple?: boolean };
+      bible?: {
+        reference?: string;
+        version?: string;
+        versionName?: string;
+        verses?: { book?: string; chapter?: number; verse?: number; text?: string }[];
+      };
     }) => {
       try {
         const { conversationId, content, type = 'text', fileName, fileSize, cloudinaryPublicId, replyToMessageId, contactUserId } = data;
@@ -184,6 +244,40 @@ export function setupSocketHandlers(io: Server) {
           };
         }
 
+        // Pasaje bíblico compartido. Se guarda el TEXTO de los versículos
+        // (snapshot) para que la burbuja se lea sin conexión y no dependa de la
+        // versión. El cliente manda los versículos ya seleccionados; aquí se
+        // normalizan y acotan (no una biblia entera en un mensaje).
+        let bible: any;
+        if (type === 'bible') {
+          const raw = data.bible;
+          const verses = (raw?.verses ?? [])
+            .map((v) => ({
+              book: String(v?.book ?? '').slice(0, 60),
+              chapter: Number(v?.chapter),
+              verse: Number(v?.verse),
+              text: String(v?.text ?? '').slice(0, 2000),
+            }))
+            .filter(
+              (v) => v.book && Number.isFinite(v.chapter) && Number.isFinite(v.verse) && v.text
+            )
+            .slice(0, 50);
+          // Un mensaje bíblico sin versículos no es nada: se descarta (como poll).
+          if (!verses.length) return;
+          const first = verses[0];
+          bible = {
+            reference:
+              String(raw?.reference ?? '').slice(0, 120) ||
+              `${first.book} ${first.chapter}:${first.verse}`,
+            version: String(raw?.version ?? '').slice(0, 20),
+            versionName: String(raw?.versionName ?? '').slice(0, 60),
+            book: first.book,
+            chapter: first.chapter,
+            verse: first.verse,
+            verses,
+          };
+        }
+
         // Pie de foto: solo tiene sentido en un archivo (en un texto, el texto ES
         // el `content`). Se recorta como en WhatsApp para que no crezca sin fin.
         const isFileMessage = ['image', 'video', 'audio', 'document'].includes(type);
@@ -228,10 +322,11 @@ export function setupSocketHandlers(io: Server) {
         const message = await Message.create({
           conversationId,
           senderId: userId,
-          // En un contacto compartido el `content` es el nombre, y en una encuesta
-          // la pregunta: así las vistas previas (lista de chats, citas, push)
-          // tienen algo que mostrar sin tener que leer `contact` ni `poll`.
-          content: contact ? contact.name : poll ? poll.question : content,
+          // En un contacto compartido el `content` es el nombre, en una encuesta
+          // la pregunta, y en un pasaje la referencia ("Juan 3:16"): así las vistas
+          // previas (lista de chats, citas, push) tienen algo que mostrar sin tener
+          // que leer `contact`, `poll` ni `bible`.
+          content: contact ? contact.name : poll ? poll.question : bible ? bible.reference : content,
           type,
           caption,
           fileName,
@@ -239,6 +334,7 @@ export function setupSocketHandlers(io: Server) {
           cloudinaryPublicId: cloudinaryPublicId ?? undefined,
           contact,
           poll,
+          bible,
           status: 'sent',
           readBy: [userId],
           replyTo,
@@ -328,6 +424,8 @@ export function setupSocketHandlers(io: Server) {
                 ? `👤 ${contact?.name ?? 'Contacto'}`
                 : type === 'poll'
                 ? `📊 ${poll?.question ?? 'Encuesta'}`
+                : type === 'bible'
+                ? `📖 ${bible?.reference ?? 'Pasaje bíblico'}`
                 : '📎 Archivo'
               : (content || '').trim().slice(0, 80) || 'Nuevo mensaje';
           const groupName = (conversation as any).groupName || 'el grupo';
@@ -817,11 +915,100 @@ export function setupSocketHandlers(io: Server) {
       await saveCallMessage(io, call.conversationId, call.callerId, call.callType, 'missed');
     });
 
+    // ── Lectura en vivo (guiada por un anfitrión) ───────────
+
+    // Iniciar (o unirse si ya hay una) una sesión de lectura en el grupo.
+    socket.on('reading:start', async (data: { groupId: string; book: string; chapter: string; version?: string }) => {
+      const { groupId, book, chapter } = data;
+      if (!groupId || !book || !chapter) return;
+      const member = await Conversation.findOne({ _id: groupId, isGroup: true, participants: userId }).select('_id').lean();
+      if (!member) return;
+
+      const me = await User.findById(userId).select('name avatar').lean();
+      const participant: ReadingParticipant = { userId, name: me?.name ?? 'Alguien', avatar: me?.avatar ?? null };
+
+      let s = readingSessions.get(groupId);
+      if (!s) {
+        s = {
+          groupId,
+          hostId: userId,
+          book,
+          chapter: String(chapter),
+          version: data.version || 'RV1909',
+          currentVerse: 1,
+          participants: new Map([[userId, participant]]),
+        };
+        readingSessions.set(groupId, s);
+        // Aviso a todo el grupo (banner "lectura en vivo").
+        io.to(groupId).emit('reading:started', readingSummary(s));
+      } else {
+        s.participants.set(userId, participant);
+        io.to(groupId).emit('reading:presence', { groupId, count: s.participants.size, participants: [...s.participants.values()] });
+      }
+      // Estado completo al que entra (para abrir el lector en el punto actual).
+      socket.emit('reading:state', readingState(s));
+    });
+
+    // Unirse a la sesión activa del grupo.
+    socket.on('reading:join', async (data: { groupId: string }) => {
+      const { groupId } = data;
+      const s = readingSessions.get(groupId);
+      if (!s) { socket.emit('reading:ended', { groupId }); return; }
+      const member = await Conversation.findOne({ _id: groupId, isGroup: true, participants: userId }).select('_id').lean();
+      if (!member) return;
+
+      const me = await User.findById(userId).select('name avatar').lean();
+      s.participants.set(userId, { userId, name: me?.name ?? 'Alguien', avatar: me?.avatar ?? null });
+      socket.emit('reading:state', readingState(s));
+      io.to(groupId).emit('reading:presence', { groupId, count: s.participants.size, participants: [...s.participants.values()] });
+    });
+
+    // El anfitrión marca el versículo que se está leyendo.
+    socket.on('reading:verse', (data: { groupId: string; verse: number }) => {
+      const s = readingSessions.get(data.groupId);
+      if (!s || s.hostId !== userId) return;
+      const verse = Number(data.verse);
+      if (!Number.isFinite(verse) || verse < 1) return;
+      s.currentVerse = verse;
+      io.to(data.groupId).emit('reading:verse', { groupId: data.groupId, verse });
+    });
+
+    // "Amén" — reacción transitoria (no se guarda; solo un destello en vivo).
+    socket.on('reading:amen', async (data: { groupId: string }) => {
+      const s = readingSessions.get(data.groupId);
+      if (!s || !s.participants.has(userId)) return;
+      const p = s.participants.get(userId)!;
+      io.to(data.groupId).emit('reading:amen', { groupId: data.groupId, userId, name: p.name });
+    });
+
+    // Salir de la sesión (participante) o terminarla (si eres el anfitrión).
+    socket.on('reading:leave', (data: { groupId: string }) => {
+      leaveReadingSession(io, data.groupId, userId);
+    });
+    socket.on('reading:end', (data: { groupId: string }) => {
+      const s = readingSessions.get(data.groupId);
+      if (!s || s.hostId !== userId) return;
+      readingSessions.delete(data.groupId);
+      io.to(data.groupId).emit('reading:ended', { groupId: data.groupId });
+    });
+
+    // Al abrir un chat de grupo: saber si hay una sesión activa (para el banner).
+    socket.on('reading:status', (data: { groupId: string }) => {
+      const s = readingSessions.get(data.groupId);
+      socket.emit('reading:status', s ? readingSummary(s) : { groupId: data.groupId, active: false });
+    });
+
     // ── Disconnect ──────────────────────────────────────────
 
     socket.on('disconnect', async () => {
       removeOnlineUser(userId, socket.id);
       if (!isUserOnline(userId)) {
+        // Sacar de cualquier sesión de lectura en vivo (host o participante). Solo
+        // al quedar totalmente offline: con varios dispositivos, cerrar uno no debe
+        // sacarte de la lectura.
+        for (const [gid, s] of readingSessions.entries()) {
+          if (s.participants.has(userId)) leaveReadingSession(io, gid, userId);
+        }
         // End any active call
         for (const [callId, call] of activeCalls.entries()) {
           if (call.callerId === userId || call.calleeId === userId) {

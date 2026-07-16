@@ -12,6 +12,7 @@ import { sendCommitmentConfirmation, sendActivityNotification } from '../service
 import { sendPushNotification, sendPushNotifications } from '../services/pushService';
 import { sendWebPushToUsers } from '../services/webPushService';
 import { isGlobalAdmin } from '../services/adminService';
+import { createLinkedPost } from '../services/linkedPost';
 
 async function assertMember(groupId: string, userId: string): Promise<any | null> {
   return Conversation.findOne({ _id: groupId, isGroup: true, participants: userId });
@@ -273,6 +274,20 @@ export async function createActivity(req: Request, res: Response) {
       if (m.email) {
         sendActivityNotification(m.email, m.name, activityEmoji, activityNameStr, groupName, startStr, endStr);
       }
+    });
+
+    // Post automático en el feed: la actividad se descubre desde los posts y al
+    // pulsar lleva al grupo (donde puede unirse). Une chat + posts.
+    createLinkedPost({
+      authorId: userId,
+      type: 'activity',
+      refId: String(activity._id),
+      groupId,
+      groupName,
+      groupImage: (conv as any).groupAvatar ?? null,
+      title: activityNameStr,
+      body: `${activityEmoji} ${groupName} empezó una actividad: "${activityNameStr}"${startStr ? ` · ${startStr}` : ''}. ¡Únete!`,
+      url: `/g/${groupId}`,
     });
   } catch (err: any) {
     if (err.code === 11000) return res.status(409).json({ error: 'Ya existe una actividad de este tipo en el grupo' });

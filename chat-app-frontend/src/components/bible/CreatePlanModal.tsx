@@ -9,7 +9,9 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 // Crear un plan de lectura propio (#D): rango de libros + días.
 //
@@ -28,16 +30,20 @@ interface Props {
   visible: boolean;
   // Libros en orden canónico de la versión activa (para el selector).
   books: string[];
+  // Grupos del usuario, para poder crear el plan CON un grupo (los demás lo verán
+  // y podrán unirse). Vacío = solo se ofrece "por mi cuenta".
+  groups?: any[];
   saving: boolean;
   colors: any;
   bottomInset: number;
   onClose: () => void;
-  onCreate: (draft: CustomPlanDraft) => void;
+  onCreate: (draft: CustomPlanDraft, groupId: string | null) => void;
 }
 
 export function CreatePlanModal({
   visible,
   books,
+  groups = [],
   saving,
   colors,
   bottomInset,
@@ -49,6 +55,8 @@ export function CreatePlanModal({
   const [end, setEnd] = useState(65);
   const [days, setDays] = useState('30');
   const [pickerFor, setPickerFor] = useState<null | 'start' | 'end'>(null);
+  // null = por mi cuenta; un _id = leerlo con ese grupo.
+  const [groupId, setGroupId] = useState<string | null>(null);
 
   const bookField = (label: string, index: number, which: 'start' | 'end') => (
     <View style={{ flex: 1 }}>
@@ -115,14 +123,65 @@ export function CreatePlanModal({
             }}
           />
 
+          {/* ¿Con quién? Un plan creado con un grupo lo verán todos y podrán
+              unirse (heredan la fecha de inicio). Solo si el usuario tiene grupos. */}
+          {groups.length > 0 && (
+            <>
+              <Text style={{ color: colors.textMuted, fontSize: 12, marginBottom: 6 }}>
+                ¿Con quién lo lees?
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 16 }}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                {[{ _id: null, groupName: 'Por mi cuenta' }, ...groups].map((g: any) => {
+                  const active = groupId === g._id;
+                  return (
+                    <TouchableOpacity
+                      key={g._id ?? 'self'}
+                      onPress={() => setGroupId(g._id)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20,
+                        borderWidth: 1,
+                        borderColor: active ? colors.accent : colors.border,
+                        backgroundColor: active ? colors.accent + '22' : colors.bgTertiary,
+                      }}
+                    >
+                      <Ionicons
+                        name={g._id ? 'people' : 'person-outline'}
+                        size={14}
+                        color={active ? colors.accent : colors.textSecondary}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: active ? colors.accent : colors.textSecondary,
+                          fontSize: 13, fontWeight: '600', maxWidth: 140,
+                        }}
+                      >
+                        {g.groupName ?? 'Grupo'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
+
           <TouchableOpacity
             onPress={() =>
-              onCreate({
-                title: title.trim() || 'Mi plan',
-                bookStart: start,
-                bookEnd: end,
-                days: Math.max(1, parseInt(days, 10) || 1),
-              })
+              onCreate(
+                {
+                  title: title.trim() || 'Mi plan',
+                  bookStart: start,
+                  bookEnd: end,
+                  days: Math.max(1, parseInt(days, 10) || 1),
+                },
+                groupId
+              )
             }
             disabled={saving}
             style={{

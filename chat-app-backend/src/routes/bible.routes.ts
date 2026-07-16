@@ -38,6 +38,7 @@ import {
   togglePlanDay,
   unsubscribePlan,
   getGroupPlans,
+  getMyGroupPlans,
 } from '../controllers/readingPlanController';
 
 const router = Router();
@@ -68,6 +69,9 @@ router.post('/me/streak', authMiddleware, markReadToday);
 // Planes de lectura (#2). El catálogo es público; el progreso requiere sesión.
 // También antes de las rutas dinámicas (`/plans` no debe verse como un libro).
 router.get('/me/plans', authMiddleware, getMyPlans);
+// Planes que leen mis grupos (aunque no me haya unido). Antes de `/me/plans/:key`
+// para que "group-plans" no se capture como una `:key`.
+router.get('/me/group-plans', authMiddleware, getMyGroupPlans);
 router.post('/me/plans', authMiddleware, subscribePlan);
 router.patch('/me/plans/:key', authMiddleware, updateMyPlan);
 router.post('/me/plans/:key/toggle-day', authMiddleware, togglePlanDay);

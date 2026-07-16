@@ -33,6 +33,7 @@ interface Props {
   onClearHighlight: () => void;
   onFavorite: () => void;
   onShare: () => void;
+  onSendToChat: () => void;
   onNote: (v: VerseItem) => void;
   onImage: (v: VerseItem) => void;
   onTags: (v: VerseItem) => void;
@@ -57,6 +58,7 @@ export function VerseActionsSheet({
   onClearHighlight,
   onFavorite,
   onShare,
+  onSendToChat,
   onNote,
   onImage,
   onTags,
@@ -240,6 +242,12 @@ export function VerseActionsSheet({
                 icon={<Ionicons name="share-outline" size={20} color={iconColor()} />}
                 label="Compartir"
                 onPress={onShare}
+              />
+
+              <Action
+                icon={<Ionicons name="chatbubble-ellipses-outline" size={20} color={iconColor()} />}
+                label="Enviar a chat"
+                onPress={onSendToChat}
               />
 
               {verse && (

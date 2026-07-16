@@ -569,6 +569,11 @@ export interface GroupPlan {
   memberCount: number;
   isJoined: boolean;
   members: GroupPlanMember[];
+  // Presentes en /bible/me/group-plans (una lista mezcla varios grupos); en
+  // /bible/groups/:id/plans el grupo se sabe por la ruta.
+  groupId?: string;
+  groupName?: string;
+  isCustom?: boolean;
 }
 
 /** Los planes que lee un grupo, con el progreso de cada miembro. */
@@ -585,10 +590,24 @@ export async function fetchGroupPlans(token: string, groupId: string): Promise<G
   }
 }
 
-export async function createCustomReadingPlan(token: string, custom: any): Promise<any> {
+/** Todos los planes que leen los grupos del usuario, aunque no se haya unido. */
+export async function fetchMyGroupPlans(token: string): Promise<GroupPlan[]> {
+  try {
+    const { data } = await api.get<GroupPlan[]>('/bible/me/group-plans', authHeader(token));
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+export async function createCustomReadingPlan(
+  token: string,
+  custom: any,
+  groupId?: string | null
+): Promise<any> {
   const { data } = await api.post(
     '/bible/me/plans',
-    { custom, timezone: myTimezone() },
+    { custom, timezone: myTimezone(), ...(groupId ? { groupId } : {}) },
     authHeader(token)
   );
   return data;
@@ -621,6 +640,53 @@ export async function fetchDailyVerse(version = DEFAULT_VERSION): Promise<DailyV
     params: { version, tz: myTimezone() },
   });
   return data;
+}
+
+// ── Versículo del día en el chat del grupo (tarjeta + reacciones compartidas) ──
+export interface DailyVerseReactor {
+  userId: string;
+  name: string;
+  avatar: string | null;
+  emoji: string;
+}
+export interface GroupDailyVerse {
+  verse: DailyVerse;
+  dateKey: string;
+  reactions: DailyVerseReactor[];
+  myEmoji: string | null;
+}
+
+export async function fetchGroupDailyVerse(
+  token: string,
+  groupId: string,
+  version = DEFAULT_VERSION
+): Promise<GroupDailyVerse | null> {
+  try {
+    const { data } = await api.get<GroupDailyVerse>(`/conversations/${groupId}/daily-verse`, {
+      params: { version, tz: myTimezone() },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function reactGroupDailyVerse(
+  token: string,
+  groupId: string,
+  emoji: string
+): Promise<{ reactions: DailyVerseReactor[]; myEmoji: string | null } | null> {
+  try {
+    const { data } = await api.post(
+      `/conversations/${groupId}/daily-verse/react`,
+      { emoji, tz: myTimezone() },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 // El endpoint /public/photos es público (no requiere token).

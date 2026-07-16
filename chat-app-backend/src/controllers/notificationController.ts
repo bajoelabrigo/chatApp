@@ -54,6 +54,7 @@ function previewOf(msg: any, isGroup: boolean, currentUserId: string): string {
   else if (msg.type === 'call') content = '📞 Llamada';
   else if (msg.type === 'contact') content = `👤 ${msg.contact?.name ?? 'Contacto'}`;
   else if (msg.type === 'poll') content = `📊 ${msg.poll?.question ?? msg.content ?? 'Encuesta'}`;
+  else if (msg.type === 'bible') content = `📖 ${msg.bible?.reference ?? msg.content ?? 'Pasaje bíblico'}`;
   else content = msg.content ?? '';
   if (isGroup && msg.senderId && typeof msg.senderId === 'object') {
     const isMe = msg.senderId._id?.toString() === currentUserId;

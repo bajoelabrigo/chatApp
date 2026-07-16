@@ -37,6 +37,8 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { getSocket } from '../../src/services/socketService';
 import GroupPendingBar from '../../src/components/GroupPendingBar';
 import { GroupCommunityBar } from '../../src/components/chat/GroupCommunityBar';
+import { DailyVerseChatCard } from '../../src/components/chat/DailyVerseChatCard';
+import { fetchGroupDailyVerse, reactGroupDailyVerse, type GroupDailyVerse } from '../../src/services/bibleService';
 import { CreatePollModal } from '../../src/components/chat/CreatePollModal';
 import { useMentions } from '../../src/hooks/useMentions';
 import { getGroupSummary, type GroupSummary } from '../../src/services/activityService';
@@ -309,13 +311,84 @@ export default function ChatScreen() {
   // debajo de la cabecera. Se pide al abrir el chat y al volver a él: si acabas de
   // apuntarte a una actividad, la franja debe dejar de insistirte.
   const [groupSummary, setGroupSummary] = useState<GroupSummary | null>(null);
+  // Versículo del día del grupo (tarjeta fija con reacciones compartidas).
+  const [dailyVerse, setDailyVerse] = useState<GroupDailyVerse | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       if (!token || !isGroupChat) return;
       getGroupSummary(token, conversationId).then(setGroupSummary);
+      fetchGroupDailyVerse(token, conversationId).then(setDailyVerse);
     }, [token, isGroupChat, conversationId])
   );
+
+  // Reacción al versículo del día en tiempo real (otro miembro reaccionó).
+  useEffect(() => {
+    if (!socket) return;
+    const onReact = (payload: { groupId: string; reactions: any[] }) => {
+      if (payload.groupId !== conversationId) return;
+      setDailyVerse((prev) =>
+        prev
+          ? { ...prev, reactions: payload.reactions, myEmoji: payload.reactions.find((r) => r.userId === user?.id)?.emoji ?? null }
+          : prev
+      );
+    };
+    socket.on('daily-verse:react', onReact);
+    return () => { socket.off('daily-verse:react', onReact); };
+  }, [socket, conversationId, user?.id]);
+
+  const handleDailyVerseReact = async (emoji: string) => {
+    if (!token || !dailyVerse) return;
+    // Optimista: alterna mi reacción al instante.
+    setDailyVerse((prev) => {
+      if (!prev) return prev;
+      const others = prev.reactions.filter((r) => r.userId !== user?.id);
+      const toggledOff = prev.myEmoji === emoji;
+      const mine = toggledOff
+        ? []
+        : [{ userId: user?.id ?? '', name: user?.name ?? 'Tú', avatar: user?.avatar ?? null, emoji }];
+      return { ...prev, reactions: [...others, ...mine], myEmoji: toggledOff ? null : emoji };
+    });
+    const res = await reactGroupDailyVerse(token, conversationId, emoji);
+    if (res) setDailyVerse((prev) => (prev ? { ...prev, reactions: res.reactions, myEmoji: res.myEmoji } : prev));
+  };
+
+  const handleDailyVerseOpen = () => {
+    if (!dailyVerse) return;
+    const v = dailyVerse.verse;
+    router.navigate({
+      pathname: '/(tabs)/bible',
+      params: { openRef: `${v.book}|${v.chapter}|${v.verse}`, refVersion: v.version },
+    } as any);
+  };
+
+  // ── Lectura en vivo (guiada por anfitrión) ──────────────────
+  // Banner de "unirse" cuando hay una sesión activa en el grupo.
+  const [liveReading, setLiveReading] = useState<{ count: number } | null>(null);
+
+  useEffect(() => {
+    if (!socket || !isGroupChat) return;
+    socket.emit('reading:status', { groupId: conversationId });
+    const upd = (p: any) => {
+      if (p.groupId !== conversationId) return;
+      setLiveReading(p.active === false ? null : { count: p.count ?? 1 });
+    };
+    const onEnded = (p: any) => { if (p.groupId === conversationId) setLiveReading(null); };
+    socket.on('reading:status', upd);
+    socket.on('reading:started', upd);
+    socket.on('reading:presence', upd);
+    socket.on('reading:ended', onEnded);
+    return () => {
+      socket.off('reading:status', upd);
+      socket.off('reading:started', upd);
+      socket.off('reading:presence', upd);
+      socket.off('reading:ended', onEnded);
+    };
+  }, [socket, isGroupChat, conversationId]);
+
+  const joinLiveReading = () => {
+    router.push({ pathname: '/live-reading/[id]', params: { id: conversationId, host: '0' } } as any);
+  };
 
   const handleToggleMute = async () => {
     if (!token) return;
@@ -602,6 +675,43 @@ export default function ChatScreen() {
     setReplyingTo(null);
   };
 
+  // ── Enviar pasaje bíblico (tipo 'bible') ────────────────
+  // Se manda estructurado (referencia + versículos), no como texto: la burbuja lo
+  // pinta como tarjeta con "Abrir en la Biblia". El `content` es la referencia,
+  // para que las vistas previas funcionen sin leer `bible`.
+  const sendBibleMessage = (passage: import('../../src/services/conversationService').SharedBible) => {
+    if (!socket || !user) return;
+    const reply = replyingTo;
+    const temp: Message = {
+      _id: `temp_${Date.now()}`,
+      conversationId,
+      senderId: { _id: user.id, name: user.name, email: user.email ?? '', avatar: user.avatar },
+      content: passage.reference,
+      type: 'bible',
+      bible: passage,
+      status: 'sent',
+      createdAt: new Date().toISOString(),
+      replyTo: reply ? {
+        messageId: reply._id,
+        senderName: reply.senderId.name,
+        senderAvatar: reply.senderId.avatar,
+        content: reply.content,
+        type: reply.type,
+        fileName: reply.fileName,
+      } : undefined,
+    };
+    addMessage(temp);
+    socket.emit('message:send', {
+      conversationId,
+      content: passage.reference,
+      type: 'bible',
+      bible: passage,
+      replyToMessageId: reply?._id,
+    });
+    setReplyingTo(null);
+    setBibleOpen(false);
+  };
+
   // ── Enviar archivo (imagen / documento / audio) ─────────
   const sendFileMessage = async (
     fileUri: string,
@@ -800,6 +910,19 @@ export default function ChatScreen() {
 
   // Botón "Mensaje" de una tarjeta de contacto compartido: abre (o crea) el chat
   // 1:1 con esa persona, igual que el deep link chatapp://u/<id>.
+  // "Abrir en la Biblia" de un pasaje compartido: abre la pestaña Biblia en esa
+  // referencia (y versión). El handler debe ir en useCallback o se anula el memo
+  // de MessageBubble.
+  const handleBiblePress = useCallback((bible: NonNullable<Message['bible']>) => {
+    router.navigate({
+      pathname: '/(tabs)/bible',
+      params: {
+        openRef: `${bible.book}|${bible.chapter}|${bible.verse}`,
+        refVersion: bible.version,
+      },
+    } as any);
+  }, []);
+
   const handleContactPress = useCallback(
     async (contact: SharedContact) => {
       if (!token) return;
@@ -947,7 +1070,7 @@ export default function ChatScreen() {
                   cosas que un grupo hace además de hablar. */}
               <TouchableOpacity
                 onPress={() =>
-                  router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans' } } as any)
+                  router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans', groupId: conversationId } } as any)
                 }
                 style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
@@ -1056,8 +1179,39 @@ export default function ChatScreen() {
           // El plan vive en la pestaña Biblia → Planes: se abre ahí directamente.
           // Sin esto, el chip diría "hay un plan" y dejaría al usuario buscándolo.
           onOpenPlan={() =>
-            router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans' } } as any)
+            router.navigate({ pathname: '/(tabs)/bible', params: { section: 'plans', groupId: conversationId } } as any)
           }
+        />
+      )}
+
+      {/* Lectura en vivo activa: banner para unirse. */}
+      {isGroupChat && liveReading && (
+        <TouchableOpacity
+          onPress={joinLiveReading}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+            paddingHorizontal: 14, paddingVertical: 10,
+            backgroundColor: colors.accent,
+          }}
+        >
+          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' }} />
+          <Ionicons name="book" size={15} color="#fff" />
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13, flex: 1 }} numberOfLines={1}>
+            Lectura en vivo · {liveReading.count} {liveReading.count === 1 ? 'leyendo' : 'leyendo'}
+          </Text>
+          <View style={{ backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>Unirse</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {/* Versículo del día del grupo: tarjeta fija con reacciones compartidas. */}
+      {isGroupChat && dailyVerse && (
+        <DailyVerseChatCard
+          data={dailyVerse}
+          colors={colors}
+          onReact={handleDailyVerseReact}
+          onOpen={handleDailyVerseOpen}
         />
       )}
 
@@ -1145,6 +1299,7 @@ export default function ChatScreen() {
                   onAvatarPress={isGroupChat ? handleAvatarPress : undefined}
                   onCallBack={handleCallBack}
                   onContactPress={handleContactPress}
+                  onBiblePress={handleBiblePress}
                   onReplyPress={jumpToMessage}
                 />
               );
@@ -1801,10 +1956,7 @@ export default function ChatScreen() {
       <BibleModal
         visible={bibleOpen}
         onClose={() => setBibleOpen(false)}
-        onSendVerses={(verseText) => {
-          setText((prev) => (prev ? prev + '\n' + verseText : verseText));
-          setBibleOpen(false);
-        }}
+        onSendBible={sendBibleMessage}
       />
 
       {/* ── Modal: perfil de miembro del grupo ── */}

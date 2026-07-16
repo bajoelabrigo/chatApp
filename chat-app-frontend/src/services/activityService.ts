@@ -211,11 +211,12 @@ export async function createPrayerRequest(
   isAnonymous: boolean,
   imageUrl?: string,
   cloudinaryPublicId?: string,
-  deadline?: string
+  deadline?: string,
+  shareToFeed: boolean = true
 ): Promise<PrayerRequest> {
   const { data } = await api.post<PrayerRequest>(
     `/groups/${groupId}/prayer-requests`,
-    { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline },
+    { content, isAnonymous, imageUrl, cloudinaryPublicId, deadline, shareToFeed },
     h(token)
   );
   return data;

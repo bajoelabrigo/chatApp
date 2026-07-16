@@ -178,6 +178,7 @@ function RootLayoutInner() {
         <Stack.Screen name="notifications" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="call" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="group-call" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="live-reading/[id]" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="contact/[id]" />
         <Stack.Screen name="u/[id]" />
         <Stack.Screen name="g/[id]" />

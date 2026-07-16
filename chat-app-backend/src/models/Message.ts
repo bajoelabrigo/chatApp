@@ -1,7 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 export type MessageStatus = 'sent' | 'delivered' | 'read';
-export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll';
+export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll' | 'bible';
 
 /**
  * Encuesta (tipo `poll`).
@@ -38,6 +38,30 @@ export interface ISharedContact {
   userId: Types.ObjectId;
   name: string;
   avatar?: string;
+}
+
+/**
+ * Pasaje bíblico compartido (tipo `bible`). Se guarda el TEXTO de los versículos
+ * (snapshot), no solo la referencia: así la burbuja se lee sin pedir nada al
+ * servidor y funciona sin conexión, y no depende de que la versión siga estando.
+ * `book`/`chapter`/`verse` son del primer versículo, para el botón "Abrir en la
+ * Biblia" (deep link) y el resaltado al llegar.
+ */
+export interface IBibleVerseRef {
+  book: string;
+  chapter: number;
+  verse: number;
+  text: string;
+}
+
+export interface IBibleShare {
+  reference: string;   // "Juan 3:16-17"
+  version: string;     // id de versión: "RV1909"
+  versionName: string; // "Reina Valera 1909"
+  book: string;        // libro del primer versículo (deep link)
+  chapter: number;
+  verse: number;
+  verses: IBibleVerseRef[];
 }
 
 export interface IReplyTo {
@@ -77,6 +101,7 @@ export interface IMessage extends Document {
   callDuration?: number;
   contact?: ISharedContact;
   poll?: IPoll;
+  bible?: IBibleShare;
   replyTo?: IReplyTo;
   reactions?: IReactionEntry[];
   // Usuarios mencionados con @ en el texto (solo grupos).
@@ -96,7 +121,7 @@ const MessageSchema = new Schema<IMessage>(
     conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true },
-    type: { type: String, enum: ['text', 'image', 'audio', 'video', 'document', 'call', 'contact', 'poll'], default: 'text' },
+    type: { type: String, enum: ['text', 'image', 'audio', 'video', 'document', 'call', 'contact', 'poll', 'bible'], default: 'text' },
     caption: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
@@ -129,6 +154,31 @@ const MessageSchema = new Schema<IMessage>(
           ],
           multiple: { type: Boolean, default: false },
           closed: { type: Boolean, default: false },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
+    // Pasaje bíblico compartido. Guarda el texto de los versículos (snapshot) para
+    // que la burbuja se lea sin conexión y no dependa de la versión.
+    bible: {
+      type: new Schema<IBibleShare>(
+        {
+          reference: { type: String, required: true },
+          version: { type: String, required: true },
+          versionName: { type: String, default: '' },
+          book: { type: String, required: true },
+          chapter: { type: Number, required: true },
+          verse: { type: Number, required: true },
+          verses: [
+            {
+              _id: false,
+              book: { type: String, required: true },
+              chapter: { type: Number, required: true },
+              verse: { type: Number, required: true },
+              text: { type: String, required: true },
+            },
+          ],
         },
         { _id: false }
       ),
