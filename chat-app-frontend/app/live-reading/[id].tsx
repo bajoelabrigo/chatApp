@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, FlatList, ActivityIndicator, Image, Pressable,
+  View, Text, TouchableOpacity, FlatList, ActivityIndicator, Image, Pressable, ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -9,6 +9,8 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { getSocket } from '../../src/services/socketService';
 import { fetchVerses, type BibleVerse } from '../../src/services/bibleService';
+import { CrossRefsList } from '../../src/components/bible/CrossRefsList';
+import type { VerseItem } from '../../src/constants/bible';
 
 // Lectura en vivo GUIADA por un anfitrión: el grupo lee el mismo pasaje a la vez;
 // el anfitrión marca el versículo que se lee y a todos se les resalta y se
@@ -18,6 +20,9 @@ interface Participant { userId: string; name: string; avatar?: string | null }
 interface ReadingState {
   groupId: string; hostId: string; book: string; chapter: string; version: string;
   currentVerse: number; participants: Participant[];
+  // Versículo cuyas referencias cruzadas está enseñando el anfitrión al grupo
+  // (null = nada abierto). Lo abre él desde la web; aquí se sigue.
+  refsVerse?: number | null;
 }
 interface FloatingAmen { id: number; name: string }
 
@@ -58,6 +63,11 @@ export default function LiveReadingScreen() {
       if (p.groupId !== groupId) return;
       setState((prev) => (prev ? { ...prev, participants: p.participants } : prev));
     };
+    // El anfitrión abrió/cerró las referencias de un versículo para todos.
+    const onRefs = (p: { groupId: string; verse: number | null }) => {
+      if (p.groupId !== groupId) return;
+      setState((prev) => (prev ? { ...prev, refsVerse: p.verse } : prev));
+    };
     const onAmen = (p: { groupId: string; name: string }) => {
       if (p.groupId !== groupId) return;
       const id = ++amenSeq.current;
@@ -69,6 +79,7 @@ export default function LiveReadingScreen() {
     socket.on('reading:state', onState);
     socket.on('reading:verse', onVerse);
     socket.on('reading:presence', onPresence);
+    socket.on('reading:refs', onRefs);
     socket.on('reading:amen', onAmen);
     socket.on('reading:ended', onEnded);
     return () => {
@@ -76,6 +87,7 @@ export default function LiveReadingScreen() {
       socket.off('reading:state', onState);
       socket.off('reading:verse', onVerse);
       socket.off('reading:presence', onPresence);
+      socket.off('reading:refs', onRefs);
       socket.off('reading:amen', onAmen);
       socket.off('reading:ended', onEnded);
     };
@@ -115,6 +127,20 @@ export default function LiveReadingScreen() {
 
   const ref = state ? `${state.book} ${state.chapter}` : 'Lectura en vivo';
   const participants = state?.participants ?? [];
+
+  // Referencias que el anfitrión le está enseñando al grupo. Aquí no se abren
+  // (las guía él, desde la web, donde caben al lado del texto): esta pantalla
+  // las SIGUE, para que quien lee desde el móvil vea de qué está hablando.
+  const refsVerse = state?.refsVerse ?? null;
+  const refsTarget: VerseItem | null =
+    refsVerse && state
+      ? {
+          book: state.book,
+          chapter: String(state.chapter),
+          verse: String(refsVerse),
+          text: verses.find((v) => Number(v.verse) === refsVerse)?.text ?? '',
+        }
+      : null;
 
   const renderVerse = ({ item }: { item: BibleVerse }) => {
     const num = Number(item.verse);
@@ -185,9 +211,44 @@ export default function LiveReadingScreen() {
           data={verses}
           keyExtractor={(v) => v.verse}
           renderItem={renderVerse}
+          // `flex: 1` explícito: cuando el anfitrión abre las referencias, el
+          // panel es hermano de esta lista y necesita que ella encoja para
+          // dejarle sitio, en vez de empujarlo fuera de la pantalla.
+          style={{ flex: 1 }}
           contentContainerStyle={{ paddingVertical: 16, paddingBottom: 120 }}
           onScrollToIndexFailed={() => {}}
         />
+      )}
+
+      {/* Referencias que enseña el anfitrión. Ocupan como mucho el 45% de la
+          pantalla: el texto que se está leyendo tiene que seguir a la vista. */}
+      {refsTarget && !ended && token && (
+        <View
+          style={{
+            maxHeight: '45%',
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            backgroundColor: colors.bgSecondary,
+            paddingHorizontal: 16,
+            paddingBottom: 8,
+            marginBottom: 76 + insets.bottom, // deja libre la barra inferior
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10 }}>
+            <Ionicons name="git-network-outline" size={16} color={colors.accent} />
+            <Text style={{ color: colors.textPrimary, fontSize: 13, fontWeight: '700' }}>
+              Referencias · {refsTarget.book} {refsTarget.chapter}:{refsTarget.verse}
+            </Text>
+          </View>
+          <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
+            <CrossRefsList
+              verse={refsTarget}
+              token={token}
+              version={state?.version ?? 'RV1909'}
+              colors={colors}
+            />
+          </ScrollView>
+        </View>
       )}
 
       {/* Amenes flotantes */}

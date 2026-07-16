@@ -37,6 +37,10 @@ interface ReadingSession {
   chapter: string;
   version: string;
   currentVerse: number;
+  // Versículo cuyas referencias cruzadas está enseñando el anfitrión al grupo
+  // (null = panel cerrado). Vive en la sesión, no solo en el evento, para que
+  // quien entre a mitad del estudio vea lo mismo que los demás.
+  refsVerse: number | null;
   participants: Map<string, ReadingParticipant>;
 }
 const readingSessions = new Map<string, ReadingSession>();
@@ -54,7 +58,11 @@ function readingSummary(s: ReadingSession) {
   };
 }
 function readingState(s: ReadingSession) {
-  return { ...readingSummary(s), participants: [...s.participants.values()] };
+  return {
+    ...readingSummary(s),
+    refsVerse: s.refsVerse,
+    participants: [...s.participants.values()],
+  };
 }
 
 // Quita a un usuario de la sesión de su grupo; si era el anfitrión o queda vacía,
@@ -936,6 +944,7 @@ export function setupSocketHandlers(io: Server) {
           chapter: String(chapter),
           version: data.version || 'RV1909',
           currentVerse: 1,
+          refsVerse: null,
           participants: new Map([[userId, participant]]),
         };
         readingSessions.set(groupId, s);
@@ -971,6 +980,31 @@ export function setupSocketHandlers(io: Server) {
       if (!Number.isFinite(verse) || verse < 1) return;
       s.currentVerse = verse;
       io.to(data.groupId).emit('reading:verse', { groupId: data.groupId, verse });
+
+      // Con el panel de referencias abierto, éstas SIGUEN al versículo que se
+      // está leyendo: el anfitrión lo abre una vez y a partir de ahí cada
+      // versículo trae las suyas sin que tenga que pedirlas de nuevo. Se decide
+      // aquí (y no en cada cliente) para que el grupo entero vea lo mismo,
+      // incluidos los que siguen la lectura desde la app.
+      if (s.refsVerse !== null) {
+        s.refsVerse = verse;
+        io.to(data.groupId).emit('reading:refs', { groupId: data.groupId, verse });
+      }
+    });
+
+    // El anfitrión enseña al grupo las referencias cruzadas de un versículo
+    // (`verse: null` las cierra). Solo él: si cualquiera pudiera cambiarlas,
+    // dos personas se pelearían por la pantalla en mitad de una explicación.
+    //
+    // Solo viaja el NÚMERO del versículo: cada cliente pide las referencias a
+    // /bible como ya hacía, y las pinta en la versión que esté leyendo.
+    socket.on('reading:refs', (data: { groupId: string; verse: number | null }) => {
+      const s = readingSessions.get(data.groupId);
+      if (!s || s.hostId !== userId) return;
+      const verse = data.verse === null ? null : Number(data.verse);
+      if (verse !== null && (!Number.isFinite(verse) || verse < 1)) return;
+      s.refsVerse = verse;
+      io.to(data.groupId).emit('reading:refs', { groupId: data.groupId, verse });
     });
 
     // "Amén" — reacción transitoria (no se guarda; solo un destello en vivo).
