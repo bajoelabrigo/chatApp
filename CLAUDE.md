@@ -458,6 +458,37 @@ Hasta 2026-07-14 el feed de alguien con sesión se limitaba a `[él + sus amigos
 - **La clave de caché es `["posts", scope]`**, así que todo lo que actualiza el feed usa `setQueriesData({ queryKey: ["posts"] })` (prefijo), NO `setQueryData(["posts"])`, que ya no encaja con nada y sería un no-op silencioso: comentarios, reacciones, shares y el socket `newPost` dejarían de verse en vivo.
 - Realidad de los datos (2026-07-14): 509 usuarios registrados, **53 han publicado alguna vez** y solo 22 en el último mes. Enseñar "40 personas" en la portada no es cuestión de ordenar mejor — ese contenido no existe. Por eso la tira `SuggestedPeopleStrip` (perfiles de `/users/suggestions`, ya cacheados por `usePost`) se intercala tras el 3er post: es lo que trae caras nuevas de los otros ~456 usuarios que nunca publicaron.
 
+## Tarjeta bíblica de un post — un pasaje, no un versículo
+
+`post.linked` con `type: 'bible'` guarda **`verses: [{book, chapter, verse, text}]`** (hasta 20). `title` es la referencia del pasaje ya formateada ("Juan 3:16-18", "Juan 3:16, 18", "Juan 3:16; Salmos 23:1") y `text` el pasaje en texto plano: los dos siguen ahí porque **los posts publicados antes solo tienen eso** (y son lo que leen las vistas previas). Al pintar, `BibleLinkedCard` cae a `text` si no hay `verses`.
+
+- **La referencia la calcula el SERVIDOR**, nunca el cliente: `backend/utils/biblePassage.js` (`normalizeVerses` + `passageReference` + `passageText`), **espejado** en `frontend/src/lib/biblePassage.js` — al tocar las reglas, editar los dos. `normalizeVerses` ordena los versículos dentro de cada capítulo: se eligen tocándolos y en cualquier orden que se toquen "16, 17" se lee igual. El editor DEBE pasar por el mismo `normalizeVerses` o la previa lista los versículos en un orden y el post publicado en otro.
+- **Desplegar el backend ANTES que la web** (misma trampa que los tipos de mensaje nuevos): con el `createPost` viejo, `linked.verses` se ignora, `linked.book` es `undefined` → no se arma la tarjeta y un post que solo lleve el pasaje se rechaza con 400 "post vacío".
+- **La tarjeta es un solo componente**: `components/bible/BibleLinkedCard.jsx` — feed (`Posts.jsx`), detalle (`PostDetailModal.jsx`) y la previa del editor (`PostCreation.jsx`). Antes el diseño estaba copiado en los dos primeros y la previa era un tercero distinto: lo que veías al escribir no era lo que se publicaba.
+- El toggle "Tarjeta" de `BibleVerseModal` nace **apagado** (insertar texto es lo que espera quien abre la Biblia mientras escribe). Solo nace encendido desde "Añadir otro versículo", que ya presupone la tarjeta.
+
+## Acciones de un versículo — `useVerseActions`
+
+Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, publicar, enlace, resaltar, etiquetas, imagen, referencias cruzadas, memorizar, orar) + sus modales vive en `frontend/src/components/bible/useVerseActions.jsx`, no en `BibleDetail`. Quien muestre versículos monta el hook, pinta `modals` y llama a `openVerse({book, chapter, verse, text, ctx})`. Lo usan la página de Biblia y la lectura en vivo (`LiveReadingModal`, botón ⋯ por versículo; ahí el anfitrión conserva tocar-para-avanzar).
+
+- Los favoritos/resaltados/notas **son estado del hook**: tenerlos duplicados fuera hacía que marcar un favorito desde la hoja no repintara la lista de al lado.
+- `onGoToReference` es opcional, pero **el hook siempre resuelve un destino** (si no se lo pasan, navega a `/bible?ref=…`): `CrossRefsModal` lo invoca sin comprobar que exista, y una referencia cruzada SIEMPRE lleva a otro pasaje.
+- Los modales van **dentro** del overlay que los usa (hijos ⇒ apilan encima sin pelearse con el z-index).
+
+## Seminario — una clase puede repartir varios materiales
+
+`seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
+
+## Botones de PayPal — el contenedor SIEMPRE con `isolate`
+
+Los PayPal Buttons del SDK meten hijos con `z-index: 100` y `300`, y su propio contenedor (`.paypal-buttons`) es `position: relative` con `z-index: auto` — o sea que **NO crea contexto de apilamiento**. Esos 100/300 acaban compitiendo en la raíz de la página y le pasan por encima al navbar (`sticky z-30`) y al sidebar del móvil (`z-50`).
+
+El arreglo es `isolate` (`isolation: isolate`) en el div donde se renderizan (`OfferingPayPal`, `PaypalButton`): encierra esos z-index en su propia caja sin tocar el layout. **No subir el z-index del navbar**: PayPal puede cambiar esos números cuando quiera y volveríamos a la carrera. Donde los botones ya viven dentro de un modal (`MaterialCheckout`, `fixed z-[100]`) no hace falta: el modal ya es un contexto de apilamiento.
+
+## Recortar texto de Quill ("Ver más") — `overflow` va inline
+
+`line-clamp-3` sobre un `.ql-editor` (descripción de un material, p. ej.) recorta a 3 líneas pero **deja barra de scroll dentro**: `quill.snow.css` trae `overflow-y: auto` y, al ser CSS **sin capa**, le gana a las utilidades de Tailwind v4 (que viven en `@layer utilities`) por mucho que se ordenen los imports. El `overflow: hidden` tiene que ir en `style` inline. Sin degradado de desvanecido: tendría que fundirse al color real del fondo (base-**200** en la página de materiales, otro en el tema oscuro) y cualquier fallo se ve como una mancha.
+
 ## Posts (`holy_app`) — el editor vacío no es una cadena vacía
 
 El contenido de un post es HTML de Quill: un editor vacío devuelve `<p><br></p>`, así que `content.trim()` **nunca** detecta un post en blanco (así se colaban posts vacíos). Usar `hasVisibleText()` — espejo en `frontend/src/lib/postContent.js` y `backend/utils/postContent.js` — que quita etiquetas y `&nbsp;`. Validar en cliente (deshabilitar el botón) **y** en servidor (`createPost`/`updatePost` → 400). Quitar etiquetas es seguro mientras el editor no admita `<img>`/`<iframe>` (ver formatos de `PostEditor.jsx`).
