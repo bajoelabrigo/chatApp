@@ -62,6 +62,42 @@ export type AlignId = 'left' | 'center' | 'right';
 
 export const fontById = (id: string) => FONTS.find((f) => f.id === id) || FONTS[0];
 
+// ── Color de la palabra resaltada ─────────────────────────────
+// Espejo de `highlightColor` en posterLayout.js de la web.
+//
+// NO vale el acento del tema sin más: está pensado para la línea y la
+// referencia, que van sueltas, pero dentro de un párrafo de texto blanco hay
+// acentos que no se distinguen — "amanecer", "lavanda" y "coral" lo tienen en
+// #ffffff (el MISMO que el texto) y "cielo", "bosque" y "menta" casi. Sobre
+// foto pasa igual: el acento se vuelve blanco. Se mide el contraste y, si no
+// llega, se usa un respaldo que sí recorta.
+export const HIGHLIGHT_LIGHT = '#ffd166';
+export const HIGHLIGHT_DARK = '#b3701f';
+
+function luminance(hex: string) {
+  const m = String(hex).trim().match(/^#?([0-9a-f]{6}|[0-9a-f]{3})$/i);
+  if (!m) return 1;
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const canal = (v: string) => {
+    const c = parseInt(v, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * canal(h.slice(0, 2)) + 0.7152 * canal(h.slice(2, 4)) + 0.0722 * canal(h.slice(4, 6));
+}
+
+const contraste = (a: string, b: string) => {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+
+export function highlightColor(t: { text: string; accent: string }, onPhoto: boolean) {
+  const respaldo = luminance(t.text) > 0.5 ? HIGHLIGHT_LIGHT : HIGHLIGHT_DARK;
+  if (onPhoto) return respaldo;
+  return contraste(t.accent, t.text) >= 1.35 ? t.accent : respaldo;
+}
+
 // Carga las fuentes propias. Se llama al ABRIR la hoja y no al arrancar la app:
 // son 850 KB que solo necesita quien comparte una imagen.
 //

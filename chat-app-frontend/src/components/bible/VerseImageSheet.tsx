@@ -30,6 +30,7 @@ import {
   normalizeWord,
   loadPosterFonts,
   type AlignId,
+  highlightColor,
   type FormatDef,
 } from '../../lib/versePosterLayout';
 
@@ -117,6 +118,9 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   const font = fontById(fontId);
   const usingPhoto = bgMode === 'photo' && !!photoUrl;
   const t = usingPhoto ? PHOTO_THEME : theme;
+  // El resaltado no usa el acento sin más: hay temas cuyo acento es blanco o
+  // casi y dentro del texto no se distinguiría (ver highlightColor).
+  const hiColor = highlightColor(t, usingPhoto);
 
   const originalText = verse.text || '';
   const text = customText?.trim() ? customText : originalText;
@@ -329,7 +333,7 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
         {highlight
           ? String(text).split(/(\s+)/).map((trozo, i) =>
               normalizeWord(trozo) === normalizeWord(highlight) && !/^\s+$/.test(trozo) ? (
-                <Text key={i} style={{ color: t.accent }}>{trozo}</Text>
+                <Text key={i} style={{ color: hiColor }}>{trozo}</Text>
               ) : (
                 trozo
               )
