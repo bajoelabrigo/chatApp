@@ -24,6 +24,10 @@ export interface AuthUser {
   avatar?: string;
   bio?: string;
   authProvider?: 'google' | 'email';
+  // Sin verificar ya no impide entrar (antes el login respondía 403): la app
+  // deja pasar y enseña un aviso en Ajustes con un botón para reenviar el
+  // código. Puede faltar en sesiones guardadas por versiones anteriores.
+  emailVerified?: boolean;
   notificationSettings?: NotificationSettings;
   privacySettings?: PrivacySettings;
 }

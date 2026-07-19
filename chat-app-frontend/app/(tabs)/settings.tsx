@@ -20,6 +20,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/useAuthStore';
+import { EmailNotVerifiedBanner } from '../../src/components/EmailNotVerifiedBanner';
 import { useChatsStore } from '../../src/store/useChatsStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import { signOutGoogle } from '../../src/services/googleSignIn';
@@ -391,6 +392,8 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }} edges={['bottom']}>
       <ScrollView showsVerticalScrollIndicator={false}>
+
+        <EmailNotVerifiedBanner />
 
         {/* ── Perfil ── */}
         <TouchableOpacity

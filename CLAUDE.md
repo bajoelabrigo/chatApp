@@ -479,6 +479,18 @@ Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, p
 
 `seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
 
+## Correo sin verificar — no bloquea nada (2026-07-18)
+
+Antes las dos apps hacían cosas opuestas con el mismo usuario: la web lo dejaba entrar sin más y la app respondía **403** en el login. Quien se registraba por la web e ignoraba el correo quedaba fuera de la app **para siempre y sin explicación**. Se unificó por lo blando: **verificar ya no es requisito en ninguna de las dos.**
+
+- **App**: se quitó el bloqueo de `login` (`chat-app-backend/src/controllers/authController.ts`). Ojo: ese bloque además **reenviaba el código en CADA intento de login** — un correo por intento.
+- `login`, `verifyEmail` y `googleSignIn` devuelven ahora `emailVerified` dentro de `user`; se guarda en `AuthUser` del store.
+- **El aviso está duplicado y hay que editar los dos**: `holy_app/frontend/src/components/EmailNotVerifiedNotice.jsx` (en el perfil) y `chat-app-frontend/src/components/EmailNotVerifiedBanner.tsx` (en Ajustes).
+- **El aviso no puede amenazar con consecuencias que no existen.** El texto anterior decía "necesitas verificarlo para entrar en la app móvil" y dejó de ser cierto en cuanto se quitó el 403. Ahora solo explica para qué sirve (recuperar la cuenta) y ofrece reenviar.
+- **El banner de la app solo se muestra si `emailVerified === false`**, nunca con `undefined`: las sesiones guardadas por APKs anteriores no traen el campo y `loadToken` restaura el usuario de SecureStore **sin volver a pedir `/auth/me`** — o sea que el campo solo llega al hacer login de nuevo.
+- En la web, el middleware `verifiedOnly` existe pero **no está aplicado a ninguna ruta**; no confundir su existencia con que haya restricciones.
+- Se borró `EmailVerificationCard.jsx` (ocupaba lo alto del feed, estaba en inglés, y su botón "Deny" usaba `useState(true)` → **reaparecía en cada recarga**). Se le mostraba a 3 usuarios de 520.
+
 ## Google One Tap (`holy_app`) — el recuadro que detecta tu cuenta
 
 `components/auth/GoogleOneTap.jsx`, montado en `Layout.jsx`. No pinta nada: dispara el prompt de Google (`useGoogleOneTapLogin`) y al aceptar llama al mismo `loginWithGoogle` que el botón, que **ya crea la cuenta si no existe** — de ahí la "inscripción automática".

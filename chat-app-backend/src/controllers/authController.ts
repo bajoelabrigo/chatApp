@@ -61,7 +61,7 @@ export async function googleSignIn(req: Request, res: Response): Promise<void> {
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider, emailVerified: user.emailVerified } });
   } catch {
     res.status(401).json({ error: 'No se pudo autenticar con Google' });
   }
@@ -138,7 +138,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider, emailVerified: user.emailVerified } });
   } catch {
     res.status(500).json({ error: 'Error verificando el código' });
   }
@@ -179,22 +179,20 @@ export async function login(req: Request, res: Response): Promise<void> {
     const match = await bcrypt.compare(password, user.password);
     if (!match) { res.status(401).json({ error: 'Correo o contraseña incorrectos' }); return; }
 
-    if (!user.emailVerified) {
-      const code = randomCode();
-      user.verificationCode = code;
-      user.verificationCodeExpiry = codeExpiry();
-      await user.save();
-      await sendVerificationCode(user.email, user.name, code);
-      res.status(403).json({ error: 'Cuenta no verificada. Te enviamos un nuevo código.', needsVerification: true, email: user.email });
-      return;
-    }
-
+    // Sin verificar YA NO bloquea el acceso. Antes esto respondía 403 y la app
+    // no dejaba pasar, mientras que en la web el mismo usuario entraba sin
+    // problema: quien se registraba por la web e ignoraba el correo se quedaba
+    // fuera de la app para siempre sin saber por qué. Ahora entra y la app le
+    // muestra un aviso con un botón para reenviar el código.
+    //
+    // Tampoco se reenvía el código aquí: se hacía en CADA intento de login, o
+    // sea un correo por intento. Lo pide el usuario desde el aviso.
     user.lastLogin = new Date();
     await user.save();
 
     const token = generateAccessToken(user.id, user.email);
     const refreshToken = generateRefreshToken(user.id);
-    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider } });
+    res.json({ token, refreshToken, user: { id: user.id, email: user.email, name: user.name, avatar: user.avatar, authProvider: user.authProvider, emailVerified: user.emailVerified } });
   } catch {
     res.status(500).json({ error: 'Error iniciando sesión' });
   }
