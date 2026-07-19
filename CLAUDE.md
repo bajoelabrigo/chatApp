@@ -479,6 +479,24 @@ Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, p
 
 `seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
 
+## Póster de versículos (compartir como imagen) — dos motores, un diseño
+
+La imagen del versículo se genera **dos veces con tecnologías distintas** y hay que tocar las dos:
+- **Web**: Canvas 2D (`holy_app/frontend/src/lib/versePoster.js`) + una vista previa en DOM (el componente `Poster` de `VerseImageModal.jsx`). Son DOS dibujantes: si una medida se cambia en uno solo, **la previa miente** y el usuario descarga algo distinto de lo que vio.
+- **App**: una vista real capturada con `react-native-view-shot` (`chat-app-frontend/src/components/bible/VerseImageSheet.tsx`).
+
+Las medidas y las listas (formatos, tipografías, plantillas) viven en **`posterLayout.js`** (web) y su espejo **`versePosterLayout.ts`** (app). Nada de números a mano en los dibujantes.
+
+- **Todo se calcula con una escala del lado corto**, no en píxeles fijos. Estaba calibrado para un lienzo de 1080 y en el formato de proyector (1920) la referencia salía diminuta.
+- **El póster que se CAPTURA nunca lleva `transform`.** En la app, la previa encogida es una copia; el que se captura va a tamaño completo fuera de pantalla (`left: -10000`) con `collapsable={false}`. Con el transform en la vista capturada, la imagen compartida sale encogida. Como capturar una vista no visible depende del dispositivo, hay respaldo: si falla, se captura la previa.
+- **Fuentes**: mismas tres (OFL) en los dos, pero la web usa **woff2** (el service worker precachea woff2 y NO ttf) y React Native necesita **ttf** (no lee woff2). Se convierten con `wawoff2` (`compress`/`decompress`). En la app se cargan con `Font.loadAsync` al abrir la hoja — por eso llegan por `eas update` sin recompilar.
+- **Antes de dibujar hay que esperar a la fuente CONCRETA** (`document.fonts.load(...)`), no solo a `document.fonts.ready`: con `font-display: swap` la fuente puede seguir en vuelo, el canvas pinta una vez y no reintenta → la imagen sale con la de reserva mientras la previa (HTML) sí se actualiza.
+- **Cada familia ocupa distinto al mismo tamaño en px**: Caveat tiene la altura de x mucho menor y se veía enclenque. Se compensa con `sizeScale`/`lineScale` por fuente, no tocando la curva de tamaños (que es común).
+- **El versículo se dibuja con `textAlign: "left"` y la x a mano.** Es lo que permite alinear el bloque y pintar una palabra de otro color a la vez. Ojo: hay que **restaurar el `textAlign`** para la referencia y la marca, que se dibujan después. El pie va siempre centrado.
+- **El color del resaltado NO es el acento del tema.** El acento sirve para la línea y la referencia (elementos sueltos); dentro del párrafo, varios temas lo tienen en `#ffffff` —el mismo que el texto— o casi. Se mide el contraste WCAG (`highlightColor`) y se cae a un respaldo si no llega a 1.35. Sobre foto pasa siempre, porque ahí el acento es blanco.
+- **El velo de las fotos se mide** (`veilFor`): luminancia de la **banda central** —el promedio de la foto entera engaña— en un lienzo de 32 px. Fijo, una foto oscura quedaba en barro y un cielo se comía el texto. En la app no está: RN no puede leer los píxeles sin otra dependencia.
+- **Los estilos guardados y la firma** están en `User.versePresets` / `User.verseBrand` vía `GET/PUT /users/verse-config` del **backend de la web**. Las rutas van ANTES de la dinámica `/:username` o se las come. La app **no los tiene**: usa el chat-backend y harían falta endpoints equivalentes (los campos ya están en la base compartida).
+
 ## Correo sin verificar — no bloquea nada (2026-07-18)
 
 Antes las dos apps hacían cosas opuestas con el mismo usuario: la web lo dejaba entrar sin más y la app respondía **403** en el login. Quien se registraba por la web e ignoraba el correo quedaba fuera de la app **para siempre y sin explicación**. Se unificó por lo blando: **verificar ya no es requisito en ninguna de las dos.**
