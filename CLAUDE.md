@@ -479,6 +479,25 @@ Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, p
 
 `seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
 
+## Materiales no listados — enlace privado con clave
+
+Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no hay enum `visibility`; los docs viejos solo tienen `published`):
+
+| Estado | `published` / `unlisted` | Qué hace |
+|---|---|---|
+| Público | `true` / `false` | Catálogo + email + push + post en el feed |
+| No listado | `true` / `true` | Fuera de catálogo, popup, difusión y feed. Solo por enlace `?k=<accessKey>` |
+| Borrador | `false` / — | Oculto para todos |
+
+- **Borrador NO genera enlace.** Era la duda que originó esto: los endpoints públicos filtran `published: true`, así que el enlace de un borrador da 404 hasta para su autor. Para repartir algo en privado hay que usar "no listado", no borrador.
+- **`accessKey` es `select: false`** — hay que pedirla con `.select("+accessKey")` en los 4 sitios que la necesitan (`getMaterialBySlug`, `purchaseMaterial`, `adminListMaterials`, `adminGetMaterial`, `updateMaterial`, `regenerateMaterialKey`). Se compara con `crypto.timingSafeEqual`.
+- **Sin clave se responde 404, no 403**: un 403 confirmaría que el slug existe.
+- **La clave se BORRA al dejar de ser no listado**, así que volver a no listado reparte un enlace nuevo en vez de resucitar el viejo. Regenerarla a mano: `POST /materials/:id/regenerate-key`.
+- **Hay que reenviar la clave DOS veces**: al cargar la página (`?k=` → `fetchMaterialBySlug(slug, key)`) y al descargar (`accessKey` en el body de `purchaseMaterial`). Olvidar la segunda deja una página que se ve pero de la que no se puede descargar.
+- **Un no listado no tiene vista previa de WhatsApp/FB** a propósito: `/api/share/material/:slug` serviría portada y título en una URL sin clave. `MaterialPage`/`MaterialsDashboard` pasan `socialUrl` vacío en ese caso y `ShareModal` cae a `url` (`socialUrl || url`).
+- **Cambiar el título cambia el slug y rompe el enlace ya repartido** (`uniqueSlug` en `updateMaterial`). Pasaba ya con los públicos, pero aquí duele porque ese enlace es el único acceso.
+- De paso se tapó una fuga vieja: las rutas OG de `shareRoutes.js` consultaban `Material.findOne({ slug })` **sin filtrar `published`** → los bots (y cualquiera pegando `/api/share/material/<slug>`) veían título, descripción y portada de los borradores.
+
 ## Botones de PayPal — el contenedor SIEMPRE con `isolate`
 
 Los PayPal Buttons del SDK meten hijos con `z-index: 100` y `300`, y su propio contenedor (`.paypal-buttons`) es `position: relative` con `z-index: auto` — o sea que **NO crea contexto de apilamiento**. Esos 100/300 acaban compitiendo en la raíz de la página y le pasan por encima al navbar (`sticky z-30`) y al sidebar del móvil (`z-50`).
