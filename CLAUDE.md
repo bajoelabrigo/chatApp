@@ -479,6 +479,17 @@ Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, p
 
 `seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
 
+## Google One Tap (`holy_app`) — el recuadro que detecta tu cuenta
+
+`components/auth/GoogleOneTap.jsx`, montado en `Layout.jsx`. No pinta nada: dispara el prompt de Google (`useGoogleOneTapLogin`) y al aceptar llama al mismo `loginWithGoogle` que el botón, que **ya crea la cuenta si no existe** — de ahí la "inscripción automática".
+
+- **`use_fedcm_for_prompt: true` es obligatorio.** Chrome ya solo permite One Tap por FedCM (murió con las cookies de terceros); sin esa opción el prompt no aparece y no hay error visible.
+- **`auto_select: false` a propósito**: con auto_select, quien ya entró alguna vez queda dentro sin tocar nada. Se quiere un clic deliberado.
+- **Tres guardas para no molestar a quien ya tiene sesión**, y hacen falta las tres: `user` de redux (no basta `isLoggedIn`, puede quedar en true con user null), la caché `currentUser` de localStorage (es lo que usa el socket antes de que redux se hidrate; el logout la borra) y un retardo de 2,5 s (hasta que `getLoginStatus` conteste, un usuario con sesión se ve como anónimo y el prompt asomaría y desaparecería).
+- **`cancel_on_tap_outside: false`**: en móvil se descarta sin querer y Google castiga los descartes con un enfriamiento de horas.
+- **Cómo probarlo**: navegador con sesión de Google abierta, en incógnito y sin haber entrado a la web. Si no hay cuenta de Google en el navegador, la consola dice `Not signed in with the identity provider` + `[GSI_LOGGER]: FedCM get() rejects` — eso significa que el camino llega bien a Google, no que esté roto.
+- `components/auth/OAuth.jsx` es un botón "Continuar con Google" **sin onClick, no importado en ningún sitio** — código muerto, no confundirlo con el login real (`GoogleLogin` en `LoginForm`/`SignUpForm`).
+
 ## Materiales no listados — enlace privado con clave
 
 Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no hay enum `visibility`; los docs viejos solo tienen `published`):
