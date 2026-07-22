@@ -13,10 +13,30 @@ import {
 import { Offering } from '../models/Offering';
 import { User } from '../models/User';
 
+// Planes de suscripción mensual (montos 5/10/20/50/100/200). Cada uno es un PLAN
+// de PayPal distinto; su ID viene por variable de entorno.
+// Nivel de socio: TODAS las suscripciones hacen socio (insignia), pero el acceso
+// a los materiales gratis es solo a partir de $20 (SOCIO_MATERIAL_MIN). Los tiers
+// de $5 y $10 dan insignia únicamente.
 const SUBSCRIPTION_PLANS: Record<string, string | undefined> = {
-  sub_5:  process.env.PAYPAL_PLAN_SUB_5_ID,
-  sub_10: process.env.PAYPAL_PLAN_SUB_10_ID,
-  sub_20: process.env.PAYPAL_PLAN_SUB_20_ID,
+  sub_5:   process.env.PAYPAL_PLAN_SUB_5_ID,
+  sub_10:  process.env.PAYPAL_PLAN_SUB_10_ID,
+  sub_20:  process.env.PAYPAL_PLAN_SUB_20_ID,
+  sub_50:  process.env.PAYPAL_PLAN_SUB_50_ID,
+  sub_100: process.env.PAYPAL_PLAN_SUB_100_ID,
+  sub_200: process.env.PAYPAL_PLAN_SUB_200_ID,
+};
+
+// Monto en USD de cada tier. Se guarda en la Offering al crear la suscripción y
+// sirve de respaldo fiable para el webhook de activación (que puede llegar sin
+// `last_payment` y no sabría el nivel del socio de otra forma).
+const TIER_AMOUNTS: Record<string, number> = {
+  sub_5: 5,
+  sub_10: 10,
+  sub_20: 20,
+  sub_50: 50,
+  sub_100: 100,
+  sub_200: 200,
 };
 
 // ── Simple HTML pages shown inside expo-web-browser ──────────
@@ -194,7 +214,8 @@ export async function createSubscriptionCheckout(req: Request, res: Response) {
       userId,
       paypalSubscriptionId: subscriptionId,
       type: 'subscription',
-      amount: 0,
+      // Guardamos el monto del tier (en centavos) como respaldo para el webhook.
+      amount: (TIER_AMOUNTS[tier] || 0) * 100,
       status: 'pending',
     });
 

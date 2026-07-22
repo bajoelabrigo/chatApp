@@ -107,7 +107,7 @@ async function saveCallMessage(
       lastMessage: message._id,
       lastMessageAt: message.createdAt,
     });
-    const populated = await message.populate('senderId', 'name avatar');
+    const populated = await message.populate('senderId', 'name avatar isSocio');
     io.to(conversationId).emit('message:new', populated);
   } catch (err) {
     console.error('Error saving call message:', err);
@@ -367,7 +367,7 @@ export function setupSocketHandlers(io: Server) {
           $pull: { hiddenBy: { $in: conversation.participants } },
         });
 
-        const populated = await message.populate('senderId', 'name avatar');
+        const populated = await message.populate('senderId', 'name avatar isSocio');
 
         if (blockedBySomeone) {
           // Only echo back to sender — recipient never sees it
@@ -395,7 +395,7 @@ export function setupSocketHandlers(io: Server) {
         );
         if (needConv.size > 0) {
           const fullConv = await Conversation.findById(conversationId)
-            .populate('participants', 'name avatar email lastSeen showLastSeen')
+            .populate('participants', 'name avatar email lastSeen showLastSeen isSocio')
             .lean();
           if (fullConv) {
             for (const pid of needConv) {

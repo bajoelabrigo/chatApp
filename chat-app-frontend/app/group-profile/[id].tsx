@@ -43,6 +43,7 @@ import {
 } from '../../src/services/conversationService';
 import { uploadFile } from '../../src/services/uploadService';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
+import { SocioTag } from '../../src/components/SocioTag';
 
 // Cuántos miembros se muestran en el panel antes del botón "Ver todos"
 // (idéntico a la web).
@@ -702,6 +703,7 @@ export default function GroupProfileScreen() {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Text style={{ color: colors.textPrimary, fontWeight: '500' }}>{member.name}</Text>
+                    {member.isSocio && <SocioTag showText={false} size={13} />}
                     {isMe && <Text style={{ color: colors.textMuted, fontSize: 12 }}>(tú)</Text>}
                   </View>
                   <Text style={{ color: colors.textMuted, fontSize: 12 }}>{member.email}</Text>
@@ -1086,6 +1088,7 @@ export default function GroupProfileScreen() {
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Text style={{ color: colors.textPrimary, fontWeight: '500' }}>{member.name}</Text>
+                      {member.isSocio && <SocioTag showText={false} size={13} />}
                       {isMe && <Text style={{ color: colors.textMuted, fontSize: 12 }}>(tú)</Text>}
                     </View>
                     {!!member.email && <Text style={{ color: colors.textMuted, fontSize: 12 }}>{member.email}</Text>}

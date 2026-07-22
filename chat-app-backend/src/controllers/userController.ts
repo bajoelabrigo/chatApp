@@ -217,7 +217,7 @@ export async function getUserProfile(req: AuthRequest, res: Response): Promise<v
     const myId = req.userId!;
     const { userId } = req.params;
 
-    const targetUser = await User.findById(userId).select('name email avatar bio role').lean();
+    const targetUser = await User.findById(userId).select('name email avatar bio role isSocio').lean();
     if (!targetUser) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
 
     const sharedGroups = await Conversation.find({
@@ -235,6 +235,7 @@ export async function getUserProfile(req: AuthRequest, res: Response): Promise<v
       avatar: targetUser.avatar,
       bio: targetUser.bio ?? '',
       role: (targetUser as any).role ?? 'user',
+      isSocio: !!(targetUser as any).isSocio,
       sharedGroups: sharedGroups.map((g) => ({
         _id: g._id,
         groupName: g.groupName,
@@ -245,6 +246,36 @@ export async function getUserProfile(req: AuthRequest, res: Response): Promise<v
     });
   } catch {
     res.status(500).json({ error: 'Error obteniendo perfil' });
+  }
+}
+
+// GET /users/me/socio-welcome — ¿hay un modal de bienvenida socio pendiente?
+// El móvil restaura el usuario de SecureStore sin refrescar, así que consulta
+// esto al arrancar para saber si mostrar el modal.
+export async function getSocioWelcome(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const user = await User.findById(req.userId!)
+      .select('name isSocio socioWelcomePending socioAmount')
+      .lean();
+    const u = user as any;
+    res.json({
+      pending: !!u?.socioWelcomePending && !!u?.isSocio,
+      name: u?.name ?? '',
+      // >= $20 desbloquea materiales; el modal muestra un texto u otro.
+      fullAccess: (Number(u?.socioAmount) || 0) >= 20,
+    });
+  } catch {
+    res.json({ pending: false, name: '', fullAccess: false });
+  }
+}
+
+// POST /users/me/socio-welcome/seen — apaga el flag tras mostrar el modal.
+export async function markSocioWelcomeSeen(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    await User.findByIdAndUpdate(req.userId!, { $set: { socioWelcomePending: false } });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Error actualizando estado' });
   }
 }
 

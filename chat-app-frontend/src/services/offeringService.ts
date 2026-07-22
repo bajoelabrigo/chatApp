@@ -20,7 +20,7 @@ export interface OfferingStatus {
   totalAmountCents: number;
 }
 
-export type SubscriptionTier = 'sub_5' | 'sub_10' | 'sub_20';
+export type SubscriptionTier = 'sub_5' | 'sub_10' | 'sub_20' | 'sub_50' | 'sub_100' | 'sub_200';
 
 export async function createOrderApi(amountUSD: number): Promise<OfferingCheckout> {
   const { data } = await api.post<OfferingCheckout>('/offerings/order', { amount: amountUSD });

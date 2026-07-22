@@ -12,6 +12,7 @@ import { useChatsStore } from '../../src/store/useChatsStore';
 import { useTheme } from '../../src/context/ThemeContext';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 import ShareContactSheet from '../../src/components/ShareContactSheet';
+import { SocioTag } from '../../src/components/SocioTag';
 import {
   getUserProfile, reportUser, apiToggleFavorite, apiToggleBlock,
   apiToggleArchive, apiTogglePin, apiToggleMute, addGroupMembers, type ContactProfile,
@@ -332,6 +333,7 @@ export default function ContactInfoScreen() {
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}>
               <Text style={{ color: colors.textPrimary, fontSize: 24, fontWeight: 'bold' }}>{displayName}</Text>
+              {profile?.isSocio && <SocioTag size={15} />}
               {nickname ? (
                 <Text style={{ color: colors.textMuted, fontSize: 14 }}>(apodo)</Text>
               ) : null}

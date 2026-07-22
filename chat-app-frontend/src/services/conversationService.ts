@@ -5,6 +5,7 @@ export interface ChatUser {
   name: string;
   email: string;
   avatar?: string;
+  isSocio?: boolean;
 }
 
 export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'call' | 'contact' | 'poll' | 'bible';
@@ -487,6 +488,7 @@ export interface ContactProfile {
   avatar?: string;
   bio?: string;
   role?: string;
+  isSocio?: boolean;
   sharedGroups: {
     _id: string;
     groupName?: string;

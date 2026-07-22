@@ -30,7 +30,7 @@ export async function getConversations(req: Request, res: Response) {
     }
 
     const conversations = await Conversation.find(query)
-      .populate('participants', 'name avatar email lastSeen showLastSeen')
+      .populate('participants', 'name avatar email lastSeen showLastSeen isSocio')
       .populate({ path: 'lastMessage', populate: { path: 'senderId', select: 'name avatar' } })
       .sort({ lastMessageAt: -1 })
       .lean();
@@ -269,11 +269,11 @@ export async function createOrGetConversation(req: Request, res: Response) {
     // Buscar conversación existente entre ambos
     let conversation = await Conversation.findOne({
       participants: { $all: [userId, targetUserId], $size: 2 },
-    }).populate('participants', 'name avatar email lastSeen showLastSeen');
+    }).populate('participants', 'name avatar email lastSeen showLastSeen isSocio');
 
     if (!conversation) {
       conversation = await Conversation.create({ participants: [userId, targetUserId] });
-      conversation = await conversation.populate('participants', 'name avatar email lastSeen showLastSeen');
+      conversation = await conversation.populate('participants', 'name avatar email lastSeen showLastSeen isSocio');
     }
 
     res.json(conversation);
@@ -308,7 +308,7 @@ export async function getMessages(req: Request, res: Response) {
     if (before) query.createdAt = { $lt: new Date(before as string) };
 
     const messages = await Message.find(query)
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar isSocio')
       .sort({ createdAt: -1 })
       .limit(Number(limit));
 
@@ -368,7 +368,7 @@ export async function searchMessages(req: Request, res: Response) {
 
     const [results, total] = await Promise.all([
       Message.find(filter)
-        .populate('senderId', 'name avatar')
+        .populate('senderId', 'name avatar isSocio')
         .sort({ createdAt: -1 })
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
@@ -526,7 +526,7 @@ export async function searchAllMessages(req: Request, res: Response) {
       deletedFor: { $ne: userId },
       $or: [{ type: 'text', content: rx }, { fileName: rx }],
     })
-      .populate('senderId', 'name avatar')
+      .populate('senderId', 'name avatar isSocio')
       .sort({ createdAt: -1 })
       .limit(limitNum)
       .lean();

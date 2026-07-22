@@ -1,5 +1,26 @@
 import { Offering } from '../models/Offering';
 import { User } from '../models/User';
+import { sendSocioWelcome } from './emailService';
+import { sendExpoPushToUsers } from './pushService';
+import { sendWebPushToUser } from './webPushService';
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://holyholyholy.es';
+
+// Efectos al hacerse SOCIO por suscripción: correo + push (Expo + web). El flag
+// socioWelcomePending (para el modal) ya se marcó en el $set del ascenso.
+async function triggerSocioWelcome(userId: string): Promise<void> {
+  try {
+    const user = await User.findById(userId).select('name email').lean();
+    if (!user?.email) return;
+    await sendSocioWelcome(user.email, user.name || 'amigo', `${FRONTEND_URL}/materiales`);
+  } catch (err) {
+    console.error('[paypalService] socio email error:', err);
+  }
+  const title = '🛡️ ¡Ahora eres Socio!';
+  const body = 'Gracias por tu ofrenda. Ya tienes tu insignia y acceso gratis a más de 100 estudios.';
+  sendExpoPushToUsers([userId], { title, body, data: { type: 'socio' } });
+  sendWebPushToUser(userId, { title, body, url: '/materiales', tag: 'socio' });
+}
 
 const PAYPAL_BASE =
   process.env.PAYPAL_MODE === 'live'
@@ -182,12 +203,23 @@ export async function handleCaptureCompleted(event: any): Promise<void> {
   }
 }
 
+// Umbral de ofrenda mensual que da acceso a los materiales gratis. Los tiers por
+// debajo ($5, $10) hacen socio (insignia) pero NO desbloquean materiales.
+// Espejo de SOCIO_MATERIAL_MIN en holy_app/backend/controllers/userController.js.
+const SOCIO_MATERIAL_MIN = 20;
+
 export async function handleSubscriptionActivated(event: any): Promise<void> {
   const sub = event.resource;
   const userId = sub?.custom_id;
-  const amountCents = Math.round(
+  const paidCents = Math.round(
     parseFloat(sub?.billing_info?.last_payment?.amount?.value ?? '0') * 100
   );
+
+  // El webhook de activación puede llegar sin `last_payment`; en ese caso usamos
+  // el monto del tier que se guardó en la Offering pendiente al crear la
+  // suscripción (así sabemos el nivel real del socio: $5/$10 vs $20+).
+  const existing = await Offering.findOne({ paypalSubscriptionId: sub.id }).lean();
+  const amountCents = paidCents > 0 ? paidCents : (Number((existing as any)?.amount) || 0);
 
   await Offering.findOneAndUpdate(
     { paypalSubscriptionId: sub.id },
@@ -204,9 +236,35 @@ export async function handleSubscriptionActivated(event: any): Promise<void> {
   );
 
   if (userId) {
+    // Al suscribirse a la ofrenda mensual, el usuario se hace SOCIO
+    // automáticamente (insignia). El acceso a materiales gratis solo desde $20
+    // (socioAmount >= SOCIO_MATERIAL_MIN). socioSince solo se establece la
+    // primera vez para no perder la antigüedad al renovar.
+    const before = await User.findById(userId).select('isSocio socioAmount').lean();
+    const wasSocio = !!before?.isSocio;
+    const oldAmount = Number((before as any)?.socioAmount) || 0;
+    // Monto real de la suscripción (NO se fuerza a 20): así un socio de $5/$10
+    // queda con insignia pero sin acceso a materiales.
+    const newAmount = Math.round(amountCents / 100) || 0;
+    const wasFull = wasSocio && oldAmount >= SOCIO_MATERIAL_MIN;
+    const nowFull = newAmount >= SOCIO_MATERIAL_MIN;
+    // La bienvenida (correo/push/modal) solo en el ASCENSO: socio nuevo, o mejora
+    // de <$20 a acceso completo. Nunca en una renovación del mismo nivel.
+    const shouldWelcome = !wasSocio || (!wasFull && nowFull);
     await User.findByIdAndUpdate(userId, {
-      $set: { isActiveSubscriber: true, lastOfferingAt: new Date() },
+      $set: {
+        isActiveSubscriber: true,
+        lastOfferingAt: new Date(),
+        isSocio: true,
+        socioAmount: newAmount,
+        ...(shouldWelcome ? { socioWelcomePending: true } : {}),
+      },
     });
+    await User.updateOne(
+      { _id: userId, socioSince: { $exists: false } },
+      { $set: { socioSince: new Date() } }
+    );
+    if (shouldWelcome) await triggerSocioWelcome(userId);
   }
 }
 
@@ -222,7 +280,11 @@ export async function handleSubscriptionCancelled(event: any): Promise<void> {
   if (userId) {
     const still = await Offering.findOne({ userId, type: 'subscription', status: 'paid' });
     if (!still) {
-      await User.findByIdAndUpdate(userId, { $set: { isActiveSubscriber: false } });
+      // Sin suscripción activa deja de ser socio. (Un socio otorgado a mano por
+      // un admin que nunca se suscribió no entra aquí: no tiene Offering.)
+      await User.findByIdAndUpdate(userId, {
+        $set: { isActiveSubscriber: false, isSocio: false },
+      });
     }
   }
 }

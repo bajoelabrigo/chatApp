@@ -874,15 +874,33 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
 
           <View style={emojiOnly ? {} : { paddingHorizontal: 12, paddingTop: firstUrl && !emojiOnly ? 0 : 8, paddingBottom: 4 }}>
             {!isMine && !emojiOnly && (
-              <Text style={{
-                color: bubbleNameColor(senderColorKey, isDark),
-                fontSize: 12.5,
-                fontWeight: '800',
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
                 marginBottom: item.replyTo && !isDeleted ? 4 : 2,
-                letterSpacing: 0.1,
               }}>
-                {item.senderId.name}
-              </Text>
+                <Text style={{
+                  color: bubbleNameColor(senderColorKey, isDark),
+                  fontSize: 12.5,
+                  fontWeight: '800',
+                  letterSpacing: 0.1,
+                }}>
+                  {item.senderId.name}
+                </Text>
+                {item.senderId.isSocio && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 5 }}>
+                    <Ionicons name="shield-checkmark" size={12} color={colors.accent} />
+                    <Text style={{
+                      color: colors.accent,
+                      fontSize: 10.5,
+                      fontWeight: '700',
+                      marginLeft: 2,
+                    }}>
+                      Socio
+                    </Text>
+                  </View>
+                )}
+              </View>
             )}
             {!emojiOnly && !isDeleted && item.replyTo && (
               <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />

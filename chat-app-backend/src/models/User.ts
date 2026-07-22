@@ -62,6 +62,16 @@ export interface IUser extends Document {
   dismissedNotifications?: { id: string; at: Date }[];
   isActiveSubscriber?: boolean;
   lastOfferingAt?: Date;
+  // Socio: acceso a materiales gratis + insignia junto al nombre. Se activa
+  // manualmente (admin web) o automáticamente al suscribirse a la ofrenda
+  // mensual (ver paypalService.handleSubscriptionActivated). Campo compartido
+  // con la web (misma colección).
+  isSocio?: boolean;
+  socioSince?: Date;
+  // Ofrenda mensual del socio (USD). Desde $20 = materiales gratis; menos = solo insignia.
+  socioAmount?: number;
+  // Modal de bienvenida socio pendiente de mostrar (transición false→true).
+  socioWelcomePending?: boolean;
   createdAt: Date;
   lastLogin: Date;
   // ── Campos espejo para compatibilidad con la web (misma colección) ──
@@ -117,6 +127,10 @@ const UserSchema = new Schema<IUser>(
     dismissedNotifications:[{ id: String, at: Date, _id: false }],
     isActiveSubscriber:    { type: Boolean, default: false },
     lastOfferingAt:        { type: Date },
+    isSocio:               { type: Boolean, default: false },
+    socioSince:            { type: Date },
+    socioAmount:           { type: Number, default: 0 },
+    socioWelcomePending:   { type: Boolean, default: false },
     // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)
     isVerified:            { type: Boolean, default: false },
     profilePicture:        { type: String },

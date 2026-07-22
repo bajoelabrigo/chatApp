@@ -33,6 +33,21 @@ import {
   highlightColor,
   type FormatDef,
 } from '../../lib/versePosterLayout';
+import {
+  tokenize,
+  isSpace,
+  tokenColor,
+  hasStyles,
+  applyStyle,
+  allHave,
+  pruneStyles,
+  boldWeight,
+  tokenSize,
+  WORD_COLORS,
+  WORD_BGS,
+  WORD_SIZES,
+  type VerseStyles,
+} from '../../lib/verseRichText';
 
 // Compartir un versículo como imagen en la app nativa (#4 móvil). Renderiza un
 // "póster" (LinearGradient o foto) y lo captura con react-native-view-shot para
@@ -88,6 +103,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   const [fontId, setFontId] = useState('clasica');
   const [align, setAlign] = useState<AlignId>('center');
   const [highlight, setHighlight] = useState('');
+  // Estilos por palabra: { [índiceDelToken]: {b,i,c,bg} }. Ver verseRichText.
+  // Se indexan por posición y NO por la palabra, para poder poner en negrita
+  // "Cristo" una vez y no las tres que aparezca.
+  const [styles, setStyles] = useState<VerseStyles>({});
+  const [sel, setSel] = useState<number[]>([]);
+  const [picker, setPicker] = useState<'color' | 'bg' | null>(null);
   const [customText, setCustomText] = useState<string | null>(null);
   const [editingText, setEditingText] = useState(false);
   const [bgMode, setBgMode] = useState<'color' | 'photo'>('color');
@@ -178,6 +199,37 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
       setHighlight('');
     }
   }, [palabras, highlight]);
+
+  // Los tokens del texto que se está dibujando: la lista sobre la que se
+  // selecciona. Mismo `tokenize` que usa el póster, así que el índice guardado
+  // aquí es el que él busca.
+  const tokens = useMemo(() => tokenize(text), [text]);
+
+  // Al editar el texto los índices se desplazan y los estilos que caen fuera
+  // quedarían huérfanos: invisibles y sin forma de quitarlos (mismo problema
+  // que el `highlight` de justo arriba).
+  useEffect(() => {
+    setStyles((s) => pruneStyles(s, text));
+    setSel((s) => s.filter((i) => i < tokens.length));
+  }, [text, tokens.length]);
+
+  const toggleSel = (i: number) =>
+    setSel((s) => (s.includes(i) ? s.filter((x) => x !== i) : [...s, i]));
+
+  const aplicar = (patch: Parameters<typeof applyStyle>[2]) =>
+    setStyles((s) => applyStyle(s, sel, patch));
+
+  // Si TODAS las seleccionadas ya lo tienen, el botón lo quita; si no, lo pone
+  // — como cualquier barra de formato: con una mezcla, uniformar.
+  const alternar = (key: 'b' | 'i' | 'u') =>
+    aplicar({ [key]: allHave(styles, sel, key) ? null : 1 });
+
+  // El tamaño es un valor, no un flag: pulsar la escala que ya tienen todas la
+  // quita; pulsar otra la cambia.
+  const allSize = (indices: number[], value: number) =>
+    indices.length > 0 && indices.every((i) => styles[i]?.sz === value);
+  const aplicarSize = (value: number) =>
+    aplicar({ sz: allSize(sel, value) ? null : value });
 
   const loadPhotos = async (q: string) => {
     setPhotosLoading(true);
@@ -330,14 +382,33 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
         fontWeight: font.weight ?? '400', fontFamily: verseFamily,
         ...sombra,
       }}>
-        {highlight
-          ? String(text).split(/(\s+)/).map((trozo, i) =>
-              normalizeWord(trozo) === normalizeWord(highlight) && !/^\s+$/.test(trozo) ? (
-                <Text key={i} style={{ color: hiColor }}>{trozo}</Text>
-              ) : (
-                trozo
-              )
-            )
+        {/* Estilos por palabra. Espejo de `drawLine`+`drawLineBgs` del canvas
+            de la web: mismo `tokenize`, mismo `tokenColor` y mismas paletas.
+            Aquí no hay que medir nada —React Native maqueta los <Text>
+            anidados por su cuenta—, pero el MODELO tiene que ser idéntico. */}
+        {highlight || hasStyles(styles)
+          ? tokenize(text).map((trozo, i) => {
+              const st = styles[i];
+              const c = tokenColor(trozo, st, { highlight, highlightColor: hiColor });
+              if (!st && !c) return trozo;
+              return (
+                <Text
+                  key={i}
+                  style={{
+                    color: c,
+                    fontWeight: st?.b ? boldWeight(font.weight) : undefined,
+                    fontStyle: st?.i ? 'italic' : undefined,
+                    textDecorationLine: st?.u ? 'underline' : undefined,
+                    // Tamaño relativo al del cuerpo (ver tokenSize). Al ir en un
+                    // <Text> anidado, RN lo aplica solo a esta palabra.
+                    fontSize: st?.sz ? tokenSize(verseSize, st) : undefined,
+                    backgroundColor: st?.bg,
+                  }}
+                >
+                  {trozo}
+                </Text>
+              );
+            })
           : text}
       </Text>
 
@@ -491,46 +562,173 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               </ScrollView>
             </View>
 
-            {/* Texto editable: lo que se comparte suele ser un trozo, no el
-                versículo entero. La referencia no se toca nunca. */}
-            {editingText ? (
-              <View style={{ gap: 8 }}>
-                <TextInput
-                  autoFocus
-                  multiline
-                  value={customText ?? originalText}
-                  onChangeText={setCustomText}
-                  maxLength={600}
-                  style={{
-                    backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1,
-                    borderColor: colors.border, color: colors.inputText,
-                    paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 90,
-                    textAlignVertical: 'top',
-                  }}
-                />
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <TouchableOpacity
-                    onPress={() => { setCustomText(null); setEditingText(false); }}
-                    disabled={!edited}
-                  >
-                    <Text style={{ color: edited ? colors.accent : colors.textMuted, fontSize: 13 }}>Restaurar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => setEditingText(false)}>
-                    <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600' }}>Listo</Text>
-                  </TouchableOpacity>
+            {/* ── Estilo por palabra ──────────────────────────────
+                NO es un editor de texto enriquecido: se toca la palabra y se
+                pulsa el estilo. Con el dedo no hay forma cómoda de seleccionar
+                un rango, y el póster que se captura no es HTML. */}
+            <View style={{
+              borderWidth: 1, borderColor: colors.border, borderRadius: 10, padding: 8, gap: 8,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, flexShrink: 1 }} numberOfLines={1}>
+                  {editingText
+                    ? 'Edita o acorta el texto'
+                    : sel.length
+                      ? `${sel.length} palabra${sel.length > 1 ? 's' : ''} seleccionada${sel.length > 1 ? 's' : ''}`
+                      : 'Toca las palabras que quieras destacar'}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  {!editingText && hasStyles(styles) && (
+                    <TouchableOpacity
+                      onPress={() => { setStyles({}); setSel([]); setPicker(null); }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                    >
+                      <Ionicons name="refresh" size={12} color={colors.textSecondary} />
+                      <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Quitar</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!editingText && (
+                    <TouchableOpacity
+                      onPress={() => { setSel([]); setPicker(null); setEditingText(true); }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                    >
+                      <Ionicons name="create-outline" size={13} color={colors.accent} />
+                      <Text style={{ color: colors.accent, fontSize: 12 }}>{edited ? 'Texto editado' : 'Editar texto'}</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
-            ) : (
-              <TouchableOpacity
-                onPress={() => setEditingText(true)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-              >
-                <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
-                <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                  {edited ? 'Texto editado — tocar para cambiar' : 'Editar o acortar el texto'}
-                </Text>
-              </TouchableOpacity>
-            )}
+
+              {editingText ? (
+                /* Modo edición: el textarea sustituye a los chips. Al terminar
+                   se vuelve a estilizar; los estilos de palabras que hayan
+                   desaparecido se limpian solos (pruneStyles). */
+                <View style={{ gap: 8 }}>
+                  <TextInput
+                    autoFocus
+                    multiline
+                    value={customText ?? originalText}
+                    onChangeText={setCustomText}
+                    maxLength={600}
+                    style={{
+                      backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1,
+                      borderColor: colors.border, color: colors.inputText,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 90,
+                      textAlignVertical: 'top',
+                    }}
+                  />
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <TouchableOpacity onPress={() => setCustomText(null)} disabled={!edited}>
+                      <Text style={{ color: edited ? colors.accent : colors.textMuted, fontSize: 13 }}>Restaurar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setEditingText(false)}>
+                      <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600' }}>Listo</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+              <>
+              {/* Cada palabra se muestra con el estilo que va a tener en la
+                  imagen: es lo más directo para ver qué lleva cada una sin
+                  buscarla en la previa, que está arriba del todo. */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                {tokens.map((tok, i) => {
+                  if (isSpace(tok)) return null;
+                  const st = styles[i];
+                  const elegida = sel.includes(i);
+                  return (
+                    <TouchableOpacity
+                      key={i}
+                      onPress={() => toggleSel(i)}
+                      style={{
+                        paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5,
+                        borderWidth: elegida ? 2 : 1,
+                        borderColor: elegida ? colors.accent : 'transparent',
+                        backgroundColor: st?.bg ?? (elegida ? undefined : colors.bgSecondary),
+                      }}
+                    >
+                      <Text style={{
+                        // Escala amortiguada en la lista: distinguir grande de
+                        // pequeño basta, el póster fiel está en la previa.
+                        fontSize: 14 * (st?.sz ? 1 + (st.sz - 1) * 0.5 : 1),
+                        color: st?.c ?? colors.textPrimary,
+                        fontWeight: st?.b ? '700' : '400',
+                        fontStyle: st?.i ? 'italic' : 'normal',
+                        textDecorationLine: st?.u ? 'underline' : 'none',
+                      }}>
+                        {tok}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* La barra solo con algo seleccionado: si no, sus botones no
+                  harían nada y parecerían rotos. */}
+              {sel.length > 0 && (
+                <View style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                  borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8,
+                }}>
+                  <TouchableOpacity onPress={() => alternar('b')} style={chip(allHave(styles, sel, 'b'))}>
+                    <Text style={[chipText(allHave(styles, sel, 'b')), { fontWeight: '700' }]}>N</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => alternar('i')} style={chip(allHave(styles, sel, 'i'))}>
+                    <Text style={[chipText(allHave(styles, sel, 'i')), { fontStyle: 'italic' }]}>K</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => alternar('u')} style={chip(allHave(styles, sel, 'u'))}>
+                    <Text style={[chipText(allHave(styles, sel, 'u')), { textDecorationLine: 'underline' }]}>S</Text>
+                  </TouchableOpacity>
+
+                  {/* Tamaño: cada botón conmuta su escala (volver a pulsar deja
+                      la palabra en tamaño normal). Normal es no tener escala. */}
+                  {WORD_SIZES.map((sz) => (
+                    <TouchableOpacity key={sz.id} onPress={() => aplicarSize(sz.value)} style={chip(allSize(sel, sz.value))}>
+                      <Text style={chipText(allSize(sel, sz.value))}>{sz.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+
+                  <TouchableOpacity
+                    onPress={() => setPicker((p) => (p === 'color' ? null : 'color'))}
+                    style={chip(picker === 'color')}
+                  >
+                    <Text style={chipText(picker === 'color')}>Color</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setPicker((p) => (p === 'bg' ? null : 'bg'))}
+                    style={chip(picker === 'bg')}
+                  >
+                    <Text style={chipText(picker === 'bg')}>Fondo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setSel([])} style={{ marginLeft: 'auto' }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Deseleccionar</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {sel.length > 0 && picker && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {(picker === 'color' ? WORD_COLORS : WORD_BGS).map((c) => (
+                    <TouchableOpacity
+                      key={c}
+                      onPress={() => aplicar({ [picker === 'color' ? 'c' : 'bg']: c })}
+                      style={{
+                        width: 24, height: 24, borderRadius: 12, backgroundColor: c,
+                        borderWidth: 1, borderColor: colors.border,
+                      }}
+                      accessibilityLabel={c}
+                    />
+                  ))}
+                  {/* Volver al color del tema (o a sin fondo) sin perder los
+                      demás estilos de la palabra. */}
+                  <TouchableOpacity onPress={() => aplicar({ [picker === 'color' ? 'c' : 'bg']: null })}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Ninguno</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              </>
+              )}
+            </View>
 
             {/* Color / Foto */}
             <View style={{ flexDirection: 'row', gap: 10 }}>

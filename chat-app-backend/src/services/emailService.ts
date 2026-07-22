@@ -228,6 +228,62 @@ export async function sendGroupJoinApproved(
   }
 }
 
+// Bienvenida al hacerse SOCIO (al suscribirse a la ofrenda mensual). Mismo
+// mensaje que la versión web (plantilla socioWelcome.handlebars).
+export async function sendSocioWelcome(to: string, name: string, link: string): Promise<void> {
+  try {
+    await getTransporter().sendMail({
+      from: `"HolyHolyHoly" <${process.env.SMTP_FROM}>`,
+      to,
+      subject: '🛡️ ¡Gracias por hacerte Socio de HolyHolyHoly!',
+      html: `
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+          <div style="background:linear-gradient(135deg,#4338CA,#6366F1);padding:36px 24px;text-align:center">
+            <div style="font-size:40px;line-height:1">🛡️</div>
+            <h1 style="margin:14px 0 4px;color:#fff;font-size:24px">¡Gracias por hacerte Socio, ${name}!</h1>
+            <p style="margin:0;color:#fff;font-size:15px;opacity:.9">Tu ofrenda sostiene este sueño.</p>
+          </div>
+          <div style="padding:28px">
+            <p style="font-size:16px;line-height:1.7;color:#374151">
+              De todo corazón: <strong>gracias</strong>. Tu ofrenda no es un pago, es una siembra.
+              Con ella ayudas a sostener el sueño de <strong>HolyHolyHoly</strong>: un lugar donde
+              miles de personas se conectan, oran juntas, estudian la Palabra y crecen en la fe.
+            </p>
+            <p style="font-size:16px;line-height:1.7;color:#374151">
+              Gracias a socios como tú podemos mantener la plataforma en línea y que todo esto siga
+              siendo accesible para quien lo necesite, sin importar dónde esté.
+            </p>
+            <div style="background:#F5F3FF;border-left:4px solid #6366F1;border-radius:10px;padding:18px 20px;margin:24px 0">
+              <p style="margin:0 0 12px;font-weight:bold;color:#4338CA;font-size:15px">¿Qué significa que ahora seas Socio?</p>
+              <p style="margin:0 0 4px;font-weight:bold;color:#111827;font-size:15px">🛡️ Tu insignia de Socio</p>
+              <p style="margin:0 0 14px;color:#4B5563;font-size:14px;line-height:1.6">
+                Verás un distintivo con un escudo junto a tu nombre en toda la comunidad: publicaciones,
+                comentarios, perfil y el chat. Es nuestra forma de honrar públicamente tu apoyo.
+              </p>
+              <p style="margin:0 0 4px;font-weight:bold;color:#111827;font-size:15px">📚 Más de 100 estudios, gratis</p>
+              <p style="margin:0;color:#4B5563;font-size:14px;line-height:1.6">
+                Tienes acceso libre a más de <strong>100 estudios de alta calidad</strong> en nuestra web.
+                Descárgalos todos sin costo, cuando quieras.
+              </p>
+            </div>
+            <div style="text-align:center;margin:28px 0">
+              <a href="${link}" style="background:#6366F1;color:#fff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:bold;display:inline-block;font-size:16px">Ver los estudios</a>
+            </div>
+            <p style="font-size:15px;line-height:1.7;color:#374151">
+              Que Dios multiplique tu generosidad. Somos un solo cuerpo, y hoy tú lo haces más fuerte. 🙏
+            </p>
+            <p style="font-size:15px;color:#374151;margin-top:22px">Con gratitud,<br /><strong>El equipo de HolyHolyHoly</strong></p>
+          </div>
+          <div style="background:#F9FAFB;padding:14px;text-align:center;border-top:1px solid #E5E7EB">
+            <p style="margin:0;color:#9CA3AF;font-size:12px">© HolyHolyHoly · holyholyholy.es</p>
+          </div>
+        </div>`,
+    });
+  } catch (err) {
+    console.error('[emailService] sendSocioWelcome error:', err);
+  }
+}
+
 const DAY_NAMES_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 function fmtTime(h: number, m: number): string {

@@ -22,10 +22,15 @@ import { WEB_URL } from '../../src/components/ShareSheet';
 
 const PRESET_AMOUNTS = [5, 10, 25, 50];
 
+// Todos los tiers hacen Socio (insignia). El acceso a materiales gratis es solo
+// desde $20 (SOCIO_MATERIAL_MIN en el backend); $5 y $10 dan la insignia sola.
 const SUBSCRIPTION_TIERS: { tier: SubscriptionTier; label: string; price: string; desc: string }[] = [
-  { tier: 'sub_5',  label: 'Semilla',    price: '$5/mes',  desc: 'Ofrenda mensual básica' },
-  { tier: 'sub_10', label: 'Cosecha',    price: '$10/mes', desc: 'Ofrenda mensual regular' },
-  { tier: 'sub_20', label: 'Abundancia', price: '$20/mes', desc: 'Ofrenda mensual especial' },
+  { tier: 'sub_5',   label: 'Grano',      price: '$5/mes',   desc: 'Insignia de Socio' },
+  { tier: 'sub_10',  label: 'Espiga',     price: '$10/mes',  desc: 'Insignia de Socio' },
+  { tier: 'sub_20',  label: 'Semilla',    price: '$20/mes',  desc: 'Socio + materiales gratis' },
+  { tier: 'sub_50',  label: 'Cosecha',    price: '$50/mes',  desc: 'Socio + materiales gratis' },
+  { tier: 'sub_100', label: 'Abundancia', price: '$100/mes', desc: 'Socio + materiales gratis' },
+  { tier: 'sub_200', label: 'Primicia',   price: '$200/mes', desc: 'Socio + materiales gratis' },
 ];
 
 // "Otras formas de ofrendar" (agencias/transferencias) — mismos datos y logos que
@@ -244,7 +249,9 @@ export default function OfrendasScreen() {
           {/* Subscriptions */}
           <SectionTitle title="Ofrenda mensual" colors={colors} />
           <Text style={{ color: colors.textMuted, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
-            Comprométete a dar cada mes. Puedes cancelar en cualquier momento desde tu cuenta PayPal.
+            Comprométete a dar cada mes. Al suscribirte te haces Socio y luces la insignia
+            junto a tu nombre; desde <Text style={{ fontWeight: '700', color: colors.textSecondary }}>$20/mes</Text> además
+            descargas todos los materiales gratis. Puedes cancelar en cualquier momento desde tu cuenta PayPal.
           </Text>
           <View style={{ gap: 10, marginBottom: 28 }}>
             {SUBSCRIPTION_TIERS.map((t) => (

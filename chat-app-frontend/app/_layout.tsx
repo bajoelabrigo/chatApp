@@ -15,6 +15,7 @@ import { playRingtone, playRingback, stop as stopRingtone, loadRingtonePreferenc
 import api from '../src/services/authService';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { triggerDailyActivityReminder } from '../src/utils/dailyActivityReminder';
+import { SocioWelcomeModal } from '../src/components/SocioWelcomeModal';
 
 registerGlobals();
 
@@ -92,7 +93,7 @@ function RootLayoutInner() {
     try {
       const Notifications = require('expo-notifications');
       const route = (data: any) => {
-        if (data?.type === 'material') router.push('/(tabs)/materiales' as any);
+        if (data?.type === 'material' || data?.type === 'socio') router.push('/(tabs)/materiales' as any);
         else if (data?.type === 'chat' && data?.conversationId)
           router.push(`/chat/${data.conversationId}` as any);
       };
@@ -183,6 +184,9 @@ function RootLayoutInner() {
         <Stack.Screen name="u/[id]" />
         <Stack.Screen name="g/[id]" />
       </Stack>
+
+      {/* Bienvenida socio (una sola vez tras hacerse socio) */}
+      <SocioWelcomeModal />
 
       {/* Incoming 1-on-1 call overlay */}
       <Modal
