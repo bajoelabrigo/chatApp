@@ -12,6 +12,9 @@ import {
   getOfferingHistory,
   getMyOfferingStatus,
   handleWebhook,
+  createManualOffering,
+  listAdminOfferings,
+  deleteManualOffering,
 } from '../controllers/offeringController';
 
 const router = Router();
@@ -32,5 +35,10 @@ router.post('/capture/inline', captureInlineOrder);
 router.post('/subscription', createSubscriptionCheckout);
 router.get('/history', getOfferingHistory);
 router.get('/status', getMyOfferingStatus);
+
+// Admin general (isGlobalAdmin dentro de cada handler): ofrendas manuales + reporte.
+router.post('/admin/manual', createManualOffering);
+router.get('/admin', listAdminOfferings);
+router.delete('/admin/:id', deleteManualOffering);
 
 export default router;

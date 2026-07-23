@@ -21,3 +21,19 @@ export async function markSocioWelcomeSeen(token: string): Promise<void> {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+// Aviso de pago para socios manuales. La web enciende el flag en la base
+// compartida; el móvil lo consulta al arrancar para mostrar el modal.
+export interface SocioReminder {
+  pending: boolean;
+  overdue: boolean;
+  nextPaymentDate: string | null;
+  amount: number;
+}
+
+export async function getSocioReminder(token: string): Promise<SocioReminder> {
+  const { data } = await api.get<SocioReminder>('/users/me/socio-reminder', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return data;
+}

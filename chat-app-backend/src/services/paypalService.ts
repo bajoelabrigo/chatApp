@@ -257,6 +257,12 @@ export async function handleSubscriptionActivated(event: any): Promise<void> {
         lastOfferingAt: new Date(),
         isSocio: true,
         socioAmount: newAmount,
+        // PayPal cobra solo cada mes → NO es socio manual y no debe recibir
+        // recordatorios de pago. Se limpia cualquier aviso manual previo.
+        socioManual: false,
+        socioPaymentReminder: false,
+        socioOverdue: false,
+        socioReminderStage: 0,
         ...(shouldWelcome ? { socioWelcomePending: true } : {}),
       },
     });

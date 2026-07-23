@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
-import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount, getMyConnections, getSocioWelcome, markSocioWelcomeSeen } from '../controllers/userController';
+import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount, getMyConnections, getSocioWelcome, markSocioWelcomeSeen, getSocioReminder } from '../controllers/userController';
 import { getPersonalActivities, createPersonalActivity, updatePersonalActivity, deletePersonalActivity } from '../controllers/personalActivityController';
 import { getMyActivePrayerRequests, getPrayerFeed } from '../controllers/prayerController';
 import { getActivityFeed } from '../controllers/activityController';
@@ -25,6 +25,7 @@ router.get('/me/activity-feed', getActivityFeed);
 router.get('/me/connections', getMyConnections);
 router.get('/me/socio-welcome', getSocioWelcome);
 router.post('/me/socio-welcome/seen', markSocioWelcomeSeen);
+router.get('/me/socio-reminder', getSocioReminder);
 router.post('/me/activities', createPersonalActivity);
 router.patch('/me/activities/:id', updatePersonalActivity);
 router.delete('/me/activities/:id', deletePersonalActivity);

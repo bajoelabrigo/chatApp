@@ -12,6 +12,7 @@ import {
 } from '../services/paypalService';
 import { Offering } from '../models/Offering';
 import { User } from '../models/User';
+import { isGlobalAdmin } from '../services/adminService';
 
 // Planes de suscripción mensual (montos 5/10/20/50/100/200). Cada uno es un PLAN
 // de PayPal distinto; su ID viene por variable de entorno.
@@ -270,6 +271,115 @@ export async function getMyOfferingStatus(req: Request, res: Response) {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error obteniendo estado' });
+  }
+}
+
+// Fecha de "solo día" (yyyy-mm-dd) → mediodía UTC, para que no se muestre un día
+// antes en zonas detrás de UTC (América). Ver la nota en holy_app/utils/dateOnly.js.
+function parseDateOnly(value?: string): Date {
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(value + 'T12:00:00.000Z');
+  }
+  return value ? new Date(value) : new Date();
+}
+
+// ── Admin: ofrendas manuales + reporte ────────────────────────
+// El admin general (web) registra a mano las ofrendas que llegan por fuera del
+// PayPal de la app (transferencia, efectivo, Zelle…) y lista todas las ofrendas.
+// Autorización: bypass isGlobalAdmin (role:'admin' en la colección compartida).
+
+// POST /offerings/admin/manual — registra una ofrenda única recibida por fuera.
+export async function createManualOffering(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const { userId, donorName, donorEmail, amount, method, note, receivedAt } = req.body || {};
+    const usd = Number(amount);
+    if (!usd || usd <= 0) {
+      return res.status(400).json({ error: 'Monto inválido' });
+    }
+    if (!userId && !donorName && !donorEmail) {
+      return res.status(400).json({ error: 'Indica un usuario o el nombre/email del donante' });
+    }
+
+    const doc = await Offering.create({
+      userId: userId || undefined,
+      type: 'one_time',
+      amount: Math.round(usd * 100), // guardado en centavos, como el resto
+      currency: 'usd',
+      status: 'paid',
+      source: 'manual',
+      method: method || 'otro',
+      note: note || undefined,
+      donorName: donorName || undefined,
+      donorEmail: donorEmail || undefined,
+      registeredBy: requesterId,
+      receivedAt: parseDateOnly(receivedAt),
+    });
+
+    res.status(201).json({ message: 'Ofrenda registrada', offering: doc });
+  } catch (err) {
+    console.error('createManualOffering:', err);
+    res.status(500).json({ error: 'Error registrando la ofrenda' });
+  }
+}
+
+// GET /offerings/admin — todas las ofrendas pagadas (PayPal + manuales) + totales.
+export async function listAdminOfferings(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+
+    const offerings = await Offering.find({ status: 'paid' })
+      .populate('userId', 'name email avatar')
+      .sort({ receivedAt: -1, createdAt: -1 })
+      .limit(500)
+      .lean();
+
+    // Totales (en USD) del mes y del año en curso. La fecha efectiva es
+    // receivedAt si existe, si no createdAt.
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startYear = new Date(now.getFullYear(), 0, 1);
+    const sumSince = async (since: Date) => {
+      const r = await Offering.aggregate([
+        { $match: { status: 'paid' } },
+        { $addFields: { eff: { $ifNull: ['$receivedAt', '$createdAt'] } } },
+        { $match: { eff: { $gte: since } } },
+        { $group: { _id: null, total: { $sum: '$amount' } } },
+      ]);
+      return (r[0]?.total ?? 0) / 100;
+    };
+    const [month, year] = await Promise.all([sumSince(startMonth), sumSince(startYear)]);
+
+    res.json({ offerings, totals: { month, year } });
+  } catch (err) {
+    console.error('listAdminOfferings:', err);
+    res.status(500).json({ error: 'Error obteniendo ofrendas' });
+  }
+}
+
+// DELETE /offerings/admin/:id — borra SOLO ofrendas manuales (corregir errores).
+export async function deleteManualOffering(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const off = await Offering.findById(req.params.id).select('source').lean();
+    if (!off) return res.status(404).json({ error: 'No encontrada' });
+    if ((off as any).source !== 'manual') {
+      return res.status(400).json({ error: 'Solo se pueden borrar ofrendas manuales' });
+    }
+    await Offering.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Ofrenda eliminada' });
+  } catch (err) {
+    console.error('deleteManualOffering:', err);
+    res.status(500).json({ error: 'Error eliminando la ofrenda' });
   }
 }
 

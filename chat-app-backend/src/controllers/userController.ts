@@ -269,6 +269,27 @@ export async function getSocioWelcome(req: AuthRequest, res: Response): Promise<
   }
 }
 
+// GET /users/me/socio-reminder — ¿hay un aviso de pago de socio pendiente?
+// La web gestiona los recordatorios de socios manuales y enciende el flag
+// `socioPaymentReminder` en la colección compartida; la app móvil lo consulta
+// aquí al arrancar para mostrar el modal/banner. Espejo de getSocioWelcome.
+export async function getSocioReminder(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const user = await User.findById(req.userId!)
+      .select('isSocio socioPaymentReminder socioOverdue socioNextPaymentDate socioAmount')
+      .lean();
+    const u = user as any;
+    res.json({
+      pending: !!u?.socioPaymentReminder && !!u?.isSocio,
+      overdue: !!u?.socioOverdue,
+      nextPaymentDate: u?.socioNextPaymentDate ?? null,
+      amount: Number(u?.socioAmount) || 0,
+    });
+  } catch {
+    res.json({ pending: false, overdue: false, nextPaymentDate: null, amount: 0 });
+  }
+}
+
 // POST /users/me/socio-welcome/seen — apaga el flag tras mostrar el modal.
 export async function markSocioWelcomeSeen(req: AuthRequest, res: Response): Promise<void> {
   try {

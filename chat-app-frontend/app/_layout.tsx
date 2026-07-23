@@ -16,6 +16,7 @@ import api from '../src/services/authService';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { triggerDailyActivityReminder } from '../src/utils/dailyActivityReminder';
 import { SocioWelcomeModal } from '../src/components/SocioWelcomeModal';
+import { SocioPaymentReminderModal } from '../src/components/SocioPaymentReminderModal';
 
 registerGlobals();
 
@@ -187,6 +188,9 @@ function RootLayoutInner() {
 
       {/* Bienvenida socio (una sola vez tras hacerse socio) */}
       <SocioWelcomeModal />
+
+      {/* Aviso de pago para socios manuales (fecha de ofrenda cerca / vencida) */}
+      <SocioPaymentReminderModal />
 
       {/* Incoming 1-on-1 call overlay */}
       <Modal

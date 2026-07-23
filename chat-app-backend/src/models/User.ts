@@ -72,6 +72,15 @@ export interface IUser extends Document {
   socioAmount?: number;
   // Modal de bienvenida socio pendiente de mostrar (transición false→true).
   socioWelcomePending?: boolean;
+  // Socio MANUAL (sin suscripción PayPal): recibe recordatorios de pago. La web
+  // gestiona estos campos; aquí solo se leen (base compartida).
+  socioManual?: boolean;
+  socioNextPaymentDate?: Date;
+  socioLastPaymentDate?: Date;
+  socioPaymentReminder?: boolean; // aviso de pago activo → modal/banner
+  socioOverdue?: boolean;
+  socioReminderStage?: number;
+  socioPayments?: { date: Date; amount: number }[];
   createdAt: Date;
   lastLogin: Date;
   // ── Campos espejo para compatibilidad con la web (misma colección) ──
@@ -131,6 +140,14 @@ const UserSchema = new Schema<IUser>(
     socioSince:            { type: Date },
     socioAmount:           { type: Number, default: 0 },
     socioWelcomePending:   { type: Boolean, default: false },
+    // Socio manual (recordatorios de pago) — los gestiona la web; aquí se leen.
+    socioManual:           { type: Boolean, default: false },
+    socioNextPaymentDate:  { type: Date },
+    socioLastPaymentDate:  { type: Date },
+    socioPaymentReminder:  { type: Boolean, default: false },
+    socioOverdue:          { type: Boolean, default: false },
+    socioReminderStage:    { type: Number, default: 0 },
+    socioPayments:         [{ date: Date, amount: Number, _id: false }],
     // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)
     isVerified:            { type: Boolean, default: false },
     profilePicture:        { type: String },
