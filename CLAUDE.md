@@ -389,6 +389,15 @@ Compartir con enlace + QR (añadido 2026-06-23). Tres superficies: materiales, l
 - **nginx** (`/etc/nginx/sites-available/holyholyholy`; copia versionada en `holy_app/deploy/nginx-holyholyholy.conf`): un `map $http_user_agent $holy_is_bot` (contexto http) + `location ~ ^/materiales/(?<mslug>[^/]+)/?$` que enruta SOLO bots a `/api/share/material/<slug>` (humanos → SPA). Patrón seguro `error_page 418 = @og_material` (evita el combo problemático `if + proxy_pass`). Deploy nginx: backup → `scp` el archivo → `nginx -t && systemctl reload nginx`.
 - WhatsApp **cachea** las previews por URL y no tiene "scrape again" público (Facebook sí: developers.facebook.com/tools/debug). Para forzar refresco al probar: añadir `?v=2` al final de la URL.
 
+## Nombre del video en los enlaces (YouTube / TikTok)
+
+La metadata la sirve `GET /public/link-preview` del chat-backend (`publicController.ts`) y la consumen los tres sitios: posts de la web, chat web y chat móvil.
+
+- **TikTok NO se puede raspar**: a un bot le devuelve una pantalla de verificación sin Open Graph. Se resuelve con su **oEmbed** (`https://www.tiktok.com/oembed?url=`), que da el pie del video como `title`, el autor y la miniatura; los enlaces cortos (`vm.`/`vt.tiktok.com`) se resuelven siguiendo la redirección y se reintenta con la URL larga. Mismo patrón que YouTube.
+- Las **miniaturas de TikTok van firmadas y caducan** (`x-expires`) — la caché de previas dura 30 días, así que `LinkPreview` esconde la imagen con `onError` en vez de dejar el icono de rota.
+- **`LiteYouTube` muestra el nombre del video** bajo la miniatura cuando se le pasa `url` (sin `url` no pinta pie: es lo que necesita `DownloadApp`, que ya pone su propio título). La metadata y su caché (`localStorage`, clave `linkpreview:<v>:`) viven en **`frontend/src/lib/linkMeta.js`** (`useLinkMeta`), compartidas con `LinkPreview` para no pedir dos veces lo mismo.
+- Los enlaces de YouTube que no dan `videoId` (listas, canales, `/shorts/` antes de soportarlo) **no pueden devolver `null`** o el enlace desaparece del post sin dejar rastro: caen a `LinkPreview`.
+
 ## Tipos de mensaje nuevos (leer antes de añadir uno)
 
 Al estrenar `type: 'contact'` (2026-07-09) el mensaje se guardaba bien pero **no se veía en ningún cliente**. Tres trampas, todas vuelven a morder con el próximo tipo:

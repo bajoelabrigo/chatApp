@@ -84,6 +84,66 @@ function youtubeId(u: URL): string | null {
   return null;
 }
 
+const TIKTOK_HOSTS = ['tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com', 'm.tiktok.com'];
+
+function isTikTok(u: URL): boolean {
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  return TIKTOK_HOSTS.includes(host) || host.endsWith('.tiktok.com');
+}
+
+/**
+ * TikTok NO se puede raspar como una página normal: a un bot le devuelve una
+ * pantalla de verificación sin Open Graph. Su oEmbed público sí da el título
+ * (el pie del video), el autor y la miniatura.
+ *
+ * Los enlaces cortos (vm./vt.tiktok.com, los que genera el botón "Compartir")
+ * no siempre los acepta el oEmbed, así que si falla resolvemos la redirección
+ * y reintentamos con la URL larga.
+ */
+async function tiktokPreview(u: URL): Promise<LinkPreviewData | null> {
+  const tryOembed = async (target: string): Promise<LinkPreviewData | null> => {
+    const r = await fetchWithTimeout(
+      `https://www.tiktok.com/oembed?url=${encodeURIComponent(target)}`,
+      6000,
+    );
+    if (!r.ok) return null;
+    const j: any = await r.json();
+    if (!j?.title && !j?.thumbnail_url) return null;
+    return {
+      url: target,
+      title: String(j.title || 'TikTok').slice(0, 200),
+      description: j.author_name ? `${j.author_name} · TikTok` : 'TikTok',
+      image: j.thumbnail_url || '',
+      siteName: 'TikTok',
+    };
+  };
+
+  try {
+    const direct = await tryOembed(u.toString());
+    if (direct) return direct;
+  } catch {
+    // sigue con la resolución del enlace corto
+  }
+
+  try {
+    const r = await fetchWithTimeout(u.toString(), 6000, {
+      'User-Agent':
+        'Mozilla/5.0 (compatible; HolyChatBot/1.0; +https://holyholyholy.es)',
+    });
+    const finalUrl: string = r.url || '';
+    if (finalUrl && finalUrl !== u.toString()) {
+      const resolved = new URL(finalUrl);
+      if (isTikTok(resolved) && isSafePublicUrl(resolved)) {
+        // Sin query: los enlaces cortos arrastran parámetros de seguimiento.
+        return await tryOembed(`${resolved.origin}${resolved.pathname}`);
+      }
+    }
+  } catch {
+    // sin preview
+  }
+  return null;
+}
+
 async function buildPreview(rawUrl: string): Promise<LinkPreviewData | null> {
   let u: URL;
   try {
@@ -122,6 +182,12 @@ async function buildPreview(rawUrl: string): Promise<LinkPreviewData | null> {
       image: `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
       siteName: 'YouTube',
     };
+  }
+
+  if (isTikTok(u)) {
+    const tt = await tiktokPreview(u);
+    if (tt) return tt;
+    return null; // raspar el HTML solo devolvería la pantalla de verificación
   }
 
   // Genérico: descargar el HTML y leer los Open Graph / meta tags.
