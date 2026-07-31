@@ -529,6 +529,31 @@ Antes las dos apps hacían cosas opuestas con el mismo usuario: la web lo dejaba
 - **Cómo probarlo**: navegador con sesión de Google abierta, en incógnito y sin haber entrado a la web. Si no hay cuenta de Google en el navegador, la consola dice `Not signed in with the identity provider` + `[GSI_LOGGER]: FedCM get() rejects` — eso significa que el camino llega bien a Google, no que esté roto.
 - `components/auth/OAuth.jsx` es un botón "Continuar con Google" **sin onClick, no importado en ningún sitio** — código muerto, no confundirlo con el login real (`GoogleLogin` en `LoginForm`/`SignUpForm`).
 
+## Tipo de material (estudio vs libro) y promociones
+
+Un material tiene un `kind` (`materialModel.js`): `material` (estudio, por defecto — los docs viejos no lo tienen y valen eso) o `libro`. **No es una etiqueta más: decide con qué ofrenda mensual se lo lleva gratis un socio** — $20 un estudio, **$50 un libro**. El libro sigue en el catálogo y cualquiera puede comprarlo; lo que cambia es a quién le sale "Gratis para ti".
+
+- **Fuente única de las reglas**: `backend/utils/materialAccess.js`, **espejado** en `frontend/src/lib/materialAccess.js` (`socioMinFor`, `hasSocioFreeAccess`, `isPromoActive`) — al tocarlas, editar los dos. Nada de comparar `socioAmount >= 20` a mano.
+- **Quien decide es el servidor**: `resolveFreeAccess()` (`materialController.js`) lo calcula igual para `/purchase` (que manda) y para `GET /materials/slug/:slug`, que ahora lleva `optionalAuth` y devuelve `freeForMe` + `freeViaSeminar`. `MaterialPage` usa ese campo, no su propio cálculo (el desbloqueo por seminario depende de las inscripciones y el cliente no puede saberlo).
+- **Libro en un seminario = gratis para el alumno socio de $20**, porque el material del seminario va incluido en la membresía. Solo cuenta si la clase enlaza el material **desde el selector** ("Elegir del catálogo" en `ClassMaterialsField`), que guarda `materialId` en `seminar.classes[].materials[]`. **Un enlace `/materiales/...` pegado a mano NO sirve**: sin `materialId` es una URL más. Lo comprueba `utils/materialSeminar.js` (`isMaterialInEnrolledSeminar`) + `hasSeminarAccess`, o sea que exige estar inscrito.
+- **`materialId` tiene que sobrevivir al armado del payload** en `SeminarAddClass` y `SeminarEditClass` (y a `normalizeMaterials`, en los dos espejos de `seminarFiles.js`). Perderlo al re-guardar la clase convierte el material en un enlace suelto y el alumno vuelve a ver el precio.
+- **Promoción** (`materialPromoModel.js`, doc único `key: "global"`): baja temporalmente el mínimo para TODO el catálogo ("este mes todo por $20, libros incluidos"). Se edita en el panel de materiales (`MaterialPromoCard`), `GET /materials/promo` (pública, **solo devuelve las vigentes**: si llega algo, está activa) + `GET/PUT /materials/admin/promo`. **Solo puede BAJAR el mínimo, nunca subirlo** (`Math.min` con el del tipo), o una promo mal puesta dejaría sin estudios a quien ya los tenía. El backend la cachea 30 s y la invalida al guardar.
+- Sitios con el texto de los niveles: `HazteSocio.jsx` (tabla de 3 niveles + aviso de promo), `MaterialsCatalog.jsx` (insignia "Libro", CTA de subida) y `MaterialPage.jsx`.
+
+## Entrega de materiales — biblioteca y enlaces que caducan
+
+- **Los archivos NO se sirven desde Cloudinary.** Se subían como `upload` (público), así que su `secure_url` valía para siempre y para cualquiera: reenviar ese enlace regalaba el material. Ahora el cliente recibe una URL del backend firmada y caducada (`utils/materialDownload.js`) y `GET /materials/:id/download/:index?t=` **hace streaming** del archivo (nunca un 302 a Cloudinary, que devolvería justo la URL que se esconde). Esa ruta NO lleva `protect`: el permiso va en el token, para que el enlace del correo funcione sin sesión. Caducidad: 6 h en la web, 30 d en el correo. **Único sitio que revela URLs: `deliverableFiles()`** — al cambiar la entrega, se cambia ahí.
+- **`GET /materials/me/purchases` + `/materiales/mios`** (`MyMaterials.jsx`): lo que el usuario ya obtuvo. Busca por `user` **y por email** porque el checkout admite invitado. No filtra por `published`: si el material se despublicó después, sigue siendo suyo.
+- **Descarga en un clic**: `MaterialCheckout` acepta `autoStart`; con sesión y acceso gratis dispara la descarga al abrirse en vez de pedir un correo que ya se sabe.
+- **Re-descargar NO es una venta**: `purchaseMaterial` busca una compra previa (mismo material + mismo usuario/email) y, si la hay y el importe es 0, hace `$inc timesDownloaded` en esa fila en vez de crear otra. Así `Material.salesCount` = personas distintas y `downloadCount` = entregas totales; sin esto, el reporte de ingresos se llenaba de filas de $0 y el catálogo contaba diez veces a la misma persona. Un pago SÍ crea fila nueva aunque ya lo tuviera.
+- **`publicFields(m, { full })`**: los LISTADOS no llevan la descripción HTML (solo `descriptionText`, extracto plano de 400) ni los metadatos de archivo; la página del material sí (`full: true`). Al buscar en un listado, usar `searchText(m)` de `materialsApi.js`, no `plainText(m.description)`.
+
+## Constancia de seminario
+
+`GET /seminars/:activityId/certificate` la emite el SERVIDOR: comprueba que el alumno completó TODAS las clases y acuña un código una sola vez, guardado en `seminar.studentProgress[].certificate` (escritura **atómica** con `arrayFilters`, como todo lo que toca `studentProgress`). Devolver siempre el mismo código evita que dos descargas salgan con números distintos.
+
+El documento se **dibuja en el cliente con Canvas 2D** (`frontend/src/lib/certificate.js`), como el póster de versículos y por el mismo motivo: html2canvas se cuelga en iOS. La barra de progreso + el botón viven en `components/seminario/SeminarProgress.jsx`, que sustituye a las cuatro copias que había (móvil y escritorio de `SeminarDetails` y `SeminarClassPage`).
+
 ## Materiales no listados — enlace privado con clave
 
 Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no hay enum `visibility`; los docs viejos solo tienen `published`):
@@ -547,6 +572,12 @@ Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no 
 - **Un no listado no tiene vista previa de WhatsApp/FB** a propósito: `/api/share/material/:slug` serviría portada y título en una URL sin clave. `MaterialPage`/`MaterialsDashboard` pasan `socialUrl` vacío en ese caso y `ShareModal` cae a `url` (`socialUrl || url`).
 - **Cambiar el título cambia el slug y rompe el enlace ya repartido** (`uniqueSlug` en `updateMaterial`). Pasaba ya con los públicos, pero aquí duele porque ese enlace es el único acceso.
 - De paso se tapó una fuga vieja: las rutas OG de `shareRoutes.js` consultaban `Material.findOne({ slug })` **sin filtrar `published`** → los bots (y cualquiera pegando `/api/share/material/<slug>`) veían título, descripción y portada de los borradores.
+
+## Suscripción de socio — el "código" NO es nuestro, y ojo con `window.open`
+
+En `/hazte-socio` el nivel elegido llama a `/offerings/subscription` (chat-backend) y **se abre PayPal**: a partir de ahí todo pasa en paypal.com. Si alguien reporta "me manda un código y no me lo acepta", ese código es de PayPal (OTP de su cuenta o verificación de tarjeta), no de la web — nuestra única pantalla de código (`/loginWithCode`) no está enlazada desde ningún sitio y además está rota: `lToken` no se escribe nunca. Antes de buscar en nuestro código, comprobar que el enlace lleva a `www.paypal.com` y no a `sandbox.paypal.com` (`PAYPAL_MODE`).
+
+**`window.open(url, "_blank", "noopener,...")` devuelve SIEMPRE `null`, aunque la pestaña se abra.** El respaldo `if (!win) window.location.href = url` de `openCheckout` (`OfferingPayPal.jsx`) se disparaba entonces siempre y dejaba **dos sesiones de PayPal abiertas para la misma suscripción**: pedir el código en una y escribirlo en la otra lo hace fallar. Para poder detectar el bloqueo de ventanas hay que abrir sin `noopener` y anular `win.opener` después.
 
 ## Botones de PayPal — el contenedor SIEMPRE con `isolate`
 
