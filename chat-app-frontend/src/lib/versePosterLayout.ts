@@ -55,6 +55,24 @@ export const FONTS: FontDef[] = [
   { id: 'impacto', name: 'Impacto', family: 'Oswald', weight: '600' },
   // Caveat tiene la altura de x mucho menor: al mismo tamaño se ve pequeña.
   { id: 'manuscrita', name: 'Manuscrita', family: 'Caveat', weight: '600', sizeScale: 1.42, lineScale: 0.82 },
+
+  // ── Letras destacadas ────────────────────────────────────────
+  // Para la frase del gancho y para títulos, no para leer un versículo largo.
+  // Van al final para no cambiarle el orden del selector a nadie. Los
+  // `sizeScale` están medidos comparando la altura de x de cada familia (ver el
+  // comentario largo en el posterLayout.js de la web): no inventarlos.
+  //
+  // OJO: aquí NO llevan `weight`. El .ttf empaquetado YA es la instancia que
+  // toca (Cinzel y Cormorant en semibold, Dancing Script y Amatic en bold), así
+  // que pedir 600 encima le sumaría una negrita falsa de Android.
+  { id: 'romana', name: 'Romana', family: 'Cinzel', sizeScale: 0.95 },
+  { id: 'refinada', name: 'Refinada', family: 'CormorantGaramond', sizeScale: 1.27, lineScale: 0.86 },
+  { id: 'editorial', name: 'Editorial', family: 'AbrilFatface', sizeScale: 0.97 },
+  { id: 'cartel', name: 'Cartel', family: 'Anton', sizeScale: 0.8 },
+  { id: 'espigada', name: 'Espigada', family: 'AmaticSC', sizeScale: 1.15 },
+  { id: 'fluida', name: 'Fluida', family: 'DancingScript', sizeScale: 1.45, lineScale: 0.78 },
+  { id: 'pincel', name: 'Pincel', family: 'AlexBrush', sizeScale: 1.5, lineScale: 0.74 },
+  { id: 'romantica', name: 'Romántica', family: 'Parisienne', sizeScale: 1.4, lineScale: 0.76 },
 ];
 
 export type AlignId = 'left' | 'center' | 'right';
@@ -96,6 +114,17 @@ export const TEMPLATES: TemplateDef[] = [
   { id: 'sereno', name: 'Sereno', themeId: 'cielo', fontId: 'moderna', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'corazon' },
   { id: 'diario', name: 'Diario', themeId: 'bosque', fontId: 'manuscrita', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'linea' },
   { id: 'aurora', name: 'Aurora', themeId: 'amanecer', fontId: 'titular', hookFontId: 'caligrafica', hookWords: 2, upper: true, align: 'center', anchor: 'bottom', ornament: 'corazon' },
+
+  // Las cinco de las letras destacadas (2026-08-01). Cada una estrena una
+  // familia distinta: sin plantilla, una fuente nueva es una opción escondida en
+  // un selector. Fijan `refBadge` a propósito (las de arriba no) para que
+  // aplicarlas dé siempre el mismo diseño y no herede el de la anterior.
+  { id: 'solemne', name: 'Solemne', themeId: 'grafito', fontId: 'romana', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'cruz', refBadge: false },
+  { id: 'manifiesto', name: 'Manifiesto', themeId: 'coral', fontId: 'titular', hookFontId: 'cartel', hookWords: 2, upper: true, align: 'left', anchor: 'bottom', ornament: 'linea', refBadge: false },
+  { id: 'filigrana', name: 'Filigrana', themeId: 'crema', fontId: 'refinada', hookFontId: 'romantica', hookWords: 2, upper: false, align: 'center', anchor: 'center', ornament: 'laurel', refBadge: true },
+  // Para versículos CORTOS: en uno largo, media imagen de cursiva no hay quien la lea.
+  { id: 'susurro', name: 'Susurro', themeId: 'lavanda', fontId: 'fluida', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'corazon', refBadge: false },
+  { id: 'portada', name: 'Portada', themeId: 'oceano', fontId: 'moderna', hookFontId: 'editorial', hookWords: 1, upper: true, align: 'center', anchor: 'top', ornament: 'doble', refBadge: false },
 ];
 
 export const ANCHORS: { id: AnchorId; name: string }[] = [
@@ -159,10 +188,15 @@ export function highlightColor(t: { text: string; accent: string }, onPhoto: boo
 }
 
 // Carga las fuentes propias. Se llama al ABRIR la hoja y no al arrancar la app:
-// son 850 KB que solo necesita quien comparte una imagen.
+// son ~1,7 MB que solo necesita quien comparte una imagen.
 //
 // Va por `Font.loadAsync` (no por un build nativo) precisamente para que llegue
 // por `eas update`: los .ttf son assets del bundle de JS.
+//
+// Las ocho últimas son las letras destacadas y son instancias estáticas del
+// subconjunto latino (30-80 KB cada una), no las variables completas: en
+// Android el peso variable no es fiable — es justo el motivo por el que
+// "Titular" (Montserrat) sigue cayendo en la sans del sistema.
 let cargando: Promise<void> | null = null;
 export function loadPosterFonts(): Promise<void> {
   if (!cargando) {
@@ -171,6 +205,14 @@ export function loadPosterFonts(): Promise<void> {
       Oswald: require('../../assets/fonts/Oswald.ttf'),
       Caveat: require('../../assets/fonts/Caveat.ttf'),
       GreatVibes: require('../../assets/fonts/GreatVibes.ttf'),
+      Cinzel: require('../../assets/fonts/Cinzel.ttf'),
+      CormorantGaramond: require('../../assets/fonts/CormorantGaramond.ttf'),
+      AbrilFatface: require('../../assets/fonts/AbrilFatface.ttf'),
+      Anton: require('../../assets/fonts/Anton.ttf'),
+      AmaticSC: require('../../assets/fonts/AmaticSC.ttf'),
+      DancingScript: require('../../assets/fonts/DancingScript.ttf'),
+      AlexBrush: require('../../assets/fonts/AlexBrush.ttf'),
+      Parisienne: require('../../assets/fonts/Parisienne.ttf'),
     }).catch(() => {
       // Si fallan, el póster usa la tipografía del sistema. Es peor, pero se
       // sigue pudiendo compartir: no vale la pena romper la pantalla por esto.
