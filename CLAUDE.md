@@ -488,6 +488,34 @@ Todo lo que se puede hacer con un versículo (favorito, copiar, enviar a chat, p
 
 `seminar.classes[].materials: []` (hasta 10). El `material` suelto de antes sigue existiendo y se rellena con el primero de la lista, porque las clases viejas solo tienen ese campo. **No leer ninguno de los dos a mano**: `classMaterials(cls)` de `backend/utils/seminarFiles.js`, **espejado** en `frontend/src/lib/seminarFiles.js`. Al editar, el formulario manda SIEMPRE la lista completa (aunque quede vacía): es lo que permite quitar uno.
 
+## Póster de versículos — composición (gancho, anclaje, velo, adornos)
+
+Reescrito el 2026-08-01 para acercarlo a las imágenes que se comparten de verdad (estilo escritoesta.org). Lo que cambia el aspecto no es la paleta: es la **composición**.
+
+- **Frase destacada ("gancho")**: las N primeras palabras del versículo se pintan como un **bloque aparte**, enorme y en caligráfica, y el resto va pequeño debajo. `hookWords` guarda SOLO el número de palabras (`splitHook`, espejado en los dos `verseRichText`): así no hay dos textos que sincronizar y **los índices de los tokens siguen siendo los del texto completo**, por lo que los estilos por palabra valen igual a ambos lados del corte. Con gancho, el cuerpo encoge (×0,74) o competirían.
+- **Anclaje** `top|center|bottom` (`blockTop`): el bloque se apoya en un borde respetando `safeTop`/`safeBottom` (la marca del pie). `shiftY` (fondo de pantalla) **solo cuenta centrado**. Ninguna imagen de referencia lleva el texto centrado vertical.
+- **El velo de la foto ya no cubre la foto entera.** `scrimFor(lum, anchor, textMode)` devuelve paradas normalizadas que consumen el canvas (`addColorStop`), la previa (`scrimCss` → CSS) y la app (`LinearGradient`): solo oscurece la franja del anclaje. **Y puede ser BLANCO**: sobre una foto clara el texto va oscuro (`photoText: auto|light|dark`, `photoPalette`, `photoInk` — con texto oscuro hay que invertir contorno y sombra o se emborrona). `measurePhoto(img, anchor)` mide la banda del **anclaje**, así que hay que volver a medir al moverlo.
+- **Adornos** (`ORNAMENTS`): 8 separadores + "ninguno". En la web cada uno es **UN path SVG en una caja normalizada de 100×vh**, generado con helpers (`hoja`, `corazon`, `cruz`, `rombo`, `punto`, `barra`) — el canvas lo pinta con `Path2D` + escala y la previa con `<svg viewBox>`, así que no hay geometría duplicada. **En la app no hay `react-native-svg`** (sería módulo nativo y esto dejaría de llegar por `eas update`): allí los mismos adornos se componen con Views y un `♥`. Mismo diseño, otra técnica.
+- **Pincelada tras la cita** (`refBadge`) y **marca de agua arriba** (`brandTop`). Sobre foto la pincelada va del color CONTRARIO al texto: ahí el acento ES el color del texto y saldría invisible.
+- **Tipografías nuevas**: `caligrafica` = **Great Vibes** (la del gancho; Caveat es letra de cuaderno y no da ese aire) y `titular` = **Montserrat** para el cuerpo en mayúsculas espaciadas (`upper`). Montserrat **no** se empaqueta en la app (su .ttf solo existe como variable, 745 KB, y el peso variable no es fiable en Android): allí ese id cae en la sans del sistema. Es la única divergencia tipográfica.
+- **Las plantillas (`TEMPLATES`) son composiciones enteras**, no tema+letra: si se toca una, tocar la de la app también.
+- **Al añadir un campo al diseño hay que tocar CINCO sitios**: `posterLayout.js`, `versePoster.js`, el `Poster` de `VerseImageModal.jsx`, y en la app `versePosterLayout.ts` + `VerseImageSheet.tsx`. Y si además va en los estilos guardados, **la lista blanca de `saveVerseConfig` y el esquema `versePresets`** (`userModel.js`) — es whitelist: lo que no esté ahí se guarda vacío y el estilo deja de reproducir la imagen.
+- **Cómo comprobar que la previa no miente**: `Poster` se exporta a propósito. Montarlo en una página suelta con las mismas props que `drawVersePoster` y mirar los dos resultados lado a lado es lo único que caza el fallo clásico de este archivo.
+
+## Modales web con fondo que cierra — `onClick={onClose}` a secas pierde el trabajo
+
+Un modal con `onClick={onClose}` en el fondo y `stopPropagation` en el cuadro **parece** correcto y no lo es: si el usuario **selecciona texto** dentro (arrastrando) y suelta el ratón fuera del cuadro, el navegador reparte ese `click` al **ancestro común** de donde se pulsó y donde se soltó — o sea el fondo —, así que el `stopPropagation` de dentro nunca llega a verlo y el modal se cierra. Pasaba al ir a seleccionar una parte del versículo para borrarla: se cerraba entero justo antes de pulsar Supr.
+
+El arreglo (aplicado en `VerseImageModal.jsx`) es exigir que el gesto **empiece y acabe** en el fondo:
+```jsx
+const fondoPulsado = useRef(false);
+<div
+  onMouseDown={(e) => { fondoPulsado.current = e.target === e.currentTarget; }}
+  onClick={(e) => { if (e.target === e.currentTarget && fondoPulsado.current) onClose(); fondoPulsado.current = false; }}
+>
+```
+Cualquier modal con un `<textarea>`/`<input>` dentro necesita esto.
+
 ## Póster de versículos (compartir como imagen) — dos motores, un diseño
 
 La imagen del versículo se genera **dos veces con tecnologías distintas** y hay que tocar las dos:

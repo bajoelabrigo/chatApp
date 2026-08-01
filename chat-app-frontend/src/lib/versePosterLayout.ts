@@ -42,6 +42,14 @@ export interface FontDef {
 // Sin ellas cargadas se cae a la del sistema, que es lo que había antes.
 export const FONTS: FontDef[] = [
   { id: 'clasica', name: 'Clásica' },
+  // La caligráfica de pincel: la de la frase destacada. Trazos finos y altura
+  // de x diminuta, de ahí el sizeScale alto y el interlineado corto.
+  { id: 'caligrafica', name: 'Caligráfica', family: 'GreatVibes', sizeScale: 1.5, lineScale: 0.74 },
+  // OJO — en la web esta es Montserrat; aquí NO se empaqueta (su .ttf solo
+  // existe como fuente variable, 745 KB, y en Android el peso variable no es
+  // fiable). Cae en la sans del sistema, que para un cuerpo en mayúsculas
+  // espaciadas se parece bastante. Es la única divergencia con la web.
+  { id: 'titular', name: 'Titular', family: undefined, weight: '600', sizeScale: 0.94 },
   { id: 'elegante', name: 'Elegante', family: 'PlayfairDisplay', sizeScale: 0.97 },
   { id: 'moderna', name: 'Moderna', family: undefined },
   { id: 'impacto', name: 'Impacto', family: 'Oswald', weight: '600' },
@@ -49,16 +57,68 @@ export const FONTS: FontDef[] = [
   { id: 'manuscrita', name: 'Manuscrita', family: 'Caveat', weight: '600', sizeScale: 1.42, lineScale: 0.82 },
 ];
 
-export const TEMPLATES = [
-  { id: 'clasico', name: 'Clásico', themeId: 'noche', fontId: 'clasica', align: 'center' as const },
-  { id: 'editorial', name: 'Editorial', themeId: 'crema', fontId: 'elegante', align: 'left' as const },
-  { id: 'titular', name: 'Titular', themeId: 'vino', fontId: 'impacto', align: 'left' as const },
-  { id: 'sereno', name: 'Sereno', themeId: 'cielo', fontId: 'moderna', align: 'center' as const },
-  { id: 'diario', name: 'Diario', themeId: 'bosque', fontId: 'manuscrita', align: 'center' as const },
-  { id: 'aurora', name: 'Aurora', themeId: 'amanecer', fontId: 'elegante', align: 'center' as const },
+export type AlignId = 'left' | 'center' | 'right';
+export type AnchorId = 'top' | 'center' | 'bottom';
+export type OrnamentId =
+  | 'linea'
+  | 'doble'
+  | 'puntos'
+  | 'rombo'
+  | 'corazon'
+  | 'cruz'
+  | 'hojas'
+  | 'laurel'
+  | 'ninguno';
+
+// Plantillas: COMPOSICIONES enteras, no solo color + letra. Espejo de TEMPLATES
+// en VerseImageModal.jsx — al tocar una, tocar las dos o las imágenes de la web
+// y las de la app dejarán de parecerse.
+export interface TemplateDef {
+  id: string;
+  name: string;
+  themeId: string;
+  fontId: string;
+  align: AlignId;
+  anchor: AnchorId;
+  hookWords: number;
+  upper: boolean;
+  ornament: OrnamentId;
+  hookFontId?: string;
+  refBadge?: boolean;
+}
+
+export const TEMPLATES: TemplateDef[] = [
+  { id: 'clasico', name: 'Clásico', themeId: 'noche', fontId: 'clasica', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'linea' },
+  { id: 'destacado', name: 'Destacado', themeId: 'noche', fontId: 'titular', hookFontId: 'caligrafica', hookWords: 1, upper: true, align: 'center', anchor: 'bottom', ornament: 'linea' },
+  { id: 'devocional', name: 'Devocional', themeId: 'crema', fontId: 'titular', hookFontId: 'caligrafica', hookWords: 3, upper: true, align: 'center', anchor: 'center', ornament: 'hojas', refBadge: true },
+  { id: 'editorial', name: 'Editorial', themeId: 'crema', fontId: 'elegante', align: 'left', anchor: 'center', hookWords: 0, upper: false, ornament: 'linea' },
+  { id: 'titular', name: 'Titular', themeId: 'vino', fontId: 'impacto', align: 'left', anchor: 'top', hookWords: 0, upper: false, ornament: 'linea' },
+  { id: 'sereno', name: 'Sereno', themeId: 'cielo', fontId: 'moderna', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'corazon' },
+  { id: 'diario', name: 'Diario', themeId: 'bosque', fontId: 'manuscrita', align: 'center', anchor: 'center', hookWords: 0, upper: false, ornament: 'linea' },
+  { id: 'aurora', name: 'Aurora', themeId: 'amanecer', fontId: 'titular', hookFontId: 'caligrafica', hookWords: 2, upper: true, align: 'center', anchor: 'bottom', ornament: 'corazon' },
 ];
 
-export type AlignId = 'left' | 'center' | 'right';
+export const ANCHORS: { id: AnchorId; name: string }[] = [
+  { id: 'top', name: 'Arriba' },
+  { id: 'center', name: 'Centro' },
+  { id: 'bottom', name: 'Abajo' },
+];
+
+// Mismos adornos que la web (ver ORNAMENTS en posterLayout.js) y en el mismo
+// orden. Allí cada uno es UN path SVG; aquí se componen con Views, porque no
+// hay react-native-svg — y añadirlo sería un módulo nativo, o sea que esto ya no
+// llegaría por `eas update`. Mismo diseño, otra técnica.
+export const ORNAMENTS: { id: OrnamentId; name: string }[] = [
+  { id: 'linea', name: 'Línea' },
+  { id: 'doble', name: 'Doble' },
+  { id: 'puntos', name: 'Puntos' },
+  { id: 'rombo', name: 'Rombo' },
+  { id: 'corazon', name: 'Corazón' },
+  { id: 'cruz', name: 'Cruz' },
+  { id: 'hojas', name: 'Hojas' },
+  { id: 'laurel', name: 'Laurel' },
+  { id: 'ninguno', name: 'Ninguno' },
+];
 
 export const fontById = (id: string) => FONTS.find((f) => f.id === id) || FONTS[0];
 
@@ -110,6 +170,7 @@ export function loadPosterFonts(): Promise<void> {
       PlayfairDisplay: require('../../assets/fonts/PlayfairDisplay.ttf'),
       Oswald: require('../../assets/fonts/Oswald.ttf'),
       Caveat: require('../../assets/fonts/Caveat.ttf'),
+      GreatVibes: require('../../assets/fonts/GreatVibes.ttf'),
     }).catch(() => {
       // Si fallan, el póster usa la tipografía del sistema. Es peor, pero se
       // sigue pudiendo compartir: no vale la pena romper la pantalla por esto.
@@ -121,7 +182,7 @@ export function loadPosterFonts(): Promise<void> {
 
 // Tamaño del versículo. Misma curva que la web; `sizeScale` compensa que cada
 // familia ocupa distinto al mismo tamaño en píxeles.
-export function verseBaseSize(len: number, format: FormatDef, font?: FontDef) {
+export function verseBaseSize(len: number, format: FormatDef, font?: FontDef, hasHook?: boolean) {
   const tall = format.h > format.w;
   let s: number;
   if (len <= 60) s = 70;
@@ -132,7 +193,73 @@ export function verseBaseSize(len: number, format: FormatDef, font?: FontDef) {
   else if (len <= 480) s = 33;
   else s = 28;
   if (tall) s += 6;
+  // Con frase destacada el cuerpo deja de ser el protagonista y se encoge: si
+  // se quedara igual de grande competiría con el gancho y se perdería justo la
+  // jerarquía que se busca.
+  if (hasHook) s *= 0.74;
   return s * (font?.sizeScale ?? 1);
+}
+
+// Tamaño de la frase destacada. Espejo de `hookFontSize` en la web.
+//
+// No hace falta encogerla para que quepa: se parte en líneas como el cuerpo
+// (aquí lo hace React Native solo), que es lo que hacen las referencias cuando
+// el gancho es largo ("No se preocupen / por nada; en cambio,").
+export function hookBaseSize(len: number, font?: FontDef) {
+  let s: number;
+  if (len <= 8) s = 170;
+  else if (len <= 14) s = 142;
+  else if (len <= 22) s = 118;
+  else if (len <= 34) s = 97;
+  else s = 80;
+  return s * (font?.sizeScale ?? 1);
+}
+
+// ── Velo de la foto ───────────────────────────────────────────
+// Espejo de `scrimFor` en la web, adaptado a LinearGradient (que quiere colores
+// y `locations` por separado en vez de paradas).
+//
+// El velo iba sobre TODA la foto de arriba abajo y la dejaba en barro. Ahora se
+// apoya en el borde del anclaje y se desvanece hacia el otro, así la foto se ve.
+//
+// OJO: aquí no se puede MEDIR la foto (React Native no lee los píxeles sin otra
+// dependencia nativa), así que no hay modo "automático" como en la web: el
+// usuario elige claro u oscuro y se asume una foto media.
+export function scrimFor(anchor: AnchorId, textMode: 'light' | 'dark') {
+  const oscuro = textMode !== 'dark';
+  const need = oscuro ? 0.5 : 0.48;
+  const rgb = oscuro ? '0,0,0' : '255,255,255';
+  let stops: [number, number][];
+  if (anchor === 'bottom') {
+    stops = [[0, 0], [0.4, need * 0.1], [0.68, need * 0.6], [1, need]];
+  } else if (anchor === 'top') {
+    stops = [[0, need], [0.32, need * 0.6], [0.6, need * 0.1], [1, 0]];
+  } else {
+    stops = [[0, need * 0.18], [0.24, need * 0.72], [0.5, need], [0.76, need * 0.72], [1, need * 0.18]];
+  }
+  return {
+    colors: stops.map(([, a]) => `rgba(${rgb},${a.toFixed(3)})`) as unknown as [string, string, ...string[]],
+    locations: stops.map(([at]) => at) as unknown as [number, number, ...number[]],
+  };
+}
+
+/** Colores del texto sobre foto. Espejo de `photoPalette` en la web. */
+export function photoPalette(textMode: 'light' | 'dark') {
+  return textMode === 'dark'
+    ? { text: '#1a1712', accent: '#1a1712', sub: 'rgba(26,23,18,0.74)' }
+    : { text: '#ffffff', accent: '#ffffff', sub: 'rgba(255,255,255,0.92)' };
+}
+
+/**
+ * Sombra del texto sobre foto. Con texto oscuro hay que invertirla: una sombra
+ * oscura bajo letras oscuras las emborrona en vez de despegarlas.
+ */
+export function photoShadow(textMode: 'light' | 'dark') {
+  return {
+    textShadowColor: textMode === 'dark' ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 10,
+  };
 }
 
 // Normaliza una palabra para compararla: sin tildes, sin mayúsculas y sin la

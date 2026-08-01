@@ -108,6 +108,46 @@ export function pruneStyles(styles: VerseStyles, text: string): VerseStyles {
   return out;
 }
 
+// ── Frase destacada ───────────────────────────────────────────
+// Espejo de `splitHook` en la web (holy_app/frontend/src/lib/verseRichText.js).
+//
+// El gancho NO es un texto aparte: son las N PRIMERAS PALABRAS del mismo texto.
+// Guardar solo el número evita tener el mismo texto en dos sitios (editar el
+// versículo dejaría el gancho apuntando a palabras que ya no están) y mantiene
+// los índices de los tokens, que son la clave de los estilos por palabra.
+export const MAX_HOOK_WORDS = 6;
+
+export function splitHook(text: string, hookWords: number) {
+  const toks = tokenize(text);
+  const n = Math.max(0, Math.min(MAX_HOOK_WORDS, Number(hookWords) || 0));
+  if (!n) return { toks, hookEnd: 0, bodyStart: 0 };
+
+  let palabras = 0;
+  let i = 0;
+  for (; i < toks.length; i++) {
+    if (isSpace(toks[i])) continue;
+    palabras++;
+    if (palabras >= n) {
+      i++;
+      break;
+    }
+  }
+  const hookEnd = i;
+  let bodyStart = hookEnd;
+  while (bodyStart < toks.length && isSpace(toks[bodyStart])) bodyStart++;
+  // Si el gancho se come el texto entero no hay jerarquía que enseñar: se trata
+  // como si no hubiera gancho, en vez de dejar el cuerpo vacío.
+  if (bodyStart >= toks.length) return { toks, hookEnd: 0, bodyStart: 0 };
+  return { toks, hookEnd, bodyStart };
+}
+
+/** Los tokens de un tramo, con su índice GLOBAL (la clave de los estilos). */
+export function tokenRange(toks: string[], from: number, to: number) {
+  const out: { i: number; s: string }[] = [];
+  for (let i = from; i < to; i++) out.push({ i, s: toks[i] });
+  return out;
+}
+
 // Paletas — MISMOS valores que la web (WORD_COLORS / WORD_BGS en posterLayout.js).
 export const WORD_COLORS = [
   '#ffd166', '#f59e0b', '#fb7185', '#ef4444', '#34d399',
