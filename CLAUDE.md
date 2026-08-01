@@ -554,6 +554,22 @@ Un material tiene un `kind` (`materialModel.js`): `material` (estudio, por defec
 
 El documento se **dibuja en el cliente con Canvas 2D** (`frontend/src/lib/certificate.js`), como el póster de versículos y por el mismo motivo: html2canvas se cuelga en iOS. La barra de progreso + el botón viven en `components/seminario/SeminarProgress.jsx`, que sustituye a las cuatro copias que había (móvil y escritorio de `SeminarDetails` y `SeminarClassPage`).
 
+## Perfil de usuario (`holy_app`) — privacidad y cuenta
+
+`GET /users/:username` devolvía el documento ENTERO menos la contraseña, así que cualquiera con sesión veía de cualquier otro: correo, teléfono, **cuánto ofrenda al mes**, a quién tenía bloqueado, su **historial de avisos y sanciones**, sus suscripciones de push… Ahora pasa por `utils/publicProfile.js`, que es una lista **blanca** (al añadir un campo al modelo no sale hasta que se ponga ahí a propósito). El dueño y los admins siguen recibiendo el documento completo; a los demás se les manda además `hasBlockedMe` ya calculado, porque la lista de bloqueados es privada.
+
+- La ruta es `optionalAuth`: un enlace de perfil compartido se abre **sin cuenta** (antes salía "Error cargando perfil" en rojo, porque `ProfilePage` gateaba también por `isAuthError` — el 401 de `/users/getUser` del invitado tumbaba la página entera). La búsqueda por correo dentro de `getPublicProfile` sí exige sesión, o sería un comprobador público de "¿está este correo registrado?".
+- `updateProfile` respondía con `.select("password")` — proyección de **inclusión**: devolvía `{_id, password}`, es decir el hash. Es `-password`.
+- **`updateProfile` usa `.save()`, no `findByIdAndUpdate`**: los hooks que espejan los campos compartidos con el móvil (`profilePicture` → `avatar`, `isVerified` → `emailVerified`) son `pre('save')` y **no hay `pre('findOneAndUpdate')`** en el modelo web. Con el update directo, cambiar la foto en la web dejaba la vieja en la app móvil.
+- Los campos de texto se vacían con `""`: el filtro `if (req.body[field])` de antes descartaba las cadenas vacías, así que **borrar** la biografía o la ubicación no hacía nada.
+- **Cambio de correo en dos pasos** (`requestEmailChange` / `confirmEmailChange`): pide la contraseña actual, guarda `pendingEmail` + token hasheado (1 h) y solo aplica el cambio cuando se abre el enlace enviado a la dirección NUEVA. **Bloqueado para cuentas de Google**: `loginWithGoogle` casa **por correo**, así que cambiarlo les dejaría fuera y su siguiente "Continuar con Google" crearía una cuenta duplicada.
+- Cambiar contraseña está disponible también para **admins** (antes se les ocultaba sin motivo); eliminar la cuenta sigue vetado para ellos. A los usuarios de Google se les ofrece "Crear contraseña", que reutiliza el flujo de `forgotPassword` (tienen una contraseña aleatoria que nunca han visto).
+- Los botones de amistad usan `FriendButton` + `GET /connections/status/:id` (que ya devuelve `{status, requestId}`). Antes se pedía ese estado y **no se usaba**: se decidía con `connections.some(c => c === authUser._id)`, comparando ObjectIds con `===`, y "Eliminar amigo" tenía `onClick={() => {}}`.
+
+**Pestaña "Mis Actividades"** (`UserPostSection` → `MyActivitiesDashboard`). Muestra dos cosas de sistemas distintos, no confundirlas:
+- Arriba, `MyActivitiesSummary.jsx`: resumen de las actividades espirituales del **chat-backend** (`/users/my-commitments` + `/users/me/activities` vía `chatApi`), que es lo que se edita en la página de actividades. Solo tipo/nombre/grupo/horario y un enlace a `/activities`; el detalle no se duplica. Lleva `refetchOnMount: "always"` — con el `staleTime` global de 1 h, unirse a una actividad no se vería aquí hasta recargar.
+- Abajo, los **seminarios** (`Activity` de la web, `/activities/mine`). Dos trampas ya corregidas: el filtro era `{ createdBy: userId }`, así que a un alumno inscrito le salía SIEMPRE vacío (crear seminarios es de admins) — ahora es `$or` con `participants.user`; y la proyección no incluía `type` ni `seminar.enabled`, que son justo los campos por los que el cliente filtra para quedarse con los seminarios, así que la lista salía vacía **también para el admin**. Del seminario se proyecta SOLO `seminar.enabled` (nunca `studentProgress`).
+
 ## Materiales no listados — enlace privado con clave
 
 Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no hay enum `visibility`; los docs viejos solo tienen `published`):
