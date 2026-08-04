@@ -15,6 +15,7 @@ import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useNotificationsStore } from '../src/store/useNotificationsStore';
 import type { NotificationItem, NotificationKind } from '../src/services/notificationService';
+import { cld } from '../src/lib/cldImage';
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -130,7 +131,7 @@ export default function NotificationsScreen() {
         <View style={{ marginRight: 12 }}>
           {item.avatar ? (
             <Image
-              source={{ uri: item.avatar }}
+              source={{ uri: cld(item.avatar, 48) }}
               style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.avatarBg }}
             />
           ) : (

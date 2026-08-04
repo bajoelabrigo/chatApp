@@ -11,6 +11,7 @@ import { getSocket } from '../../src/services/socketService';
 import { fetchVerses, type BibleVerse } from '../../src/services/bibleService';
 import { CrossRefsList } from '../../src/components/bible/CrossRefsList';
 import type { VerseItem } from '../../src/constants/bible';
+import { cld } from '../../src/lib/cldImage';
 
 // Lectura en vivo GUIADA por un anfitrión: el grupo lee el mismo pasaje a la vez;
 // el anfitrión marca el versículo que se lee y a todos se les resalta y se
@@ -180,7 +181,7 @@ export default function LiveReadingScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           {participants.slice(0, 4).map((p, i) =>
             p.avatar ? (
-              <Image key={p.userId} source={{ uri: p.avatar }} style={{ width: 26, height: 26, borderRadius: 13, marginLeft: i === 0 ? 0 : -8, borderWidth: 1.5, borderColor: colors.bgPrimary }} />
+              <Image key={p.userId} source={{ uri: cld(p.avatar, 26) }} style={{ width: 26, height: 26, borderRadius: 13, marginLeft: i === 0 ? 0 : -8, borderWidth: 1.5, borderColor: colors.bgPrimary }} />
             ) : (
               <View key={p.userId} style={{ width: 26, height: 26, borderRadius: 13, marginLeft: i === 0 ? 0 : -8, backgroundColor: colors.bgTertiary, borderWidth: 1.5, borderColor: colors.bgPrimary, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 11, color: colors.textSecondary }}>{p.name[0]?.toUpperCase()}</Text>

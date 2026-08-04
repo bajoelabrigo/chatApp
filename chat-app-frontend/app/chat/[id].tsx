@@ -68,6 +68,7 @@ import {
 } from '../../src/components/chat/ChatListParts';
 import { useVoiceRecorder } from '../../src/hooks/useVoiceRecorder';
 import { GroupMemberSheet } from '../../src/components/chat/GroupMemberSheet';
+import { cld } from '../../src/lib/cldImage';
 
 const QUICK_EMOJIS = ['❤️', '😂', '😮', '😢', '👍', '🙏'];
 
@@ -1129,7 +1130,7 @@ export default function ChatScreen() {
             }}
           >
             {avatar ? (
-              <Image source={{ uri: avatar }} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} />
+              <Image source={{ uri: cld(avatar, 40) }} style={{ width: 40, height: 40, borderRadius: 10, marginRight: 10 }} />
             ) : (
               <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 10, alignItems: 'center', justifyContent: 'center' }}>
                 {isGroupChat ? (
@@ -1438,7 +1439,7 @@ export default function ChatScreen() {
                 }}
               >
                 {u.avatar ? (
-                  <Image source={{ uri: u.avatar }} style={{ width: 34, height: 34, borderRadius: 17 }} />
+                  <Image source={{ uri: cld(u.avatar, 34) }} style={{ width: 34, height: 34, borderRadius: 17 }} />
                 ) : (
                   <View
                     style={{
@@ -1467,7 +1468,7 @@ export default function ChatScreen() {
           <View style={{ width: 3, alignSelf: 'stretch', backgroundColor: colors.accent, borderRadius: 2, marginRight: 10 }} />
           {replyingTo.type === 'image' && (
             <Image
-              source={{ uri: replyingTo.content }}
+              source={{ uri: cld(replyingTo.content, 44) }}
               style={{ width: 44, height: 44, borderRadius: 6, marginRight: 10 }}
               resizeMode="cover"
             />
@@ -1912,7 +1913,7 @@ export default function ChatScreen() {
                         {/* Avatar */}
                         {avatarUri ? (
                           <Image
-                            source={{ uri: avatarUri }}
+                            source={{ uri: cld(avatarUri, 46) }}
                             style={{ width: 46, height: 46, borderRadius: 23, marginRight: 12 }}
                           />
                         ) : (

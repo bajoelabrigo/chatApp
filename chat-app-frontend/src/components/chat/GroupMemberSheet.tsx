@@ -1,6 +1,7 @@
 import { View, Text, Image, Modal, Pressable, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ChatUser } from '../../services/conversationService';
+import { cld } from '../../lib/cldImage';
 
 // Hoja de un miembro del grupo: su ficha y lo que se puede hacer con él.
 //
@@ -104,7 +105,7 @@ export function GroupMemberSheet({
             <View style={{ alignItems: 'center', paddingTop: 20, paddingBottom: 12 }}>
               <View style={{ padding: 3, borderRadius: 50, borderWidth: 2.5, borderColor: colors.accent }}>
                 {member.avatar ? (
-                  <Image source={{ uri: member.avatar }} style={{ width: 72, height: 72, borderRadius: 36 }} />
+                  <Image source={{ uri: cld(member.avatar, 72) }} style={{ width: 72, height: 72, borderRadius: 36 }} />
                 ) : (
                   <View
                     style={{

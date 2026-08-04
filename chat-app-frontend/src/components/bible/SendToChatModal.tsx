@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Conversation } from '../../services/conversationService';
+import { cld } from '../../lib/cldImage';
 
 // Elegir a qué chat enviar un pasaje bíblico (desde la página de la Biblia).
 // Al pulsar una conversación se manda como mensaje `bible` (tarjeta con "Abrir en
@@ -79,7 +80,7 @@ export function SendToChatModal({
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 12 }}
                 >
                   {avatarOf(c) ? (
-                    <Image source={{ uri: avatarOf(c)! }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                    <Image source={{ uri: cld(avatarOf(c)!, 44) }} style={{ width: 44, height: 44, borderRadius: 22 }} />
                   ) : (
                     <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
                       <Ionicons name={c.isGroup ? 'people' : 'person'} size={20} color={colors.textSecondary} />

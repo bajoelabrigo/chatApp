@@ -26,6 +26,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { uploadFile } from '../../src/services/uploadService';
 import { DatePickerModal } from '../../src/components/DatePickerModal';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
+import { cld } from '../../src/lib/cldImage';
 import {
   getPrayerRequests,
   createPrayerRequest,
@@ -59,7 +60,7 @@ function PrayingUserChip({
       style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.bgTertiary, borderRadius: 999, paddingLeft: 4, paddingRight: 10, paddingVertical: 4, marginRight: 6, marginBottom: 6 }}
     >
       {pu.userId?.avatar ? (
-        <Image source={{ uri: pu.userId.avatar }} style={{ width: 20, height: 20, borderRadius: 10 }} />
+        <Image source={{ uri: cld(pu.userId.avatar, 20) }} style={{ width: 20, height: 20, borderRadius: 10 }} />
       ) : (
         <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontSize: 9, color: colors.textPrimary, fontWeight: '700' }}>{initial}</Text>
@@ -115,7 +116,7 @@ function RequestCard({
 
       {request.imageUrl ? (
         <Image
-          source={{ uri: request.imageUrl }}
+          source={{ uri: cld(request.imageUrl, 400) }}
           style={{ width: '100%', height: 180, borderRadius: 12, marginBottom: 10 }}
           resizeMode="cover"
         />
@@ -565,7 +566,7 @@ export default function GroupPrayerScreen() {
                           )}
                         </View>
                         {req.imageUrl ? (
-                          <Image source={{ uri: req.imageUrl }} style={{ width: '100%', height: 140, borderRadius: 10, marginVertical: 8 }} resizeMode="cover" />
+                          <Image source={{ uri: cld(req.imageUrl, 400) }} style={{ width: '100%', height: 140, borderRadius: 10, marginVertical: 8 }} resizeMode="cover" />
                         ) : null}
                         {req.answeredNote ? (
                           <Text style={{ color: colors.accent, fontSize: 12, fontStyle: 'italic' }}>"{req.answeredNote}"</Text>
@@ -882,7 +883,8 @@ export default function GroupPrayerScreen() {
 
                 {(editImage || editImageUrl) ? (
                   <View style={{ marginBottom: 16, position: 'relative' }}>
-                    <Image source={{ uri: editImage ? editImage.uri : (editImageUrl as string) }} style={{ width: '100%', height: 160, borderRadius: 12 }} resizeMode="cover" />
+                    {/* `editImage.uri` es un file:// recién elegido; la otra rama sí es de Cloudinary. */}
+                    <Image source={{ uri: editImage ? editImage.uri : cld(editImageUrl as string, 400) }} style={{ width: '100%', height: 160, borderRadius: 12 }} resizeMode="cover" />
                     <TouchableOpacity
                       onPress={() => { setEditImage(null); setEditImageUrl(null); }}
                       style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 16, padding: 4 }}

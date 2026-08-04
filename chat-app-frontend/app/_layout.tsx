@@ -17,6 +17,7 @@ import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { triggerDailyActivityReminder } from '../src/utils/dailyActivityReminder';
 import { SocioWelcomeModal } from '../src/components/SocioWelcomeModal';
 import { SocioPaymentReminderModal } from '../src/components/SocioPaymentReminderModal';
+import { cld } from '../src/lib/cldImage';
 
 registerGlobals();
 
@@ -202,7 +203,7 @@ function RootLayoutInner() {
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'center', alignItems: 'center', padding: 32 }}>
           <View style={{ width: '100%', backgroundColor: colors.bgSecondary, borderRadius: 28, padding: 32, alignItems: 'center' }}>
             {incomingCall?.callerAvatar ? (
-              <Image source={{ uri: incomingCall.callerAvatar }} style={{ width: 96, height: 96, borderRadius: 20, marginBottom: 16 }} />
+              <Image source={{ uri: cld(incomingCall.callerAvatar, 96) }} style={{ width: 96, height: 96, borderRadius: 20, marginBottom: 16 }} />
             ) : (
               <View style={{ width: 96, height: 96, borderRadius: 20, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
                 <Text style={{ color: colors.textPrimary, fontSize: 40, fontWeight: 'bold' }}>

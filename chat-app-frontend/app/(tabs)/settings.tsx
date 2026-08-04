@@ -27,6 +27,7 @@ import { signOutGoogle } from '../../src/services/googleSignIn';
 import { uploadFile } from '../../src/services/uploadService';
 import { getMyProfileApi, updateProfileApi, getSettingsApi, updateSettingsApi, changePasswordApi, deleteAccountApi } from '../../src/services/userService';
 import type { NotificationSettings, PrivacySettings } from '../../src/store/useAuthStore';
+import { cld } from '../../src/lib/cldImage';
 import {
   getConversations,
   getArchivedConversations,
@@ -409,7 +410,7 @@ export default function SettingsScreen() {
           {/* Avatar */}
           <View style={{ position: 'relative', marginRight: 16 }}>
             {user?.avatar ? (
-              <Image source={{ uri: user.avatar }} style={{ width: 68, height: 68, borderRadius: 34 }} />
+              <Image source={{ uri: cld(user.avatar, 68) }} style={{ width: 68, height: 68, borderRadius: 34 }} />
             ) : (
               <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: '#fff', fontSize: 26, fontWeight: 'bold' }}>
@@ -640,7 +641,7 @@ export default function SettingsScreen() {
                 <TouchableOpacity onPress={pickAvatar} activeOpacity={0.8} disabled={uploadingAvatar}>
                   <View style={{ position: 'relative' }}>
                     {editAvatar ? (
-                      <Image source={{ uri: editAvatar }} style={{ width: 100, height: 100, borderRadius: 50 }} />
+                      <Image source={{ uri: cld(editAvatar, 100) }} style={{ width: 100, height: 100, borderRadius: 50 }} />
                     ) : (
                       <View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ color: '#fff', fontSize: 36, fontWeight: 'bold' }}>
@@ -1019,7 +1020,7 @@ function ConvRow({ name, avatar, sub, loading, actionLabel, actionColor, onActio
       style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
     >
       {avatar ? (
-        <Image source={{ uri: avatar }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
+        <Image source={{ uri: cld(avatar, 44) }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
       ) : (
         <View style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 16 }}>{name[0]?.toUpperCase()}</Text>
@@ -1050,7 +1051,7 @@ function UserRow({ user: blockedUser, loading, onUnblock, colors }: {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}>
       {blockedUser.avatar ? (
-        <Image source={{ uri: blockedUser.avatar }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
+        <Image source={{ uri: cld(blockedUser.avatar, 44) }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
       ) : (
         <View style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 16 }}>{blockedUser.name[0]?.toUpperCase()}</Text>

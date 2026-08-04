@@ -13,6 +13,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 import ShareContactSheet from '../../src/components/ShareContactSheet';
 import { SocioTag } from '../../src/components/SocioTag';
+import { cld } from '../../src/lib/cldImage';
 import {
   getUserProfile, reportUser, apiToggleFavorite, apiToggleBlock,
   apiToggleArchive, apiTogglePin, apiToggleMute, addGroupMembers, type ContactProfile,
@@ -302,7 +303,7 @@ export default function ContactInfoScreen() {
         {/* Avatar + name + email */}
         <View style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: 16 }}>
           {profile.avatar ? (
-            <Image source={{ uri: profile.avatar }} style={{ width: 112, height: 112, borderRadius: 56 }} />
+            <Image source={{ uri: cld(profile.avatar, 112) }} style={{ width: 112, height: 112, borderRadius: 56 }} />
           ) : (
             <View style={{ width: 112, height: 112, borderRadius: 56, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
               <Text style={{ color: colors.textPrimary, fontSize: 48, fontWeight: 'bold' }}>
@@ -394,7 +395,7 @@ export default function ContactInfoScreen() {
                 style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: idx < visibleGroups.length - 1 ? 1 : 0, borderBottomColor: colors.border }}
               >
                 {g.groupAvatar ? (
-                  <Image source={{ uri: g.groupAvatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                  <Image source={{ uri: cld(g.groupAvatar, 40) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
                 ) : (
                   <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.accent}33`, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                     <FontAwesome5 name="user-friends" size={16} color={colors.accent} />
@@ -564,7 +565,7 @@ export default function ContactInfoScreen() {
                       style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
                     >
                       {g.groupAvatar ? (
-                        <Image source={{ uri: g.groupAvatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                        <Image source={{ uri: cld(g.groupAvatar, 40) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
                       ) : (
                         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.accent}33`, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                           <FontAwesome5 name="user-friends" size={16} color={colors.accent} />

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { GroupDailyVerse } from '../../services/bibleService';
+import { cld } from '../../lib/cldImage';
 
 // Tarjeta fija del "versículo del día" en el chat del grupo. Muestra el versículo
 // (el mismo para todos ese día), un botón "Abrir en la Biblia" y una fila de
@@ -131,7 +132,7 @@ export function DailyVerseChatCard({ data, colors, onReact, onOpen }: Props) {
                   r.avatar ? (
                     <Image
                       key={r.userId}
-                      source={{ uri: r.avatar }}
+                      source={{ uri: cld(r.avatar, 20) }}
                       style={{ width: 20, height: 20, borderRadius: 10, marginLeft: i === 0 ? 0 : -6, borderWidth: 1, borderColor: colors.bgSecondary }}
                     />
                   ) : (

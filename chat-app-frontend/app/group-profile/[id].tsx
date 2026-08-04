@@ -44,6 +44,7 @@ import {
 import { uploadFile } from '../../src/services/uploadService';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
 import { SocioTag } from '../../src/components/SocioTag';
+import { cld } from '../../src/lib/cldImage';
 
 // Cuántos miembros se muestran en el panel antes del botón "Ver todos"
 // (idéntico a la web).
@@ -511,7 +512,7 @@ export default function GroupProfileScreen() {
                 <ActivityIndicator color={colors.accent} />
               </View>
             ) : group.groupAvatar ? (
-              <Image source={{ uri: group.groupAvatar }} style={{ width: 96, height: 96, borderRadius: 48 }} />
+              <Image source={{ uri: cld(group.groupAvatar, 96) }} style={{ width: 96, height: 96, borderRadius: 48 }} />
             ) : (
               <View style={{ width: 96, height: 96, borderRadius: 48, backgroundColor: colors.accentDark, alignItems: 'center', justifyContent: 'center' }}>
                 <FontAwesome5 name="user-friends" size={36} color="#fff" />
@@ -694,7 +695,7 @@ export default function GroupProfileScreen() {
                 style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: isLast ? 0 : 1, borderBottomColor: colors.border }}
               >
                 {member.avatar ? (
-                  <Image source={{ uri: member.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                  <Image source={{ uri: cld(member.avatar, 40) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
                 ) : (
                   <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                     <Text style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{member.name[0]?.toUpperCase()}</Text>
@@ -1004,7 +1005,7 @@ export default function GroupProfileScreen() {
                     style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
                   >
                     {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                      <Image source={{ uri: cld(item.avatar, 40) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
                     ) : (
                       <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{item.name[0]?.toUpperCase()}</Text>
@@ -1079,7 +1080,7 @@ export default function GroupProfileScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10 }}
                 >
                   {member.avatar ? (
-                    <Image source={{ uri: member.avatar }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
+                    <Image source={{ uri: cld(member.avatar, 40) }} style={{ width: 40, height: 40, borderRadius: 20, marginRight: 12 }} />
                   ) : (
                     <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                       <Text style={{ color: colors.textPrimary, fontWeight: 'bold' }}>{member.name[0]?.toUpperCase()}</Text>
@@ -1130,7 +1131,7 @@ export default function GroupProfileScreen() {
                   {/* Profile header */}
                   <View style={{ alignItems: 'center', paddingVertical: 20, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                     {memberModal.avatar ? (
-                      <Image source={{ uri: memberModal.avatar }} style={{ width: 72, height: 72, borderRadius: 36, marginBottom: 10 }} />
+                      <Image source={{ uri: cld(memberModal.avatar, 72) }} style={{ width: 72, height: 72, borderRadius: 36, marginBottom: 10 }} />
                     ) : (
                       <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
                         <Text style={{ color: colors.accent, fontSize: 28, fontWeight: '700' }}>{memberModal.name[0]?.toUpperCase()}</Text>

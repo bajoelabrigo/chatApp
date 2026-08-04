@@ -8,6 +8,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { parseFormatting, type FmtSegment } from '../../utils/chatFormat';
 import { splitMentions } from '../../utils/mentions';
 import { PollBubble } from './PollBubble';
+import { cld } from '../../lib/cldImage';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 const EMOJI_ONLY_REGEX = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
@@ -164,7 +165,7 @@ function ReplyPreview({ reply, isMine, colors, onPress }: { reply: MessageReplyT
       </View>
       {isImageReply && (
         <Image
-          source={{ uri: reply.content }}
+          source={{ uri: cld(reply.content, 48) }}
           style={{ width: 48, height: 48, borderRadius: 7 }}
           resizeMode="cover"
         />
@@ -270,7 +271,7 @@ function SenderAvatar({ name, avatar, colors }: { name: string; avatar?: string;
   if (avatar) {
     return (
       <Image
-        source={{ uri: avatar }}
+        source={{ uri: cld(avatar, 32) }}
         style={{ width: 32, height: 32, borderRadius: 8, marginRight: 10, marginTop: 2 }}
       />
     );
@@ -477,7 +478,9 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
               <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />
             </View>
           )}
-          <Image source={{ uri: item.content }} style={{ width: 224, height: 224 }} resizeMode="cover" />
+          {/* Miniatura: se pide a 224dp. Abrir/descargar sigue usando
+              `item.content` (el original en calidad completa). */}
+          <Image source={{ uri: cld(item.content, 224) }} style={{ width: 224, height: 224 }} resizeMode="cover" />
           {captionBlock}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, backgroundColor: bubbleBg }}>
             <Text style={{ color: bubbleSubtext, fontSize: 12, flex: 1, marginRight: 8 }} numberOfLines={1}>
@@ -710,7 +713,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
 
           <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingTop: 12, paddingBottom: 10, gap: 12 }}>
             {item.contact?.avatar ? (
-              <Image source={{ uri: item.contact.avatar }} style={{ width: 48, height: 48, borderRadius: 24 }} />
+              <Image source={{ uri: cld(item.contact.avatar, 48) }} style={{ width: 48, height: 48, borderRadius: 24 }} />
             ) : (
               <View style={{
                 width: 48, height: 48, borderRadius: 24,

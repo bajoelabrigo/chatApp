@@ -27,6 +27,7 @@ import {
   type GroupPermissions,
 } from '../src/services/conversationService';
 import { getSocket } from '../src/services/socketService';
+import { cld } from '../src/lib/cldImage';
 
 const TEMP_OPTIONS: { label: string; value: number | null }[] = [
   { label: 'Desactivado', value: null },
@@ -76,7 +77,7 @@ function Chip({ user, onRemove, colors }: { user: ChatUser; onRemove: () => void
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${colors.accent}33`, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4, marginRight: 8, marginBottom: 8 }}>
       {user.avatar ? (
-        <Image source={{ uri: user.avatar }} style={{ width: 20, height: 20, borderRadius: 10, marginRight: 4 }} />
+        <Image source={{ uri: cld(user.avatar, 20) }} style={{ width: 20, height: 20, borderRadius: 10, marginRight: 4 }} />
       ) : (
         <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 4, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: colors.textPrimary, fontSize: 10, fontWeight: 'bold' }}>{user.name[0]?.toUpperCase()}</Text>
@@ -264,7 +265,7 @@ export default function NewGroupScreen() {
                   {/* Avatar */}
                   <View style={{ position: 'relative', marginRight: 12 }}>
                     {item.avatar ? (
-                      <Image source={{ uri: item.avatar }} style={{ width: 44, height: 44, borderRadius: 22 }} />
+                      <Image source={{ uri: cld(item.avatar, 44) }} style={{ width: 44, height: 44, borderRadius: 22 }} />
                     ) : (
                       <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ color: colors.textPrimary, fontWeight: 'bold', fontSize: 16 }}>{item.name[0]?.toUpperCase()}</Text>

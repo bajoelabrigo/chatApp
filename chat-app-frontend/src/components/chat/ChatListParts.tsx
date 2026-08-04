@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { View, Text, Image, Animated, Easing, PanResponder } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { cld } from '../../lib/cldImage';
 
 // Piezas visuales de la lista de mensajes: el separador de día, el indicador de
 // "escribiendo…" y el gesto de deslizar para responder.
@@ -65,7 +66,7 @@ export function TypingIndicator({
   return (
     <View style={{ paddingHorizontal: 12, marginBottom: 8, flexDirection: 'row', alignItems: 'flex-end' }}>
       {avatar ? (
-        <Image source={{ uri: avatar }} style={{ width: 30, height: 30, borderRadius: 8, marginRight: 6 }} />
+        <Image source={{ uri: cld(avatar, 30) }} style={{ width: 30, height: 30, borderRadius: 8, marginRight: 6 }} />
       ) : (
         <View
           style={{

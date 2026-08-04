@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import type { DiscoverableGroup } from '../../services/conversationService';
+import { cld } from '../../lib/cldImage';
 
 // "Descubre grupos": grupos abiertos a los que se puede pedir entrar.
 //
@@ -61,7 +62,7 @@ export function DiscoverGroups({ groups, busyId, colors, onJoin }: Props) {
             }}
           >
             {g.groupAvatar ? (
-              <Image source={{ uri: g.groupAvatar }} style={{ width: 50, height: 50, borderRadius: 12 }} />
+              <Image source={{ uri: cld(g.groupAvatar, 50) }} style={{ width: 50, height: 50, borderRadius: 12 }} />
             ) : (
               <View
                 style={{

@@ -8,6 +8,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useTheme } from '../../src/context/ThemeContext';
+import { cld } from '../../src/lib/cldImage';
 import {
   getGroupMedia,
   type GroupMedia,
@@ -72,7 +73,7 @@ function GroupLinkRow({ url, colors }: { url: string; colors: any }) {
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12, backgroundColor: colors.bgSecondary }}
     >
       {meta?.image ? (
-        <Image source={{ uri: meta.image }} style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: colors.bgTertiary }} />
+        <Image source={{ uri: cld(meta.image, 40) }} style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: colors.bgTertiary }} />
       ) : (
         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.accent}26`, alignItems: 'center', justifyContent: 'center' }}>
           <Ionicons name="link" size={18} color={colors.accent} />
@@ -95,7 +96,7 @@ function FileTile({ file, colors }: { file: GroupMediaFile; colors: any }) {
       style={{ flex: 1 / 3, aspectRatio: 1, margin: 3, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border }}
     >
       {isImage(file.url) ? (
-        <Image source={{ uri: url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+        <Image source={{ uri: cld(url, 130) }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
       ) : isVideo(file.url) ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
           <Ionicons name="play-circle" size={34} color="#fff" />

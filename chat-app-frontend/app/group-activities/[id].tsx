@@ -36,6 +36,7 @@ import {
 import { getGroupInfo } from '../../src/services/conversationService';
 import { DatePickerModal } from '../../src/components/DatePickerModal';
 import ShareSheet, { WEB_URL } from '../../src/components/ShareSheet';
+import { cld } from '../../src/lib/cldImage';
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
@@ -427,7 +428,7 @@ export default function GroupActivitiesScreen() {
                       >
                         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                           {p.userId.avatar ? (
-                            <Image source={{ uri: p.userId.avatar }} style={{ width: 36, height: 36, borderRadius: 10, marginRight: 10 }} />
+                            <Image source={{ uri: cld(p.userId.avatar, 36) }} style={{ width: 36, height: 36, borderRadius: 10, marginRight: 10 }} />
                           ) : (
                             <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
                               <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 16 }}>

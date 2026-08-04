@@ -18,6 +18,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuthStore } from '../../src/store/useAuthStore';
+import { cld } from '../../src/lib/cldImage';
 import {
   getMaterials,
   markMaterialViewed,
@@ -186,7 +187,7 @@ export default function MaterialesScreen() {
         }}
       >
         {img ? (
-          <Image source={{ uri: img }} style={{ width: '100%', height: 170 }} resizeMode="cover" />
+          <Image source={{ uri: cld(img, 400) }} style={{ width: '100%', height: 170 }} resizeMode="cover" />
         ) : (
           <View
             style={{

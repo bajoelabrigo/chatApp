@@ -6,6 +6,7 @@ import { RTCView } from '@livekit/react-native-webrtc';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallStore } from '../src/store/useCallStore';
 import { useTheme } from '../src/context/ThemeContext';
+import { cld } from '../src/lib/cldImage';
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -52,7 +53,7 @@ export default function CallScreen() {
   const PeerPlaceholder = () => (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: callBg }}>
       {peerAvatar ? (
-        <Image source={{ uri: peerAvatar }} style={{ width: 128, height: 128, borderRadius: 64,
+        <Image source={{ uri: cld(peerAvatar, 128) }} style={{ width: 128, height: 128, borderRadius: 64,
           shadowColor: colors.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 16 }} />
       ) : (
         <View style={{ width: 128, height: 128, borderRadius: 64, backgroundColor: colors.avatarBg,

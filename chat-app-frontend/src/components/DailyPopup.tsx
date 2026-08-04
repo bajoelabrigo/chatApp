@@ -6,6 +6,7 @@ import { useFocusEffect, router } from 'expo-router';
 import { useTheme } from '../context/ThemeContext';
 import { useAuthStore } from '../store/useAuthStore';
 import { markMaterialViewed } from '../services/materialsService';
+import { cld } from '../lib/cldImage';
 import {
   getDailyPopup,
   getPopupConfig,
@@ -182,7 +183,7 @@ export default function DailyPopup() {
       }}
     >
       {img ? (
-        <Image source={{ uri: img }} style={{ width: 54, height: 54, borderRadius: 12 }} />
+        <Image source={{ uri: cld(img, 54) }} style={{ width: 54, height: 54, borderRadius: 12 }} />
       ) : (
         <View
           style={{

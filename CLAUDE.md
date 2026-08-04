@@ -13,6 +13,23 @@ Monorepo structure:
 
 ---
 
+## Imágenes de Cloudinary — SIEMPRE servirlas con `cld()`
+
+Hasta 2026-08-04 no se usaba **ninguna** transformación: se subía el archivo original y se pintaba el `secure_url` crudo, así que un avatar de 46dp se descargaba como la foto de 3000px que subió el usuario. Medido contra la cuenta real (`drojpkloa`), una portada de material de 2.129 KB baja a **238 KB solo con `f_auto,q_auto` (−89%)** y a **39 KB pidiendo el ancho que se pinta (−98%)**.
+
+**Helper espejado — al tocar las reglas, editar los dos**: `chat-app-frontend/src/lib/cldImage.ts` (móvil) y `holy_app/frontend/src/lib/cldImage.js` (web). Firma: `cld(url, anchoEnDp?, { crop, h })`.
+
+- **Regla: toda imagen de Cloudinary se pinta con `cld(url, ancho)`**, donde `ancho` es el tamaño al que se MUESTRA (dp en móvil, px CSS en web), no el del archivo. Sin ancho aplica solo `f_auto,q_auto` — es el modo seguro cuando no se sabe el tamaño (visores a pantalla completa, contenedores fluidos).
+- **Solo toca `/image/upload/`**. Devuelve la URL intacta si no es de Cloudinary (Pexels, YouTube, `blob:`, `/avatar.png`, avatares de Google), si es `/video/upload/` o `/raw/upload/` (los documentos se romperían), o si ya trae transformaciones (el póster de video de `MessageBubble` las pone a mano).
+- **El ancho se redondea a escalones** (`LADDER`) y se multiplica por el DPR (×3 tope en móvil, ×2 en web). Los escalones existen para que dos dispositivos parecidos compartan la MISMA URL: cada ancho distinto es un asset derivado nuevo, y las transformaciones también se facturan. **Los escalones deben ser idénticos en las dos copias** o cada cliente genera su propio juego de derivados.
+- **Abrir/descargar/compartir usa SIEMPRE la URL original**, nunca la de `cld()`: la miniatura del chat va a `cld(item.content, 224)` pero `onDownload(item)` y `Linking.openURL` siguen con `item.content`.
+- **Un ancho demasiado pequeño se ve borroso** — es el único modo de estropear la calidad con esto. Al añadir un `<img>`/`<Image>`, leer el tamaño real pintado; si el `className` de Tailwind está en un div padre y no en la imagen, es mejor pasar `cld(url)` sin ancho que adivinar.
+- Cómo comprobarlo: abrir la página y leer el DOM (`document.querySelectorAll('img')`), verificando que `pedido >= pintado * devicePixelRatio` para todas. Un `vite build` no detecta ni un ancho corto ni un `cld` sin importar.
+
+Esto es solo la ENTREGA. La subida sigue guardando el original sin transformar (los ~10 `upload_stream`/`upload` de los dos backends no pasan opciones): reduce ancho de banda, no almacenamiento.
+
+---
+
 ## Base de datos unificada (web + móvil)
 
 Desde 2026-06-08, la app móvil (`chat-app-backend`) y la web (`holy_app`) **comparten una única base de datos MongoDB: `chatapp`** (cluster `uyjlwo2`). La base antigua de la web (`Authentication`, cluster `jsfmxek`) quedó **solo como respaldo** — nada la lee ya. Un registro/borrado en cualquiera de las dos apps se refleja en la otra.

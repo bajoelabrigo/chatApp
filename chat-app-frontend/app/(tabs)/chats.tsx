@@ -54,6 +54,7 @@ import {
   type DiscoverableGroup,
 } from '../../src/services/conversationService';
 import { DiscoverGroups } from '../../src/components/chat/DiscoverGroups';
+import { cld } from '../../src/lib/cldImage';
 
 // Cuántos sugeridos ("Quizás los conozcas") se ven sin desplegar. El backend
 // manda hasta 15; en filas verticales, pintarlos todos empujaría los CHATS —lo
@@ -750,7 +751,7 @@ export default function ChatsScreen() {
         {/* Avatar */}
         <View style={{ position: 'relative', marginRight: 12 }}>
           {displayAvatar ? (
-            <Image source={{ uri: displayAvatar }} style={{ width: 50, height: 50, borderRadius: 12 }} />
+            <Image source={{ uri: cld(displayAvatar, 50) }} style={{ width: 50, height: 50, borderRadius: 12 }} />
           ) : (
             <View style={{ width: 50, height: 50, borderRadius: 12, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
               {isGroup ? (
@@ -908,7 +909,7 @@ export default function ChatsScreen() {
                           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10 }}
                         >
                           {c?.avatar ? (
-                            <Image source={{ uri: c.avatar }} style={{ width: 46, height: 46, borderRadius: 23, marginRight: 12 }} />
+                            <Image source={{ uri: cld(c.avatar, 46) }} style={{ width: 46, height: 46, borderRadius: 23, marginRight: 12 }} />
                           ) : (
                             <View style={{ width: 46, height: 46, borderRadius: 23, marginRight: 12, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
                               <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 18 }}>{(c?.name ?? '?')[0]?.toUpperCase()}</Text>
@@ -1006,7 +1007,7 @@ export default function ChatsScreen() {
                         >
                           <View>
                             {u.avatar ? (
-                              <Image source={{ uri: u.avatar }} style={{ width: 50, height: 50, borderRadius: 25 }} />
+                              <Image source={{ uri: cld(u.avatar, 50) }} style={{ width: 50, height: 50, borderRadius: 25 }} />
                             ) : (
                               <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: colors.avatarBg, alignItems: 'center', justifyContent: 'center' }}>
                                 <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 20 }}>
@@ -1250,7 +1251,7 @@ export default function ChatsScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
                 >
                   {item.avatar ? (
-                    <Image source={{ uri: item.avatar }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
+                    <Image source={{ uri: cld(item.avatar, 44) }} style={{ width: 44, height: 44, borderRadius: 10, marginRight: 12 }} />
                   ) : (
                     <View style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                       <Text style={{ color: colors.accent, fontWeight: 'bold' }}>{item.name[0]?.toUpperCase()}</Text>
@@ -1336,7 +1337,7 @@ export default function ChatsScreen() {
                     style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
                   >
                     {displayAvatar ? (
-                      <Image source={{ uri: displayAvatar }} style={{ width: 46, height: 46, borderRadius: 10, marginRight: 12 }} />
+                      <Image source={{ uri: cld(displayAvatar, 46) }} style={{ width: 46, height: 46, borderRadius: 10, marginRight: 12 }} />
                     ) : (
                       <View style={{ width: 46, height: 46, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 17 }}>{displayName[0]?.toUpperCase()}</Text>
@@ -1387,7 +1388,7 @@ export default function ChatsScreen() {
                   style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border }}
                 >
                   {item.avatar ? (
-                    <Image source={{ uri: item.avatar }} style={{ width: 46, height: 46, borderRadius: 10, marginRight: 12 }} />
+                    <Image source={{ uri: cld(item.avatar, 46) }} style={{ width: 46, height: 46, borderRadius: 10, marginRight: 12 }} />
                   ) : (
                     <View style={{ width: 46, height: 46, borderRadius: 10, backgroundColor: colors.avatarBg, marginRight: 12, alignItems: 'center', justifyContent: 'center' }}>
                       <Text style={{ color: colors.accent, fontWeight: 'bold', fontSize: 18 }}>{item.name[0]?.toUpperCase()}</Text>

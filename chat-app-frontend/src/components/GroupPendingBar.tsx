@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Image, ActivityIndicator } from 'react-na
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { getSocket } from '../services/socketService';
+import { cld } from '../lib/cldImage';
 import {
   getPendingMembers,
   approvePendingMember,
@@ -150,7 +151,7 @@ export default function GroupPendingBar({
                 }}
               >
                 <Image
-                  source={{ uri: u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.name) }}
+                  source={{ uri: cld(u.avatar || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(u.name), 36) }}
                   style={{ width: 36, height: 36, borderRadius: 18 }}
                 />
                 <View style={{ flex: 1, minWidth: 0 }}>
