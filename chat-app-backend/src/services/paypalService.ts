@@ -195,12 +195,79 @@ export async function handleCaptureCompleted(event: any): Promise<void> {
 
   await Offering.findOneAndUpdate(
     { paypalOrderId: orderId },
-    { $set: { status: 'paid', amount: amountCents } }
+    // Se guarda el id de la CAPTURA: es por donde llega un reembolso más tarde.
+    { $set: { status: 'paid', amount: amountCents, paypalCaptureId: capture?.id } }
   );
 
   if (userId) {
     await User.findByIdAndUpdate(userId, { $set: { lastOfferingAt: new Date() } });
   }
+}
+
+// El enlace `up` de un reembolso apunta a la captura que se devolvió:
+// https://api.paypal.com/v2/payments/captures/<captureId>
+export function captureIdFromRefund(refund: any): string | undefined {
+  const up = (refund?.links || []).find((l: any) => l?.rel === 'up')?.href;
+  const fromLink = typeof up === 'string' ? up.split('/').pop() : undefined;
+  return refund?.supplementary_data?.related_ids?.capture_id || fromLink || undefined;
+}
+
+// Cuánto queda devuelto y en qué estado queda la ofrenda tras un reembolso.
+// Separado del acceso a la base para poder probarlo: los reembolsos parciales y
+// los repetidos (PayPal reenvía webhooks) son fáciles de equivocar.
+export function applyRefund(
+  amount: number,
+  alreadyRefunded: number,
+  refundedNow: number
+): { refundedAmount: number; fullyRefunded: boolean } {
+  const total = Math.min((Number(alreadyRefunded) || 0) + refundedNow, Number(amount) || 0);
+  return { refundedAmount: total, fullyRefunded: total >= (Number(amount) || 0) };
+}
+
+// PAYMENT.CAPTURE.REFUNDED / .REVERSED — el dinero se devolvió (o hubo
+// contracargo). Sin esto la ofrenda seguía contando como ingreso PARA SIEMPRE.
+//
+// Se guarda el importe devuelto en vez de tocar `amount`: así un reembolso
+// PARCIAL también cuadra (el ingreso neto es amount - refundedAmount) y no se
+// pierde de cuánto fue la ofrenda original.
+export async function handleCaptureRefunded(event: any): Promise<void> {
+  const refund = event.resource;
+  const refundedCents = Math.round(parseFloat(refund?.amount?.value ?? '0') * 100);
+  if (!refundedCents) return;
+
+  const captureId = captureIdFromRefund(refund);
+  const orderId = refund?.supplementary_data?.related_ids?.order_id;
+
+  // Las capturas anteriores a 2026-08 no guardaron su id: se cae al de la orden.
+  const query = captureId
+    ? { $or: [{ paypalCaptureId: captureId }, { paypalOrderId: captureId }] }
+    : orderId
+    ? { paypalOrderId: orderId }
+    : null;
+
+  const offering = query ? await Offering.findOne(query) : null;
+
+  if (!offering) {
+    // No se silencia: es dinero que salió y el panel no lo sabe. Hay que poder
+    // buscarlo en el log y anular la ofrenda a mano desde Ingresos.
+    console.error(
+      'PayPal: reembolso sin ofrenda que le corresponda —',
+      JSON.stringify({ refundId: refund?.id, captureId, orderId, refundedCents })
+    );
+    return;
+  }
+
+  const { refundedAmount, fullyRefunded } = applyRefund(
+    offering.amount,
+    offering.refundedAmount ?? 0,
+    refundedCents
+  );
+
+  offering.refundedAmount = refundedAmount;
+  offering.refundedAt = new Date();
+  // Solo se marca 'refunded' si se devolvió TODO; un parcial sigue siendo pagada.
+  if (fullyRefunded) offering.status = 'refunded';
+  await offering.save();
 }
 
 // Umbral de ofrenda mensual que da acceso a los materiales gratis. Los tiers por

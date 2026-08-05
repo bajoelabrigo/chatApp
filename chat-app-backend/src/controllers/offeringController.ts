@@ -7,6 +7,7 @@ import {
   createSubscription,
   verifyWebhook,
   handleCaptureCompleted,
+  handleCaptureRefunded,
   handleSubscriptionActivated,
   handleSubscriptionCancelled,
 } from '../services/paypalService';
@@ -142,7 +143,8 @@ export async function captureInlineOrder(req: Request, res: Response) {
       // una orden ajena). El webhook PAYMENT.CAPTURE.COMPLETED es idempotente.
       await Offering.findOneAndUpdate(
         { paypalOrderId: orderId, userId },
-        { $set: { status: 'paid', amount: amountCents } }
+        // El id de la captura hace falta para casar un reembolso futuro.
+        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id } }
       );
       await User.findByIdAndUpdate(userId, { $set: { lastOfferingAt: new Date() } });
 
@@ -174,7 +176,8 @@ export async function captureOrderReturn(req: Request, res: Response) {
 
       await Offering.findOneAndUpdate(
         { paypalOrderId: orderId },
-        { $set: { status: 'paid', amount: amountCents } }
+        // El id de la captura hace falta para casar un reembolso futuro.
+        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id } }
       );
 
       if (userId) {
@@ -334,7 +337,10 @@ export async function listAdminOfferings(req: Request, res: Response) {
       return res.status(403).json({ error: 'Solo el admin general' });
     }
 
-    const offerings = await Offering.find({ status: 'paid' })
+    // Se incluyen las reembolsadas y las anuladas: el panel tiene que MOSTRARLAS
+    // (con su motivo) aunque no sumen. Un ingreso que desaparece de la vista sin
+    // dejar rastro es justo lo que impide explicar un descuadre meses después.
+    const offerings = await Offering.find({ status: { $in: ['paid', 'refunded'] } })
       .populate('userId', 'name email avatar')
       .sort({ receivedAt: -1, createdAt: -1 })
       .limit(500)
@@ -345,12 +351,18 @@ export async function listAdminOfferings(req: Request, res: Response) {
     const now = new Date();
     const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startYear = new Date(now.getFullYear(), 0, 1);
+    // Neto: lo anulado no cuenta y lo reembolsado se descuenta (parciales incluidos).
     const sumSince = async (since: Date) => {
       const r = await Offering.aggregate([
-        { $match: { status: 'paid' } },
+        { $match: { status: 'paid', voided: { $ne: true } } },
         { $addFields: { eff: { $ifNull: ['$receivedAt', '$createdAt'] } } },
         { $match: { eff: { $gte: since } } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $subtract: ['$amount', { $ifNull: ['$refundedAmount', 0] }] } },
+          },
+        },
       ]);
       return (r[0]?.total ?? 0) / 100;
     };
@@ -363,23 +375,58 @@ export async function listAdminOfferings(req: Request, res: Response) {
   }
 }
 
-// DELETE /offerings/admin/:id — borra SOLO ofrendas manuales (corregir errores).
+// POST /offerings/admin/:id/void — ANULA una ofrenda (cualquiera, no solo las
+// manuales: una de PayPal puede ser un cobro erróneo o un contracargo que no
+// llegó por webhook). Body: { reason?, undo? }.
+//
+// En contabilidad no se borra: se anula. El registro sigue visible con su motivo
+// y fuera de los totales — es lo único que permite explicar un descuadre meses
+// después de que ocurriera.
+export async function voidOffering(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const off = await Offering.findById(req.params.id);
+    if (!off) return res.status(404).json({ error: 'No encontrada' });
+
+    const undo = !!req.body?.undo;
+    off.voided = !undo;
+    off.voidReason = undo ? undefined : String(req.body?.reason || '').slice(0, 300);
+    off.voidedAt = undo ? undefined : new Date();
+    off.voidedBy = undo ? undefined : requesterId;
+    await off.save();
+
+    res.json({ message: undo ? 'Anulación deshecha' : 'Ofrenda anulada' });
+  } catch (err) {
+    console.error('voidOffering:', err);
+    res.status(500).json({ error: 'Error anulando la ofrenda' });
+  }
+}
+
+// DELETE /offerings/admin/:id — se mantiene por compatibilidad con clientes ya
+// desplegados, pero YA NO BORRA: anula, como el endpoint de arriba. Borrar de
+// verdad dejaba un ingreso sin rastro y era imposible auditar nada.
 export async function deleteManualOffering(req: Request, res: Response) {
   try {
     const requesterId = (req as any).userId;
     if (!(await isGlobalAdmin(requesterId))) {
       return res.status(403).json({ error: 'Solo el admin general' });
     }
-    const off = await Offering.findById(req.params.id).select('source').lean();
+    const off = await Offering.findById(req.params.id);
     if (!off) return res.status(404).json({ error: 'No encontrada' });
-    if ((off as any).source !== 'manual') {
-      return res.status(400).json({ error: 'Solo se pueden borrar ofrendas manuales' });
-    }
-    await Offering.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Ofrenda eliminada' });
+
+    off.voided = true;
+    off.voidReason = 'Eliminada desde el panel';
+    off.voidedAt = new Date();
+    off.voidedBy = requesterId;
+    await off.save();
+
+    res.json({ message: 'Ofrenda anulada' });
   } catch (err) {
     console.error('deleteManualOffering:', err);
-    res.status(500).json({ error: 'Error eliminando la ofrenda' });
+    res.status(500).json({ error: 'Error anulando la ofrenda' });
   }
 }
 
@@ -401,6 +448,11 @@ export async function handleWebhook(req: Request, res: Response) {
     switch (eventType) {
       case 'PAYMENT.CAPTURE.COMPLETED':
         await handleCaptureCompleted(req.body);
+        break;
+      // Devolución o contracargo: deja de contar como ingreso.
+      case 'PAYMENT.CAPTURE.REFUNDED':
+      case 'PAYMENT.CAPTURE.REVERSED':
+        await handleCaptureRefunded(req.body);
         break;
       case 'BILLING.SUBSCRIPTION.ACTIVATED':
         await handleSubscriptionActivated(req.body);

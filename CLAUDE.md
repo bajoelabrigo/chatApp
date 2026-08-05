@@ -527,15 +527,13 @@ Reescrito el 2026-08-01 para acercarlo a las imágenes que se comparten de verda
 
 Un modal con `onClick={onClose}` en el fondo y `stopPropagation` en el cuadro **parece** correcto y no lo es: si el usuario **selecciona texto** dentro (arrastrando) y suelta el ratón fuera del cuadro, el navegador reparte ese `click` al **ancestro común** de donde se pulsó y donde se soltó — o sea el fondo —, así que el `stopPropagation` de dentro nunca llega a verlo y el modal se cierra. Pasaba al ir a seleccionar una parte del versículo para borrarla: se cerraba entero justo antes de pulsar Supr.
 
-El arreglo (aplicado en `VerseImageModal.jsx`) es exigir que el gesto **empiece y acabe** en el fondo:
+El arreglo es exigir que el gesto **empiece y acabe** en el fondo. **Desde 2026-08-05 no se copia a mano: está en `components/ModalBackdrop.jsx`** (probado en `frontend/scripts/modalBackdrop.test.mjs`, que ejercita los handlers reales — el gesto no se puede reproducir con un render estático). Usar ese componente y ya:
 ```jsx
-const fondoPulsado = useRef(false);
-<div
-  onMouseDown={(e) => { fondoPulsado.current = e.target === e.currentTarget; }}
-  onClick={(e) => { if (e.target === e.currentTarget && fondoPulsado.current) onClose(); fondoPulsado.current = false; }}
->
+<ModalBackdrop onClose={onClose}>
+  <div className="bg-base-100 rounded-2xl …">…</div>
+</ModalBackdrop>
 ```
-Cualquier modal con un `<textarea>`/`<input>` dentro necesita esto.
+**Cualquier modal con un `<textarea>`/`<input>` dentro necesita esto**, y volvió a morder: los cuatro modales del panel de contabilidad y socios nacieron con el `onClick` a secas y el usuario perdió un formulario de gasto a medio rellenar. La regla es **asimétrica** a propósito: empezar FUERA y soltar dentro sí cierra (la intención era cerrar y no se pierde nada); lo que se impide es empezar DENTRO y soltar fuera. `VerseImageModal.jsx` conserva su copia inline.
 
 ## Póster de versículos (compartir como imagen) — dos motores, un diseño
 
@@ -659,6 +657,68 @@ Un material tiene TRES estados, combinando dos campos de `materialModel.js` (no 
 - **Un no listado no tiene vista previa de WhatsApp/FB** a propósito: `/api/share/material/:slug` serviría portada y título en una URL sin clave. `MaterialPage`/`MaterialsDashboard` pasan `socialUrl` vacío en ese caso y `ShareModal` cae a `url` (`socialUrl || url`).
 - **Cambiar el título cambia el slug y rompe el enlace ya repartido** (`uniqueSlug` en `updateMaterial`). Pasaba ya con los públicos, pero aquí duele porque ese enlace es el único acceso.
 - De paso se tapó una fuga vieja: las rutas OG de `shareRoutes.js` consultaban `Material.findOne({ slug })` **sin filtrar `published`** → los bots (y cualquiera pegando `/api/share/material/<slug>`) veían título, descripción y portada de los borradores.
+
+## Ingresos — una entrada de dinero, una fila (cuota de socio ≠ ingreso)
+
+Había **dos libros de contabilidad para el mismo dinero**: `Offering` (chat-backend) y `User.socioPayments` (web), y el panel de Ingresos sumaba los dos. Un socio que paga por PayPal y al que además se le registraba la cuota para moverle la fecha aparecía **dos veces** (pasó con la ofrenda de $40 del 4/8/2026). No era un caso raro: le ocurre a **todo socio nuevo que llega por una ofrenda de PayPal**.
+
+**La regla**: el dinero es SIEMPRE una ofrenda (o una venta de material). `socioPayments` es el **recibo** que mueve `socioNextPaymentDate`, no un ingreso; su `offeringId` apunta a la ofrenda que lo respalda y una cuota se limita a **etiquetar** esa ofrenda como "Socio".
+
+- **Fuente única**: `holy_app/frontend/src/lib/incomeLedger.js` (`buildLedger`, `candidateOfferings`, `findDuplicate`, `linkedOfferingIds`), probado en `frontend/scripts/incomeLedger.test.mjs` (`node scripts/incomeLedger.test.mjs`, 15 casos). El esquema, en `backend/scripts/socioPayments.test.mjs`. **Al tocar las reglas, correr los dos** — son los únicos tests del repo.
+- **Nada se empareja solo.** Un socio también hace ofrendas aparte de su cuota: vincular es siempre una decisión explícita del admin. `findDuplicate` (mismo importe ±0, ±12 días) solo AVISA y propone; el modal de "Registrar cuota" propone candidatas (suyas, 60 días, libres) para ELEGIR una.
+- **Una ofrenda respalda como mucho UNA cuota** — lo comprueba el backend (409) en `registerSocioPayment` y `linkSocioPayment`.
+- **Las ofrendas `type: 'subscription'` cuentan como cuota de socio automáticamente**: ese cobro siempre ES la cuota. Antes caían en "Ofrendas" y la tarjeta "Socios (mensual)" solo contaba a los manuales.
+- **"Recibí el pago por fuera" crea la ofrenda manual** (`/offerings/admin/manual` vía `chatApi`) y luego la cuota que la referencia. Si la segunda llamada falla hay que decirlo: la ofrenda ya quedó anotada y volver a registrar duplicaría.
+- **Una ofrenda manual vinculada a una cuota NO se puede borrar desde Ingresos** (`deletable: false`): la cuota sobreviviría y el respaldo de "ofrenda fuera del tope de 500" la volvería a pintar sumando lo mismo.
+- **`registerSocioPayment` ya no fuerza `socioManual: true`** salvo que ya lo fuera o el dinero entrara por fuera: marcarlo convertía a un socio con suscripción de PayPal en manual y empezaba a recibir recordatorios de un cobro automático.
+- Los datos anteriores a 2026-08-05 no tienen `offeringId`: siguen contando y el panel los marca "posible duplicado" con un botón que los vincula (`POST /users/socio/payment/link`, atómico con `arrayFilters` — ojo, hay que castear el `paymentId` a ObjectId a mano).
+
+**Nada se borra: se ANULA.** `Offering`, `MaterialPurchase` y `Expense` tienen `voided`/`voidReason`/`voidedAt`/`voidedBy`. La fila se sigue viendo tachada con su motivo y deja de sumar; un ingreso que desaparece sin rastro es lo que hace imposible explicar un descuadre meses después. Los `DELETE` de siempre (`/offerings/admin/:id`, `/materials/admin/sales/:id`) **ya no borran: anulan** — se mantienen solo por los clientes ya desplegados; lo nuevo usa `POST …/:id/void` (con `{ undo: true }` para deshacer).
+
+**Reembolsos de PayPal.** El webhook maneja `PAYMENT.CAPTURE.REFUNDED` y `.REVERSED` (`handleCaptureRefunded`). Se guarda `refundedAmount` en vez de tocar `amount`, así un reembolso **parcial** también cuadra (neto = `amount - refundedAmount`) y no se pierde de cuánto fue la ofrenda. Para casarlo hace falta el **id de la captura** (`paypalCaptureId`), que ahora se guarda en los tres sitios que capturan; las ofrendas anteriores solo tienen el de la orden y caen a ese. Si no encaja con ninguna, se registra en el log con `console.error` — nunca en silencio: es dinero que salió.
+
+**Dos unidades para el dinero, a propósito**: `Offering` y `Expense` en **centavos** (enteros — sumar dólares en coma flotante acumula error); `MaterialPurchase` en **dólares**, por historia. La conversión vive solo en `backend/utils/money.js` (`toCents`/`fromCents`), espejado en `frontend/src/lib/money.js`. Toda la API habla en dólares.
+
+## Gastos y balance (`holy_app`)
+
+La pestaña Ingresos pasó a llamarse **Contabilidad** el 2026-08-05: además de lo que entra, registra lo que sale.
+
+- **`Expense`** (`backend/models/media/expenseModel.js`, rutas `/api/expenses`, todo `adminOnly`): categoría, método, **cuenta** (`paypal|banco|efectivo|otro` — sin esto el "saldo" es ficción: lo que hay en PayPal no es lo que hay en el sobre), beneficiario y **comprobante** (foto o PDF en Cloudinary). Los enums están espejados en `frontend/src/lib/expenseMeta.js`: lo que el backend no reconoce lo convierte en `"otro"` **en silencio**, así que al añadir una categoría hay que tocar los dos.
+- **Los recurrentes NO se autoregistran.** `recurrence` + `nextDueDate` hacen que el panel avise cuando toca; el admin confirma con el importe REAL (`POST /expenses/:id/confirm-recurring`), que actualiza también el del padre para la próxima vez. Un proveedor que sube de precio quedaría anotado mal para siempre y nadie lo notaría.
+- **El período puede ser un MES CONCRETO** (`<input type="month">`), no solo "el mes en curso": es lo que permite cerrar julio estando en agosto. Los rangos son **semiabiertos** `[desde, hasta)` (`frontend/src/lib/periods.js`) y la comparativa con el período anterior se desplaza por unidad de calendario, no restando días.
+- **Exportar a CSV**: separador `;`, decimal `,` y BOM UTF-8 (lo que abre bien un Excel en español sin asistente). **Los gastos van en negativo**, así que sumar la columna da el balance.
+- La gráfica (`components/admin/LedgerChart.jsx`) son barras agrupadas de 12 meses con **un solo eje** (misma unidad). La pareja de colores `#0d9488`/`#ea580c` está **validada** (contraste, banda de luminosidad y separación para daltonismo) contra el fondo claro y el oscuro: verde/rojo, que es lo intuitivo en contabilidad, es justo el par que no distingue un daltónico. Al cambiarla, volver a validarla.
+- **Las descargas gratis se ocultan por defecto** (`hasMoney`). Entran como ventas de $0 y son la inmensa mayoría de las filas —medido en producción el 2026-08-05: **140 de 164 en julio**—, así que ahogaban las 24 que sí llevan dinero. Siguen en el libro (hay un interruptor) y el recuento de descargas vive en el catálogo: no se pierde nada. El contador del encabezado cuenta solo las que mueven dinero.
+- **Moneda de la factura**: `currency` + `originalAmount` en `Expense`. `amount` es SIEMPRE dólares —lo que salió del banco, lo único que suma—; si el proveedor factura en otra moneda se guarda aparte lo que decía la factura. **No se convierte nada**: el tipo de cambio lo aplicó el banco el día del cargo y cualquier tasa que pusiéramos sería inventada. Salió al registrar el VPS de Hostinger, que factura en euros.
+- **Ojo al género de las claves**: la CUENTA es `"otro"` y la MONEDA es `"otra"`. Si una de las dos copias se desalinea, el backend no reconoce el valor y cae al de por defecto **sin decir nada**.
+- El CSV usa **etiquetas legibles**, no las claves internas (`Cuota de socio`, no `socio`; `Servicios (Cloudinary…)`, no `servicios`).
+
+## Guardas de ruta — `user: null` no significa "invitado"
+
+`RequireAdmin` redirigía en cuanto `user` era null, y al abrir una URL directa (recargar `/users`, pegar el enlace) ese es el estado normal mientras la sesión viaja. Resultado: **el admin era expulsado a la portada al entrar por URL**, y solo funcionaba navegando por dentro de la app, cuando el perfil ya estaba en memoria. Verificado en producción el 2026-08-05.
+
+El arreglo es la bandera **`authChecked`** en `authSlice`: se pone en true cuando la comprobación TERMINA (getLoginStatus dice que no hay sesión, o getUser resuelve/falla). El guarda espera mientras `!authChecked || (isLoggedIn && !user)`. Cualquier guarda nueva debe hacer lo mismo: `isLoading` no vale, lo comparten muchos thunks.
+
+## Socios — comprometido no es cobrado
+
+`stats.monthlyTotal` sumaba el `socioAmount` de TODOS los socios, incluidos los que llevaban meses sin pagar, y se enseñaba como si fuera ingreso. Ahora hay dos números: **`committed`** (lo que se comprometieron a dar) y **`collected`** (lo que ha entrado este mes), más `collectionRate`. `monthlyTotal` sigue existiendo con el valor de `committed` porque lo leen clientes ya desplegados.
+
+- Métricas en `backend/utils/socioStats.js` (`buildSocioRows`, `monthsLate`), fuera del controlador para poder probarlas sin arrastrar Google OAuth, Cloudinary y el correo. Probadas en `backend/scripts/socios.test.mjs`.
+- **Dar de baja ya no borra el rastro**: `socioEndedAt` + `socioPayments` intactos. `GET /users/socios/admin?former=1` los devuelve con `isFormer`. Sin esto la rotación (cuántos entran y salen) era invisible y un ex-socio desaparecía como si nunca hubiera dado nada.
+- `monthsLate` distingue 3 días de 3 meses de retraso; el badge dice "Debe 2 meses".
+- `POST /users/socio/remind-all` avisa a todos los vencidos **en serie**: `sendEmail` usa un pool limitado a 3 mensajes/segundo y disparar N a la vez solo llena su cola.
+
+## Tests — los únicos del repo (`npm test` en cada paquete)
+
+No hay runner ni CI: son ficheros de `node:test` que se ejecutan a mano. **Al tocar cuentas, socios o la gráfica, correrlos.**
+
+| Paquete | Qué cubre |
+|---|---|
+| `holy_app/frontend` | rangos y comparativas, libro de cuentas (duplicados, anulaciones, reembolsos parciales, monedas, CSV), render real de la gráfica, de las dos páginas de admin y del guarda `RequireAdmin` |
+| `holy_app/backend` | esquema de cuotas de socio, métricas comprometido/cobrado/retraso, esquema de gastos y conversión de dinero |
+| `chat-app-backend` | reembolsos de PayPal (importa de `dist/`, así que compila primero) |
+
+`frontend/scripts/jsx-loader.mjs` es lo que permite importar `.jsx` desde Node sin Vite: compila JSX con esbuild, resuelve los imports sin extensión y sustituye `import.meta.env`. **Un `vite build` compila igual una página que revienta al pintarse** — por eso las pruebas de render montan los componentes con `react-dom/server`. En SSR no corren los efectos, así que lo que se prueba es el estado inicial (sin datos).
 
 ## Suscripción de socio — el "código" NO es nuestro, y ojo con `window.open`
 

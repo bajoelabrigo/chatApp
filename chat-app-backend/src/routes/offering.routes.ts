@@ -15,6 +15,7 @@ import {
   createManualOffering,
   listAdminOfferings,
   deleteManualOffering,
+  voidOffering,
 } from '../controllers/offeringController';
 
 const router = Router();
@@ -39,6 +40,8 @@ router.get('/status', getMyOfferingStatus);
 // Admin general (isGlobalAdmin dentro de cada handler): ofrendas manuales + reporte.
 router.post('/admin/manual', createManualOffering);
 router.get('/admin', listAdminOfferings);
+router.post('/admin/:id/void', voidOffering);
+// Legado: ya no borra, anula (ver el controlador).
 router.delete('/admin/:id', deleteManualOffering);
 
 export default router;
