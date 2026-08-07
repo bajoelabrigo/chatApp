@@ -13,6 +13,7 @@ import {
   getMyOfferingStatus,
   handleWebhook,
   createManualOffering,
+  updateManualOffering,
   listAdminOfferings,
   deleteManualOffering,
   voidOffering,
@@ -39,6 +40,7 @@ router.get('/status', getMyOfferingStatus);
 
 // Admin general (isGlobalAdmin dentro de cada handler): ofrendas manuales + reporte.
 router.post('/admin/manual', createManualOffering);
+router.put('/admin/:id', updateManualOffering);
 router.get('/admin', listAdminOfferings);
 router.post('/admin/:id/void', voidOffering);
 // Legado: ya no borra, anula (ver el controlador).

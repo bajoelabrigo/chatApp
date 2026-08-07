@@ -329,6 +329,46 @@ export async function createManualOffering(req: Request, res: Response) {
   }
 }
 
+// PUT /offerings/admin/:id — edita una ofrenda MANUAL (nunca una de PayPal: esa
+// la generó una captura real y editarla la desincroniza de lo que PayPal sabe
+// que cobró; para corregir un cobro de PayPal está anular).
+export async function updateManualOffering(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const off = await Offering.findById(req.params.id);
+    if (!off) return res.status(404).json({ error: 'No encontrada' });
+    if (off.source !== 'manual') {
+      return res.status(400).json({ error: 'Solo se pueden editar las ofrendas manuales' });
+    }
+
+    const { userId, donorName, donorEmail, amount, method, note, receivedAt } = req.body || {};
+    const usdAmount = Number(amount);
+    if (!usdAmount || usdAmount <= 0) {
+      return res.status(400).json({ error: 'Monto inválido' });
+    }
+    if (!userId && !donorName && !donorEmail) {
+      return res.status(400).json({ error: 'Indica un usuario o el nombre/email del donante' });
+    }
+
+    off.userId = userId || undefined;
+    off.donorName = userId ? undefined : donorName || undefined;
+    off.donorEmail = userId ? undefined : donorEmail || undefined;
+    off.amount = Math.round(usdAmount * 100);
+    off.method = method || 'otro';
+    off.note = note || undefined;
+    off.receivedAt = parseDateOnly(receivedAt);
+    await off.save();
+
+    res.json({ message: 'Ofrenda actualizada', offering: off });
+  } catch (err) {
+    console.error('updateManualOffering:', err);
+    res.status(500).json({ error: 'Error actualizando la ofrenda' });
+  }
+}
+
 // GET /offerings/admin — todas las ofrendas pagadas (PayPal + manuales) + totales.
 export async function listAdminOfferings(req: Request, res: Response) {
   try {
