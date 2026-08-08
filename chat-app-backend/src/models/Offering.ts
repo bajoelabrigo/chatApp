@@ -7,10 +7,18 @@ export interface IOffering extends Document {
   // casar con su ofrenda: el webhook de reembolso habla de capturas.
   paypalCaptureId?: string;
   paypalSubscriptionId?: string;
+  // Id del cobro RECURRENTE de una suscripción (evento clásico PAYMENT.SALE.*,
+  // uno por cada mes). El primer mes se reclama sobre la Offering creada al
+  // activarse; los meses siguientes crean una fila nueva con este id como
+  // clave de idempotencia (PayPal reenvía webhooks).
+  paypalSaleId?: string;
   type: 'one_time' | 'subscription';
   amount: number;
   currency: string;
   status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded';
+  // Comisión que PayPal retuvo de este cobro (centavos). El ingreso NETO real
+  // es amount - refundedAmount - feeAmount: PayPal nunca deposita el bruto.
+  feeAmount?: number;
   // Devuelto por PayPal (centavos). El ingreso neto es amount - refundedAmount,
   // así un reembolso PARCIAL también cuadra.
   refundedAmount?: number;
@@ -40,10 +48,12 @@ const OfferingSchema = new Schema<IOffering>(
     paypalOrderId:         { type: String },
     paypalCaptureId:       { type: String, index: true },
     paypalSubscriptionId:  { type: String },
+    paypalSaleId:          { type: String, index: true, unique: true, sparse: true },
     type:                  { type: String, enum: ['one_time', 'subscription'], required: true },
     amount:                { type: Number, required: true },
     currency:              { type: String, default: 'usd' },
     status:                { type: String, enum: ['pending', 'paid', 'failed', 'cancelled', 'refunded'], default: 'pending' },
+    feeAmount:             { type: Number, default: 0 },
     refundedAmount:        { type: Number, default: 0 },
     refundedAt:            { type: Date },
     voided:                { type: Boolean, default: false },

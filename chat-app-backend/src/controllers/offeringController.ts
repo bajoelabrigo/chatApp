@@ -8,8 +8,13 @@ import {
   verifyWebhook,
   handleCaptureCompleted,
   handleCaptureRefunded,
+  handleSaleCompleted,
+  handleSaleRefunded,
   handleSubscriptionActivated,
   handleSubscriptionCancelled,
+  feeCentsFromCapture,
+  searchPaypalTransactions,
+  parseTransactionCandidate,
 } from '../services/paypalService';
 import { Offering } from '../models/Offering';
 import { User } from '../models/User';
@@ -138,13 +143,14 @@ export async function captureInlineOrder(req: Request, res: Response) {
       const unit = capture.purchase_units?.[0];
       const captureData = unit?.payments?.captures?.[0];
       const amountCents = Math.round(parseFloat(captureData?.amount?.value ?? '0') * 100);
+      const feeCents = feeCentsFromCapture(captureData);
 
       // Solo confirma la ofrenda si pertenece a este usuario (evita capturar
       // una orden ajena). El webhook PAYMENT.CAPTURE.COMPLETED es idempotente.
       await Offering.findOneAndUpdate(
         { paypalOrderId: orderId, userId },
         // El id de la captura hace falta para casar un reembolso futuro.
-        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id } }
+        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id, feeAmount: feeCents } }
       );
       await User.findByIdAndUpdate(userId, { $set: { lastOfferingAt: new Date() } });
 
@@ -172,12 +178,13 @@ export async function captureOrderReturn(req: Request, res: Response) {
       const unit = capture.purchase_units?.[0];
       const captureData = unit?.payments?.captures?.[0];
       const amountCents = Math.round(parseFloat(captureData?.amount?.value ?? '0') * 100);
+      const feeCents = feeCentsFromCapture(captureData);
       const userId = unit?.custom_id;
 
       await Offering.findOneAndUpdate(
         { paypalOrderId: orderId },
         // El id de la captura hace falta para casar un reembolso futuro.
-        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id } }
+        { $set: { status: 'paid', amount: amountCents, paypalCaptureId: captureData?.id, feeAmount: feeCents } }
       );
 
       if (userId) {
@@ -298,13 +305,40 @@ export async function createManualOffering(req: Request, res: Response) {
     if (!(await isGlobalAdmin(requesterId))) {
       return res.status(403).json({ error: 'Solo el admin general' });
     }
-    const { userId, donorName, donorEmail, amount, method, note, receivedAt } = req.body || {};
+    const {
+      userId,
+      donorName,
+      donorEmail,
+      amount,
+      method,
+      note,
+      receivedAt,
+      // Si la ofrenda se emparejó con un candidato de "Buscar en PayPal": id
+      // de la transacción real (para no poder registrarla dos veces) y su
+      // comisión, ya calculada por el backend en esa búsqueda.
+      paypalTransactionId,
+      feeAmount,
+    } = req.body || {};
     const usd = Number(amount);
     if (!usd || usd <= 0) {
       return res.status(400).json({ error: 'Monto inválido' });
     }
     if (!userId && !donorName && !donorEmail) {
       return res.status(400).json({ error: 'Indica un usuario o el nombre/email del donante' });
+    }
+
+    let paypalCaptureId: string | undefined;
+    let fee = 0;
+    if (paypalTransactionId) {
+      const dupe = await Offering.findOne({
+        paypalCaptureId: paypalTransactionId,
+        voided: { $ne: true },
+      }).lean();
+      if (dupe) {
+        return res.status(409).json({ error: 'Esa transacción de PayPal ya está registrada como ofrenda' });
+      }
+      paypalCaptureId = String(paypalTransactionId);
+      fee = Math.max(0, Math.round(Number(feeAmount) || 0));
     }
 
     const doc = await Offering.create({
@@ -314,7 +348,9 @@ export async function createManualOffering(req: Request, res: Response) {
       currency: 'usd',
       status: 'paid',
       source: 'manual',
-      method: method || 'otro',
+      method: method || (paypalCaptureId ? 'paypal' : 'otro'),
+      feeAmount: fee,
+      paypalCaptureId,
       note: note || undefined,
       donorName: donorName || undefined,
       donorEmail: donorEmail || undefined,
@@ -326,6 +362,56 @@ export async function createManualOffering(req: Request, res: Response) {
   } catch (err) {
     console.error('createManualOffering:', err);
     res.status(500).json({ error: 'Error registrando la ofrenda' });
+  }
+}
+
+// GET /offerings/admin/paypal-search?amount=&date=&days= — candidatos para una
+// ofrenda recibida por fuera del checkout (alguien mandó dinero directo a la
+// cuenta de PayPal del ministerio). Solo BUSCA y muestra: no crea nada, es el
+// admin quien elige el candidato correcto en createManualOffering.
+export async function searchPaypalOfferingCandidates(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+
+    const dateParam = req.query.date as string | undefined;
+    const days = Math.min(Math.max(Number(req.query.days) || 3, 1), 15);
+    const amount = req.query.amount ? Number(req.query.amount) : undefined;
+
+    const center =
+      dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+        ? new Date(dateParam + 'T12:00:00.000Z')
+        : new Date();
+    const start = new Date(center.getTime() - days * 24 * 60 * 60 * 1000);
+    const end = new Date(Math.min(center.getTime() + days * 24 * 60 * 60 * 1000, Date.now()));
+
+    const raw = await searchPaypalTransactions(start, end);
+
+    // No se ofrecen dos veces: lo que ya está registrado (por este buscador o
+    // por el checkout normal) desaparece de la lista de candidatos.
+    const registered = await Offering.find({ paypalCaptureId: { $exists: true, $ne: null } })
+      .select('paypalCaptureId')
+      .lean();
+    const already = new Set(registered.map((o: any) => o.paypalCaptureId));
+
+    let candidates = raw
+      .map(parseTransactionCandidate)
+      .filter((c: any): c is NonNullable<typeof c> => !!c && !already.has(c.transactionId));
+
+    candidates = amount
+      ? candidates.sort(
+          (a: any, b: any) =>
+            Math.abs(a.amountCents - Math.round(amount * 100)) -
+            Math.abs(b.amountCents - Math.round(amount * 100))
+        )
+      : candidates.sort((a: any, b: any) => b.date.getTime() - a.date.getTime());
+
+    res.json({ candidates: candidates.slice(0, 15) });
+  } catch (err) {
+    console.error('searchPaypalOfferingCandidates:', err);
+    res.status(500).json({ error: 'Error buscando en PayPal' });
   }
 }
 
@@ -493,6 +579,16 @@ export async function handleWebhook(req: Request, res: Response) {
       case 'PAYMENT.CAPTURE.REFUNDED':
       case 'PAYMENT.CAPTURE.REVERSED':
         await handleCaptureRefunded(req.body);
+        break;
+      // Cobro recurrente de una suscripción (mes 2 en adelante). El mes 1 lo
+      // registra BILLING.SUBSCRIPTION.ACTIVATED; sin este evento las
+      // renovaciones no dejaban ningún rastro en Ingresos.
+      case 'PAYMENT.SALE.COMPLETED':
+        await handleSaleCompleted(req.body);
+        break;
+      case 'PAYMENT.SALE.REFUNDED':
+      case 'PAYMENT.SALE.REVERSED':
+        await handleSaleRefunded(req.body);
         break;
       case 'BILLING.SUBSCRIPTION.ACTIVATED':
         await handleSubscriptionActivated(req.body);

@@ -17,6 +17,7 @@ import {
   listAdminOfferings,
   deleteManualOffering,
   voidOffering,
+  searchPaypalOfferingCandidates,
 } from '../controllers/offeringController';
 
 const router = Router();
@@ -39,6 +40,7 @@ router.get('/history', getOfferingHistory);
 router.get('/status', getMyOfferingStatus);
 
 // Admin general (isGlobalAdmin dentro de cada handler): ofrendas manuales + reporte.
+router.get('/admin/paypal-search', searchPaypalOfferingCandidates);
 router.post('/admin/manual', createManualOffering);
 router.put('/admin/:id', updateManualOffering);
 router.get('/admin', listAdminOfferings);

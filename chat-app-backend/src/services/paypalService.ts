@@ -73,6 +73,12 @@ async function paypalFetch(path: string, options: RequestInit = {}): Promise<any
   return res.json().catch(() => null);
 }
 
+// GET genérico, para el script de backfill (consultar capturas/órdenes/
+// transacciones de suscripción viejas que no tienen comisión guardada).
+export async function paypalGet(path: string): Promise<any> {
+  return paypalFetch(path, { method: 'GET' });
+}
+
 export async function createOrder(
   amountUSD: string,
   userId: string,
@@ -187,16 +193,25 @@ export async function verifyWebhook(
 
 // ── Webhook event handlers ──────────────────────────────────
 
+// PayPal nunca deposita el bruto: `seller_receivable_breakdown.paypal_fee` es
+// lo que se queda. Mismo shape en el webhook, en la respuesta directa de
+// captura/orden y en el backfill histórico — una sola función para leerlo.
+export function feeCentsFromCapture(capture: any): number {
+  const fee = capture?.seller_receivable_breakdown?.paypal_fee?.value;
+  return fee ? Math.round(parseFloat(fee) * 100) : 0;
+}
+
 export async function handleCaptureCompleted(event: any): Promise<void> {
   const capture = event.resource;
   const orderId = capture?.supplementary_data?.related_ids?.order_id ?? capture?.id;
   const userId = capture?.custom_id;
   const amountCents = Math.round(parseFloat(capture?.amount?.value ?? '0') * 100);
+  const feeCents = feeCentsFromCapture(capture);
 
   await Offering.findOneAndUpdate(
     { paypalOrderId: orderId },
     // Se guarda el id de la CAPTURA: es por donde llega un reembolso más tarde.
-    { $set: { status: 'paid', amount: amountCents, paypalCaptureId: capture?.id } }
+    { $set: { status: 'paid', amount: amountCents, paypalCaptureId: capture?.id, feeAmount: feeCents } }
   );
 
   if (userId) {
@@ -266,6 +281,147 @@ export async function handleCaptureRefunded(event: any): Promise<void> {
   offering.refundedAmount = refundedAmount;
   offering.refundedAt = new Date();
   // Solo se marca 'refunded' si se devolvió TODO; un parcial sigue siendo pagada.
+  if (fullyRefunded) offering.status = 'refunded';
+  await offering.save();
+}
+
+// ── Cobros recurrentes de suscripción (PAYMENT.SALE.*) ──────────────────────
+//
+// BILLING.SUBSCRIPTION.ACTIVATED solo llega UNA VEZ, al activarse. Los cobros
+// de los meses siguientes los notifica el evento clásico PAYMENT.SALE.COMPLETED
+// (la API de Suscripciones sigue facturando con el motor viejo de Payments por
+// debajo). Sin manejar este evento, el mes 1 se registraba como ingreso y el
+// resto de la vida del socio, no.
+
+// Extracción pura del evento (testable sin tocar la base de datos).
+export function parseSaleEvent(sale: any): {
+  saleId?: string;
+  subscriptionId?: string;
+  amountCents: number;
+  feeCents: number;
+  userId?: string;
+  receivedAt: Date;
+} {
+  return {
+    saleId: sale?.id,
+    subscriptionId: sale?.billing_agreement_id,
+    amountCents: Math.round(parseFloat(sale?.amount?.total ?? '0') * 100),
+    feeCents: Math.round(parseFloat(sale?.transaction_fee?.value ?? '0') * 100),
+    userId: sale?.custom || undefined,
+    receivedAt: sale?.create_time ? new Date(sale.create_time) : new Date(),
+  };
+}
+
+// Crea o reclama la fila de Offering para UN cobro de suscripción (por su sale
+// id de PayPal). La usan el webhook y el script de backfill histórico —una
+// sola lógica, para que no diverjan.
+//
+// - Si el sale id ya está guardado: no-op (PayPal reenvía webhooks) salvo que
+//   le falte la comisión (backfill).
+// - Si no: intenta RECLAMAR la fila que se creó al activarse (mes 1, sin sale
+//   id todavía) en vez de duplicar el ingreso.
+// - Si esa fila ya está reclamada por otro cobro: es una renovación → fila
+//   nueva. `paypalSaleId` es único, así que un reenvío en carrera choca con
+//   un duplicado y se ignora en vez de crear dos filas.
+export async function reconcileSubscriptionSale(input: {
+  subscriptionId: string;
+  saleId: string;
+  amountCents: number;
+  feeCents: number;
+  receivedAt: Date;
+  userId?: string;
+}): Promise<void> {
+  const { subscriptionId, saleId, amountCents, feeCents, receivedAt, userId } = input;
+
+  const already = await Offering.findOne({ paypalSaleId: saleId }).select('_id feeAmount').lean();
+  if (already) {
+    if (!(already as any).feeAmount && feeCents) {
+      await Offering.updateOne({ _id: (already as any)._id }, { $set: { feeAmount: feeCents } });
+    }
+    return;
+  }
+
+  const claimed = await Offering.findOneAndUpdate(
+    { paypalSubscriptionId: subscriptionId, paypalSaleId: { $exists: false } },
+    {
+      $set: {
+        paypalSaleId: saleId,
+        feeAmount: feeCents,
+        status: 'paid',
+        ...(amountCents > 0 ? { amount: amountCents } : {}),
+      },
+    },
+    { sort: { createdAt: 1 } }
+  );
+  if (claimed) return;
+
+  try {
+    await Offering.create({
+      userId,
+      paypalSubscriptionId: subscriptionId,
+      paypalSaleId: saleId,
+      type: 'subscription',
+      amount: amountCents,
+      feeAmount: feeCents,
+      status: 'paid',
+      receivedAt,
+    });
+  } catch (err: any) {
+    if (err?.code !== 11000) throw err; // 11000 = ya lo creó un webhook en carrera
+  }
+}
+
+export async function handleSaleCompleted(event: any): Promise<void> {
+  const { saleId, subscriptionId, amountCents, feeCents, userId: rawUserId, receivedAt } =
+    parseSaleEvent(event.resource);
+  if (!saleId || !subscriptionId) return; // no es un cobro de suscripción
+
+  // `custom` debería traer el userId (se pasó como custom_id al crear la
+  // suscripción), pero por si alguna vez llega vacío se recupera de la fila
+  // de activación — sin userId no se puede refrescar lastOfferingAt ni casar
+  // la ofrenda por usuario en el libro de cuentas.
+  let userId = rawUserId;
+  if (!userId) {
+    const existing = await Offering.findOne({ paypalSubscriptionId: subscriptionId })
+      .select('userId')
+      .lean();
+    userId = (existing as any)?.userId ? String((existing as any).userId) : undefined;
+  }
+
+  await reconcileSubscriptionSale({ subscriptionId, saleId, amountCents, feeCents, receivedAt, userId });
+
+  if (userId) {
+    await User.findByIdAndUpdate(userId, { $set: { lastOfferingAt: new Date() } });
+  }
+}
+
+// PAYMENT.SALE.REFUNDED / .REVERSED — reembolso o contracargo de UN cobro
+// recurrente. El recurso es el reembolso; `sale_id` apunta al cobro original
+// (equivalente al enlace `up` de un reembolso v2, pero el evento clásico lo
+// da directo).
+export async function handleSaleRefunded(event: any): Promise<void> {
+  const refund = event.resource;
+  const refundedCents = Math.round(parseFloat(refund?.amount?.total ?? '0') * 100);
+  if (!refundedCents) return;
+
+  const saleId = refund?.sale_id;
+  const offering = saleId ? await Offering.findOne({ paypalSaleId: saleId }) : null;
+
+  if (!offering) {
+    console.error(
+      'PayPal: reembolso de suscripción sin ofrenda que le corresponda —',
+      JSON.stringify({ refundId: refund?.id, saleId, refundedCents })
+    );
+    return;
+  }
+
+  const { refundedAmount, fullyRefunded } = applyRefund(
+    offering.amount,
+    offering.refundedAmount ?? 0,
+    refundedCents
+  );
+  offering.refundedAmount = refundedAmount;
+  offering.refundedAt = new Date();
   if (fullyRefunded) offering.status = 'refunded';
   await offering.save();
 }
@@ -360,4 +516,57 @@ export async function handleSubscriptionCancelled(event: any): Promise<void> {
       });
     }
   }
+}
+
+// ── Búsqueda de transacciones (ofrendas recibidas por fuera de la app) ──────
+//
+// Alguien puede mandarle dinero directo a la cuenta de PayPal del ministerio
+// (PayPal.me, "Enviar a un amigo", un pago que no pasó por nuestro checkout…)
+// sin que exista ningún orderId/subscriptionId nuestro con qué casarlo — por
+// eso esas ofrendas se registran a mano. La API de Transaction Search SÍ tiene
+// el dato (comisión, nombre y correo del pagador): el admin busca por
+// fecha/monto en vez de teclear la comisión copiándola de PayPal a ojo.
+
+export async function searchPaypalTransactions(startDate: Date, endDate: Date): Promise<any[]> {
+  const qs = new URLSearchParams({
+    start_date: startDate.toISOString(),
+    end_date: endDate.toISOString(),
+    fields: 'all',
+    page_size: '100',
+  });
+  const res = await paypalGet(`/v1/reporting/transactions?${qs}`);
+  return res?.transaction_details || [];
+}
+
+// Extracción pura (testable): de un item crudo de Transaction Search a lo que
+// necesita el admin para elegir. Descarta lo que no sirve como candidato de
+// ofrenda: pagos SALIENTES (comisiones de terceros, suscripciones que
+// pagamos nosotros) y transacciones que no llegaron a completarse.
+export function parseTransactionCandidate(t: any): {
+  transactionId: string;
+  date: Date;
+  amountCents: number;
+  feeCents: number;
+  payerName: string;
+  payerEmail: string;
+} | null {
+  const ti = t?.transaction_info;
+  const amount = parseFloat(ti?.transaction_amount?.value ?? '0');
+  if (!ti?.transaction_id || !(amount > 0)) return null; // solo dinero ENTRANTE
+  if (ti?.transaction_status && ti.transaction_status !== 'S') return null; // solo completadas
+
+  const fee = Math.abs(parseFloat(ti?.fee_amount?.value ?? '0'));
+  const payer = t?.payer_info;
+  const name =
+    payer?.payer_name?.alternate_full_name ||
+    [payer?.payer_name?.given_name, payer?.payer_name?.surname].filter(Boolean).join(' ');
+
+  return {
+    transactionId: ti.transaction_id,
+    date: ti.transaction_initiation_date ? new Date(ti.transaction_initiation_date) : new Date(),
+    amountCents: Math.round(amount * 100),
+    feeCents: Math.round(fee * 100),
+    payerName: name || '',
+    payerEmail: payer?.email_address || '',
+  };
 }
