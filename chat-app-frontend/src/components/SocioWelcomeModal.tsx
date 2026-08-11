@@ -44,7 +44,7 @@ export function SocioWelcomeModal() {
   const goToMaterials = () => {
     close();
     // Con acceso completo, a los materiales; si no, a ofrendas para mejorar.
-    router.push((fullAccess ? '/(tabs)/materiales' : '/(tabs)/ofrendas') as any);
+    router.push((fullAccess ? '/menu/materiales' : '/(tabs)/ofrendas') as any);
   };
 
   const firstName = (name || '').split(' ')[0];

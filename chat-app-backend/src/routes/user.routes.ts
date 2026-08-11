@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/authMiddleware';
-import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount, getMyConnections, getSocioWelcome, markSocioWelcomeSeen, getSocioReminder } from '../controllers/userController';
+import { toggleBlock, getBlockedUsers, updatePushToken, getAllMyCommitments, getUserProfile, reportUser, getMyProfile, updateMyProfile, getMySettings, updateSettings, changePassword, deleteAccount, getMyConnections, getSocioWelcome, markSocioWelcomeSeen, getSocioReminder, followUser, unfollowUser, getFollowStatus } from '../controllers/userController';
 import { getPersonalActivities, createPersonalActivity, updatePersonalActivity, deletePersonalActivity } from '../controllers/personalActivityController';
 import { getMyActivePrayerRequests, getPrayerFeed } from '../controllers/prayerController';
 import { getActivityFeed } from '../controllers/activityController';
@@ -23,6 +23,9 @@ router.get('/me/prayer-requests', getMyActivePrayerRequests);
 router.get('/me/prayer-feed', getPrayerFeed);
 router.get('/me/activity-feed', getActivityFeed);
 router.get('/me/connections', getMyConnections);
+router.post('/follow/:userId', followUser);
+router.post('/unfollow/:userId', unfollowUser);
+router.get('/follow/status/:userId', getFollowStatus);
 router.get('/me/socio-welcome', getSocioWelcome);
 router.post('/me/socio-welcome/seen', markSocioWelcomeSeen);
 router.get('/me/socio-reminder', getSocioReminder);

@@ -104,7 +104,7 @@ export default function NotificationsScreen() {
   const handlePress = useCallback((it: NotificationItem) => {
     const { screen, id } = it.nav;
     if (screen === 'activities-tab') { router.push('/(tabs)/actividades' as any); return; }
-    if (screen === 'material') { router.push('/(tabs)/materiales' as any); return; }
+    if (screen === 'material') { router.push('/menu/materiales' as any); return; }
     if (!id) return;
     if (screen === 'chat') router.push(`/chat/${id}` as any);
     else if (screen === 'prayer') router.push(`/group-prayer/${id}` as any);

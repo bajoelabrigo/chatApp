@@ -12,6 +12,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { deleteCloudinaryAsset, deleteCloudinaryAssets } from '../services/cloudinaryService';
 import { sendAccountDeletedEmail } from '../services/emailService';
 import { cleanWebDomainReferences } from '../services/userCascade';
+import { ConnectionRequest } from '../models/ConnectionRequest';
 
 function extractCloudinaryPublicId(url: string): string | null {
   try {
@@ -209,6 +210,62 @@ export async function getMyConnections(req: AuthRequest, res: Response): Promise
     res.json(users);
   } catch {
     res.status(500).json({ error: 'Error obteniendo conexiones' });
+  }
+}
+
+// POST /users/follow/:userId — seguir (unidireccional, no requiere aceptación).
+export async function followUser(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const targetId = req.params.userId;
+    if (targetId === userId) { res.status(400).json({ error: 'No puedes seguirte a ti mismo' }); return; }
+
+    const [me, target] = await Promise.all([
+      User.findById(userId).select('blockedUsers'),
+      User.findById(targetId).select('blockedUsers'),
+    ]);
+    if (!me || !target) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
+
+    const blocked =
+      (me.blockedUsers ?? []).some((id) => id.toString() === targetId) ||
+      (target.blockedUsers ?? []).some((id) => id.toString() === userId);
+    if (blocked) { res.status(403).json({ error: 'No puedes seguir a este usuario' }); return; }
+
+    await Promise.all([
+      User.findByIdAndUpdate(userId, { $addToSet: { following: targetId } }),
+      User.findByIdAndUpdate(targetId, { $addToSet: { followers: userId } }),
+    ]);
+    res.json({ following: true });
+  } catch {
+    res.status(500).json({ error: 'Error al seguir al usuario' });
+  }
+}
+
+// POST /users/unfollow/:userId
+export async function unfollowUser(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const targetId = req.params.userId;
+    await Promise.all([
+      User.findByIdAndUpdate(userId, { $pull: { following: targetId } }),
+      User.findByIdAndUpdate(targetId, { $pull: { followers: userId } }),
+    ]);
+    res.json({ following: false });
+  } catch {
+    res.status(500).json({ error: 'Error al dejar de seguir' });
+  }
+}
+
+// GET /users/follow/status/:userId
+export async function getFollowStatus(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const userId = req.userId!;
+    const targetId = req.params.userId;
+    const me = await User.findById(userId).select('following').lean();
+    const isFollowing = (me?.following ?? []).some((id: any) => id.toString() === targetId);
+    res.json({ following: isFollowing });
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo el estado' });
   }
 }
 
@@ -483,6 +540,26 @@ export async function toggleBlock(req: Request, res: Response) {
         ? { $pull: { blockedUsers: targetUserId } }
         : { $addToSet: { blockedUsers: targetUserId } }
     );
+
+    // Al bloquear (no al desbloquear) se deshace cualquier conexión/follow mutuo
+    // y se borran las solicitudes pendientes entre ambos — paridad con
+    // `blockUser` de la web, para que bloquear también corte el lazo social.
+    if (!isBlocked) {
+      await Promise.all([
+        User.findByIdAndUpdate(userId, {
+          $pull: { connections: targetUserId, followers: targetUserId, following: targetUserId },
+        }),
+        User.findByIdAndUpdate(targetUserId, {
+          $pull: { connections: userId, followers: userId, following: userId },
+        }),
+        ConnectionRequest.deleteMany({
+          $or: [
+            { sender: userId, recipient: targetUserId },
+            { sender: targetUserId, recipient: userId },
+          ],
+        }),
+      ]);
+    }
 
     // Sync conversation archive state with block state
     const conversation = await Conversation.findOne({

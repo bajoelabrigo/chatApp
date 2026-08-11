@@ -95,7 +95,7 @@ function RootLayoutInner() {
     try {
       const Notifications = require('expo-notifications');
       const route = (data: any) => {
-        if (data?.type === 'material' || data?.type === 'socio') router.push('/(tabs)/materiales' as any);
+        if (data?.type === 'material' || data?.type === 'socio') router.push('/menu/materiales' as any);
         else if (data?.type === 'chat' && data?.conversationId)
           router.push(`/chat/${data.conversationId}` as any);
       };

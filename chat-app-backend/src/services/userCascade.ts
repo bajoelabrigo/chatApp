@@ -41,9 +41,12 @@ export async function cleanWebDomainReferences(
   await safe('petitions-praying', () =>
     col('petitions').updateMany({}, { $pull: { prayingUsers: uid } } as any)
   );
-  // Sacarlo de followers/following/connections de los demás
+  // Sacarlo de followers/following/connections/blockedUsers de los demás
   await safe('users-social', () =>
-    col('users').updateMany({}, { $pull: { followers: uid, following: uid, connections: uid } } as any)
+    col('users').updateMany(
+      {},
+      { $pull: { followers: uid, following: uid, connections: uid, blockedUsers: uid } } as any
+    )
   );
   // Tokens (verificación/reseteo de la web)
   await safe('tokens', () => col('tokens').deleteMany({ userId: uid }));

@@ -102,7 +102,7 @@ export default function DailyPopup() {
 
     if (d.kind === 'material' && d.material) {
       if (token) markMaterialViewed(token, d.material._id).catch(() => {});
-      router.push('/(tabs)/materiales' as any);
+      router.push('/menu/materiales' as any);
     } else if (d.kind === 'prayer' && d.prayer) {
       router.push({ pathname: '/group-prayer/[id]' as any, params: { id: d.prayer.groupId, highlight: d.prayer._id } });
     } else if (d.kind === 'activity' && d.activity) {

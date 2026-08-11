@@ -35,6 +35,13 @@ export interface IUser extends Document {
   resetCode?: string;
   resetCodeExpiry?: Date;
   blockedUsers: Types.ObjectId[];
+  // Grafo social compartido con la web (misma colección `users`). Ya se leían
+  // vía strict:false desde `getMyConnections`; aquí quedan tipados de verdad.
+  followers?: Types.ObjectId[];
+  following?: Types.ObjectId[];
+  connections?: Types.ObjectId[];
+  // Posts que el usuario marcó "no me interesa" (se excluyen del feed).
+  notInterestedPosts?: Types.ObjectId[];
   expoPushToken?: string;
   // Suscripciones Web Push (PWA de holyholyholy.es). Colección compartida: la web
   // las crea; este backend las lee para notificar chat/actividades/oración de grupo.
@@ -104,6 +111,10 @@ const UserSchema = new Schema<IUser>(
     resetCodeExpiry:       { type: Date },
     lastLogin:             { type: Date, default: Date.now },
     blockedUsers:          [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    followers:             [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    following:             [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    connections:           [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    notInterestedPosts:    [{ type: Schema.Types.ObjectId, ref: 'Post' }],
     expoPushToken:         { type: String },
     webPushSubscriptions: [
       {

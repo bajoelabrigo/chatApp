@@ -53,7 +53,7 @@ const BIO_MAX = 150;
 const DEFAULT_NOTIF: NotificationSettings = { messages: true, prayerRequests: true, activityReminders: true };
 const DEFAULT_PRIVACY: PrivacySettings = { showOnlineStatus: true, showReadReceipts: true, showLastSeen: true };
 
-export default function SettingsScreen() {
+export default function AjustesScreen() {
   const { user, logout, updateUser } = useAuthStore();
   const { token } = useAuthStore();
   const { colors, isDark, toggleTheme } = useTheme();
@@ -391,7 +391,22 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }} edges={['bottom']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+      {/* ── Header ── */}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 16, paddingVertical: 12,
+        borderBottomWidth: 1, borderBottomColor: colors.border,
+        backgroundColor: colors.headerBg,
+      }}>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12, padding: 4 }}>
+          <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '600', flex: 1 }}>
+          Ajustes
+        </Text>
+      </View>
+
       <ScrollView showsVerticalScrollIndicator={false}>
 
         <EmailNotVerifiedBanner />
@@ -560,17 +575,6 @@ export default function SettingsScreen() {
           <SectionRow icon="📂" label="Archivados" onPress={() => openSection_('archivados')} colors={colors} />
           <SectionRow icon="⭐" label="Favoritos" onPress={() => openSection_('favoritos')} colors={colors} />
           <SectionRow icon="🚫" label="Bloqueados" onPress={() => openSection_('bloqueados')} colors={colors} last />
-        </View>
-
-        {/* ── Información ── */}
-        <View style={cardStyle}>
-          <Text style={{ color: colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 }}>
-            Información
-          </Text>
-          <SectionRow icon="📜" label="Reglamentos" onPress={() => router.push('/info/reglamentos' as any)} colors={colors} />
-          <SectionRow icon="❓" label="Preguntas frecuentes" onPress={() => router.push('/info/faq' as any)} colors={colors} />
-          <SectionRow icon="✝️" label="Quiénes somos" onPress={() => router.push('/info/quienes-somos' as any)} colors={colors} />
-          <SectionRow icon="📧" label="Contacto" onPress={() => router.push('/info/contacto' as any)} colors={colors} last />
         </View>
 
         {/* ── Cuenta ── */}

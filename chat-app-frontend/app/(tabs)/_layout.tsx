@@ -57,20 +57,6 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="materiales"
-        options={{
-          title: 'Materiales',
-          headerShown: false,
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'library' : 'library-outline'}
-              size={22}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="ofrendas"
         options={{
           title: 'Ofrendas',
@@ -84,12 +70,12 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="settings"
+        name="menu"
         options={{
-          title: 'Ajustes',
+          title: 'Menú',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'settings' : 'settings-outline'}
+              name={focused ? 'grid' : 'grid-outline'}
               size={22}
               color={color}
             />

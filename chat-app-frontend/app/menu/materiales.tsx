@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { cld } from '../../src/lib/cldImage';
@@ -281,10 +281,29 @@ export default function MaterialesScreen() {
     );
   };
 
+  const Header = (
+    <View style={{
+      flexDirection: 'row', alignItems: 'center',
+      paddingHorizontal: 16, paddingVertical: 12,
+      borderBottomWidth: 1, borderBottomColor: colors.border,
+      backgroundColor: colors.headerBg,
+    }}>
+      <TouchableOpacity onPress={() => router.back()} style={{ marginRight: 12, padding: 4 }}>
+        <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+      </TouchableOpacity>
+      <Text style={{ color: colors.textPrimary, fontSize: 18, fontWeight: '600', flex: 1 }}>
+        Materiales
+      </Text>
+    </View>
+  );
+
   if (loading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={colors.accent} />
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+        {Header}
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color={colors.accent} />
+        </View>
       </SafeAreaView>
     );
   }
@@ -405,7 +424,8 @@ export default function MaterialesScreen() {
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+      {Header}
       <FlatList
         data={filtered}
         keyExtractor={(m) => m._id}

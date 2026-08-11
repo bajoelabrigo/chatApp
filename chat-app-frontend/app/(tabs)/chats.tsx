@@ -935,7 +935,7 @@ export default function ChatsScreen() {
                 )}
 
                 <TouchableOpacity
-                  onPress={() => router.navigate({ pathname: '/(tabs)/settings', params: { section: 'archivados' } } as any)}
+                  onPress={() => router.navigate({ pathname: '/menu/ajustes', params: { section: 'archivados' } } as any)}
                   style={{
                     flexDirection: 'row', alignItems: 'center',
                     paddingHorizontal: 16, paddingVertical: 12,
