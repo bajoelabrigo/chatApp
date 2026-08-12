@@ -17,6 +17,7 @@ import {
   listAdminOfferings,
   deleteManualOffering,
   voidOffering,
+  purgeOffering,
   searchPaypalOfferingCandidates,
 } from '../controllers/offeringController';
 
@@ -46,6 +47,9 @@ router.put('/admin/:id', updateManualOffering);
 router.get('/admin', listAdminOfferings);
 router.post('/admin/:id/void', voidOffering);
 // Legado: ya no borra, anula (ver el controlador).
+// Antes que la genérica: '/admin/:id/hard' con :id = 'x' no debe caer en la de
+// abajo. Borra de verdad; la de abajo anula.
+router.delete('/admin/:id/hard', purgeOffering);
 router.delete('/admin/:id', deleteManualOffering);
 
 export default router;

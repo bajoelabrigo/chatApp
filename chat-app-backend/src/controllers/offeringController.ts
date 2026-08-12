@@ -531,6 +531,45 @@ export async function voidOffering(req: Request, res: Response) {
   }
 }
 
+// DELETE /offerings/admin/:id/hard — BORRA de verdad, sin dejar rastro.
+//
+// Lo normal es anular (queda tachado con su motivo y deja de sumar): un ingreso
+// que desaparece sin explicación es lo que hace imposible cuadrar meses después.
+// Esto es para lo que NUNCA fue dinero — una prueba, una fila duplicada por un
+// registro a mano repetido— donde dejar el tachón solo ensucia el libro.
+//
+// Una ofrenda que respalda la cuota de un socio no se puede borrar: la cuota
+// seguiría apuntando a ella y el panel la volvería a pintar desde el socio (el
+// respaldo de las ofrendas fuera del tope de 500). Primero hay que deshacer la
+// cuota en Socios. La comprobación se hace contra la colección `users`, que es
+// de la web pero vive en la MISMA base (ver "Base de datos unificada").
+export async function purgeOffering(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const off = await Offering.findById(req.params.id);
+    if (!off) return res.status(404).json({ error: 'No encontrada' });
+
+    const socio = await User.findOne({ 'socioPayments.offeringId': String(off._id) })
+      .select('name')
+      .lean();
+    if (socio) {
+      return res.status(409).json({
+        error: `Respalda la cuota de socio de ${socio.name}. Deshaz la cuota en Socios y vuelve a intentarlo.`,
+      });
+    }
+
+    await off.deleteOne();
+    console.log(`purgeOffering: ${off._id} (${off.amount} centavos) borrada por ${requesterId}`);
+    res.json({ message: 'Movimiento eliminado' });
+  } catch (err) {
+    console.error('purgeOffering:', err);
+    res.status(500).json({ error: 'Error eliminando la ofrenda' });
+  }
+}
+
 // DELETE /offerings/admin/:id — se mantiene por compatibilidad con clientes ya
 // desplegados, pero YA NO BORRA: anula, como el endpoint de arriba. Borrar de
 // verdad dejaba un ingreso sin rastro y era imposible auditar nada.

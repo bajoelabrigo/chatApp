@@ -87,7 +87,7 @@ export interface IUser extends Document {
   socioPaymentReminder?: boolean; // aviso de pago activo → modal/banner
   socioOverdue?: boolean;
   socioReminderStage?: number;
-  socioPayments?: { date: Date; amount: number }[];
+  socioPayments?: { date: Date; amount: number; months?: number; source?: string; offeringId?: string }[];
   createdAt: Date;
   lastLogin: Date;
   // ── Campos espejo para compatibilidad con la web (misma colección) ──
@@ -158,7 +158,11 @@ const UserSchema = new Schema<IUser>(
     socioPaymentReminder:  { type: Boolean, default: false },
     socioOverdue:          { type: Boolean, default: false },
     socioReminderStage:    { type: Number, default: 0 },
-    socioPayments:         [{ date: Date, amount: Number, _id: false }],
+    // Espejo de solo lectura del historial de cuotas que escribe la web. Los
+    // campos tienen que estar TODOS aunque aquí no se usen: si este backend
+    // guardara un usuario con el array modificado, Mongoose borraría los que no
+    // conoce (el vínculo con la ofrenda, los meses que cubre el pago).
+    socioPayments:         [{ date: Date, amount: Number, months: Number, source: String, offeringId: String, _id: false }],
     // Campos espejo de la web (se mantienen sincronizados con los hooks de abajo)
     isVerified:            { type: Boolean, default: false },
     profilePicture:        { type: String },
