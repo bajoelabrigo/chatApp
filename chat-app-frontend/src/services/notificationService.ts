@@ -5,6 +5,7 @@ export type NotificationKind =
   | 'missed_call'
   | 'prayer'
   | 'prayer_pray'
+  | 'poll_vote'
   | 'activity'
   | 'reminder'
   | 'material'

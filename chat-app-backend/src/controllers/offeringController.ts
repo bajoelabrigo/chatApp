@@ -314,9 +314,12 @@ export async function createManualOffering(req: Request, res: Response) {
       note,
       receivedAt,
       // Si la ofrenda se emparejó con un candidato de "Buscar en PayPal": id
-      // de la transacción real (para no poder registrarla dos veces) y su
-      // comisión, ya calculada por el backend en esa búsqueda.
+      // de la transacción real (para no poder registrarla dos veces).
       paypalTransactionId,
+      // Comisión que se quedó la pasarela, en CENTAVOS (la trae el buscador de
+      // PayPal, o la escribe el admin a mano cuando el cobro no aparece en la
+      // búsqueda: el correo de PayPal la dice). Sin ella el panel contaría como
+      // ingreso un bruto que nunca llegó a la cuenta.
       feeAmount,
     } = req.body || {};
     const usd = Number(amount);
@@ -327,8 +330,13 @@ export async function createManualOffering(req: Request, res: Response) {
       return res.status(400).json({ error: 'Indica un usuario o el nombre/email del donante' });
     }
 
+    const amountCents = Math.round(usd * 100);
+    const fee = Math.max(0, Math.round(Number(feeAmount) || 0));
+    if (fee > amountCents) {
+      return res.status(400).json({ error: 'La comisión no puede ser mayor que el monto' });
+    }
+
     let paypalCaptureId: string | undefined;
-    let fee = 0;
     if (paypalTransactionId) {
       const dupe = await Offering.findOne({
         paypalCaptureId: paypalTransactionId,
@@ -338,13 +346,12 @@ export async function createManualOffering(req: Request, res: Response) {
         return res.status(409).json({ error: 'Esa transacción de PayPal ya está registrada como ofrenda' });
       }
       paypalCaptureId = String(paypalTransactionId);
-      fee = Math.max(0, Math.round(Number(feeAmount) || 0));
     }
 
     const doc = await Offering.create({
       userId: userId || undefined,
       type: 'one_time',
-      amount: Math.round(usd * 100), // guardado en centavos, como el resto
+      amount: amountCents, // guardado en centavos, como el resto
       currency: 'usd',
       status: 'paid',
       source: 'manual',
@@ -430,7 +437,8 @@ export async function updateManualOffering(req: Request, res: Response) {
       return res.status(400).json({ error: 'Solo se pueden editar las ofrendas manuales' });
     }
 
-    const { userId, donorName, donorEmail, amount, method, note, receivedAt } = req.body || {};
+    const { userId, donorName, donorEmail, amount, method, note, receivedAt, feeAmount } =
+      req.body || {};
     const usdAmount = Number(amount);
     if (!usdAmount || usdAmount <= 0) {
       return res.status(400).json({ error: 'Monto inválido' });
@@ -443,6 +451,15 @@ export async function updateManualOffering(req: Request, res: Response) {
     off.donorName = userId ? undefined : donorName || undefined;
     off.donorEmail = userId ? undefined : donorEmail || undefined;
     off.amount = Math.round(usdAmount * 100);
+    // La comisión solo se toca si el cliente la manda: un cliente antiguo (que
+    // no conoce el campo) no puede borrar la que ya estaba guardada.
+    if (feeAmount !== undefined) {
+      const fee = Math.max(0, Math.round(Number(feeAmount) || 0));
+      if (fee > off.amount) {
+        return res.status(400).json({ error: 'La comisión no puede ser mayor que el monto' });
+      }
+      off.feeAmount = fee;
+    }
     off.method = method || 'otro';
     off.note = note || undefined;
     off.receivedAt = parseDateOnly(receivedAt);

@@ -71,7 +71,8 @@ export interface Message {
   /** Encuesta (`type: 'poll'`). Los votos van dentro de cada opción. */
   poll?: {
     question: string;
-    options: { text: string; votes: string[] }[];
+    /** `votedAt` (hora del voto de cada uno) solo lo traen las encuestas nuevas. */
+    options: { text: string; votes: string[]; votedAt?: { user: string; at: string }[] }[];
     multiple: boolean;
     closed: boolean;
   };

@@ -40,6 +40,7 @@ import { GroupCommunityBar } from '../../src/components/chat/GroupCommunityBar';
 import { DailyVerseChatCard } from '../../src/components/chat/DailyVerseChatCard';
 import { fetchGroupDailyVerse, reactGroupDailyVerse, type GroupDailyVerse } from '../../src/services/bibleService';
 import { CreatePollModal } from '../../src/components/chat/CreatePollModal';
+import { PollVotersModal } from '../../src/components/chat/PollVotersModal';
 import { useMentions } from '../../src/hooks/useMentions';
 import { getGroupSummary, type GroupSummary } from '../../src/services/activityService';
 import {
@@ -171,6 +172,9 @@ export default function ChatScreen() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectionMode = selectedIds.size > 0;
   const [reactionDetail, setReactionDetail] = useState<{ messageId: string; filterEmoji: string } | null>(null);
+  // "Ver votos": se guarda el ID, no la encuesta, para que el detalle se repinte
+  // solo cuando llegue un `poll:update` (los votos se ven en vivo estando dentro).
+  const [pollDetailId, setPollDetailId] = useState<string | null>(null);
   const [reactionEmojiPickerOpen, setReactionEmojiPickerOpen] = useState(false);
   const [memberModal, setMemberModal] = useState<ChatUser | null>(null);
   const [memberActionLoading, setMemberActionLoading] = useState(false);
@@ -289,6 +293,13 @@ export default function ChatScreen() {
     if (!reactionDetail) return null;
     return conversationMessages.find((m) => m._id === reactionDetail.messageId) ?? null;
   }, [reactionDetail, conversationMessages]);
+
+  const pollDetailMessage = useMemo(() => {
+    if (!pollDetailId) return null;
+    return conversationMessages.find((m) => m._id === pollDetailId) ?? null;
+  }, [pollDetailId, conversationMessages]);
+
+  const openPollDetail = useCallback((msg: Message) => setPollDetailId(msg._id), []);
 
   const participantMap = useMemo(() => {
     const conv = conversations.find((c) => c._id === conversationId);
@@ -1292,6 +1303,8 @@ export default function ChatScreen() {
                   mentionUsers={mentions.all}
                   onVote={votePoll}
                   onClosePoll={closePoll}
+                  pollUsers={participantMap}
+                  onPollDetail={openPollDetail}
                   highlighted={item.data._id === highlightedId}
                   onLongPress={handleLongPress}
                   onDownload={handleDownload}
@@ -1953,6 +1966,15 @@ export default function ChatScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Detalles de la encuesta: quién votó qué (se actualiza en vivo). */}
+      <PollVotersModal
+        visible={!!pollDetailMessage?.poll}
+        poll={pollDetailMessage?.poll}
+        users={participantMap}
+        currentUserId={user?.id ?? ''}
+        onClose={() => setPollDetailId(null)}
+      />
 
       <BibleModal
         visible={bibleOpen}

@@ -445,6 +445,27 @@ Un solo endpoint para los dos clientes: `POST /upload` (multer en memoria → Cl
 
 ---
 
+## Notas de voz — UN reproductor global, fuera de React (2026-08-13)
+
+Cada burbuja tenía su `useAudioPlayer`, atado al ciclo de vida del componente: salir del chat —o que la FlashList reciclara la fila al desplazarse— liberaba el reproductor y **el audio se cortaba a media frase**. WhatsApp lo sigue reproduciendo hasta el final aunque te muevas por la app.
+
+- El reproductor vive en **`chat-app-frontend/src/store/useVoiceStore.ts`**, creado con `createAudioPlayer` (no el hook) y guardado en una variable de módulo, **no dentro del estado de zustand**: es un objeto nativo (`SharedObject`), no un valor serializable. El store solo guarda `{uri, messageId, conversationId, title, playing, position, duration}`.
+- `VoicePlayer` solo pinta. Sus selectores comparan `s.messageId === messageId` y devuelven primitivas, así que **las demás burbujas no se repintan** mientras una suena. Su `useAudioPlayer` local recibe `null` cuando esa nota es la activa (si no, el mismo audio se cargaría dos veces) y solo sirve para saber la duración antes de tocarla; las duraciones ya vistas se cachean por URL en el store.
+- **`VoiceMiniPlayer`** (montado en `app/_layout.tsx`) es la barra flotante al salir del chat: sin ella el audio seguiría sonando sin forma de pararlo. Se esconde dentro de su propia conversación comparando `usePathname()` con `/chat/<conversationId>`.
+- Se pausa sola al **empezar a grabar** (`useVoiceRecorder.start`) y al **sonar un tono de llamada** (`ringtoneService.playLoop`): en Android se pelearían por la sesión de audio.
+- **No hay reproducción en segundo plano** (app minimizada) a propósito: `shouldPlayInBackground` necesita configuración nativa (`eas build`), y esto tenía que llegar por `eas update`.
+
+## Encuestas — "Ver votos", hora del voto y avisos (2026-08-13)
+
+La burbuja (`PollBubble`, espejada en `holy_app/.../messages/PollBubble.jsx`) y el detalle (`PollVotersModal`, también espejado) copian la composición de WhatsApp: pregunta, instrucción ("Selecciona una opción o más."), círculos de 26, caras de los votantes + recuento, barra a lo ancho, y pie "Ver votos".
+
+- **La barra se mide contra la opción MÁS votada**, no contra el total: la ganadora llena la barra y las opciones se comparan de un vistazo. Con el total, en una encuesta de 3 opciones ninguna llegaba nunca al final.
+- **La hora del voto es un campo nuevo: `poll.options[].votedAt: [{user, at}]`** (`Message.ts`). Va en un arreglo APARTE de `votes` porque `votes` se manipula con operadores atómicos por valor escalar (`$addToSet`/`$pull`); con objetos dentro, `$addToSet` dejaría de deduplicar y cada doble toque contaría dos veces. Se mueve **en el mismo update** que el voto. Las encuestas anteriores no lo tienen: se pintan igual, sin hora.
+- **El detalle se pinta con el mensaje VIVO** (se guarda el `_id`, no la encuesta), así que los votos que llegan por `poll:update` se ven sin cerrarlo. `updatePoll` del store reemplaza el mensaje de forma inmutable — sin eso, `React.memo` de `MessageBubble` lo dejaría congelado.
+- **"Ver todos" a partir de 5 votantes por opción**: en un grupo grande la ganadora se comía la pantalla y las demás opciones quedaban fuera de vista.
+- **Avisos**: `poll:vote` manda push (Expo + web) al AUTOR cuando alguien vota — solo al añadir voto, nunca a uno mismo, respetando `mutedBy` y solo si no tiene socket abierto (si está dentro ya ve moverse las barras); `tag: poll-<messageId>` para que varios votos actualicen el mismo aviso. La campana lista una sección **"Votos en tus encuestas"** (`kind: 'poll_vote'`), calculada de `votedAt` como "está orando por ti" — no hay colección de avisos.
+- **⚠️ Orden de despliegue INVERTIDO respecto a los tipos de mensaje nuevos: primero los CLIENTES, luego el backend.** Un `kind` de notificación desconocido tumbaba la pantalla de la campana (`grouped[it.kind].push(...)` sobre `undefined`). Ya lleva `?.`, pero un APK que aún no bajó el OTA sigue con el bundle viejo. Regla: **campo nuevo en un mensaje → backend primero; tipo nuevo que el backend EMPIEZA a mandar a los clientes → clientes primero.**
+
 ## Lista de chats — opciones (móvil y web)
 
 Las 8 acciones sobre un chat (marcar no leído, fijar, favorito, silenciar, archivar, vaciar, eliminar, bloquear) están en los dos clientes: móvil en la hoja de acciones al mantener pulsado (`app/(tabs)/chats.tsx`), web en el menú de 3 puntos de `sidebar/Conversation.jsx` (mismo componente para las pestañas Todos/No leídos/Favoritos/Grupos/Archivados).
@@ -680,6 +701,13 @@ Había **dos libros de contabilidad para el mismo dinero**: `Offering` (chat-bac
 **Reembolsos de PayPal.** El webhook maneja `PAYMENT.CAPTURE.REFUNDED` y `.REVERSED` (`handleCaptureRefunded`). Se guarda `refundedAmount` en vez de tocar `amount`, así un reembolso **parcial** también cuadra (neto = `amount - refundedAmount`) y no se pierde de cuánto fue la ofrenda. Para casarlo hace falta el **id de la captura** (`paypalCaptureId`), que ahora se guarda en los tres sitios que capturan; las ofrendas anteriores solo tienen el de la orden y caen a ese. Si no encaja con ninguna, se registra en el log con `console.error` — nunca en silencio: es dinero que salió.
 
 **Dos unidades para el dinero, a propósito**: `Offering` y `Expense` en **centavos** (enteros — sumar dólares en coma flotante acumula error); `MaterialPurchase` en **dólares**, por historia. La conversión vive solo en `backend/utils/money.js` (`toCents`/`fromCents`), espejado en `frontend/src/lib/money.js`. Toda la API habla en dólares.
+
+## Método de pago y comisión de una ofrenda (2026-08-13)
+
+- **Los métodos son clave + etiqueta**, en `holy_app/frontend/src/lib/offeringMethods.js` (`METHODS`, `methodLabel`): la clave en minúsculas es lo que se guarda en `Offering.method` (campo libre, sin enum) y la etiqueta con mayúscula es lo único que se enseña (`Efectivo`, `PayPal`, `Western Union`, `Yape`…). Un método viejo o desconocido se pinta con la inicial en mayúscula en vez de perderse. Lo usan el modal de ofrenda, "Registrar cuota" de Socios y el `origin` del libro (`Manual · Efectivo` — ojo, hay un test que lo comprueba).
+- Los **métodos de GASTO son otra lista** (`expenseMeta.js`), porque el backend web sí los valida contra un enum (`EXPENSE_METHODS`) y lo que no reconoce lo convierte en `"otro"` **en silencio**. `expenses.test.mjs` compara las dos copias.
+- **La comisión de una ofrenda se puede escribir a mano** (campo "Comisión ($)" del modal, también al editar): `feeAmount` ya no depende de haber usado "Buscar en PayPal". Viaja en **CENTAVOS** (nació con ese buscador; el resto de la API va en dólares) y el backend rechaza una comisión mayor que el monto. En el `PUT` solo se toca si el cliente manda el campo, para que un cliente viejo no borre la guardada.
+- **"Buscar en PayPal" busca ±3 días y se puede ampliar a ±15.** Si no aparece nada, el aviso lo explica: un cobro recién hecho tarda horas en salir en el informe de transacciones de PayPal, y ahí está el campo manual.
 
 ## Gastos y balance (`holy_app`)
 

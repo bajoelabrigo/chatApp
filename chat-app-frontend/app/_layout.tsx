@@ -16,6 +16,7 @@ import api from '../src/services/authService';
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { triggerDailyActivityReminder } from '../src/utils/dailyActivityReminder';
 import { SocioWelcomeModal } from '../src/components/SocioWelcomeModal';
+import { VoiceMiniPlayer } from '../src/components/chat/VoiceMiniPlayer';
 import { SocioPaymentReminderModal } from '../src/components/SocioPaymentReminderModal';
 import { cld } from '../src/lib/cldImage';
 
@@ -186,6 +187,9 @@ function RootLayoutInner() {
         <Stack.Screen name="u/[id]" />
         <Stack.Screen name="g/[id]" />
       </Stack>
+
+      {/* Nota de voz que sigue sonando fuera de su chat (como WhatsApp) */}
+      <VoiceMiniPlayer />
 
       {/* Bienvenida socio (una sola vez tras hacerse socio) */}
       <SocioWelcomeModal />

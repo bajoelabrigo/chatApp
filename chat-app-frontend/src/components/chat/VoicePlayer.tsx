@@ -1,11 +1,17 @@
 import { useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useTheme } from '../../context/ThemeContext';
+import { useVoiceStore, cachedDuration, rememberDuration } from '../../store/useVoiceStore';
 
 interface Props {
   uri: string;
   isMine: boolean;
+  /** Identifica la nota dentro del reproductor global (una sola suena a la vez). */
+  messageId: string;
+  conversationId: string;
+  /** Quién la mandó — lo enseña la barra flotante al salir del chat. */
+  senderName?: string;
   onLongPress?: () => void;
 }
 
@@ -16,31 +22,36 @@ function formatDuration(seconds: number): string {
   return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
-export function VoicePlayer({ uri, isMine, onLongPress }: Props) {
+export function VoicePlayer({ uri, isMine, messageId, conversationId, senderName, onLongPress }: Props) {
   const { colors } = useTheme();
-  const player = useAudioPlayer({ uri }, { updateInterval: 100 });
-  const status = useAudioPlayerStatus(player);
 
-  const isPlaying = status.playing;
-  const position = status.currentTime ?? 0;
-  const duration = status.duration ?? 0;
-  const progress = duration > 0 ? position / duration : 0;
+  // Estado del reproductor GLOBAL: solo la nota activa lee valores reales, así
+  // que las demás burbujas no se repintan mientras esta suena.
+  const isActive = useVoiceStore((s) => s.messageId === messageId);
+  const isPlaying = useVoiceStore((s) => s.messageId === messageId && s.playing);
+  const isBuffering = useVoiceStore((s) => s.messageId === messageId && s.buffering);
+  const activePosition = useVoiceStore((s) => (s.messageId === messageId ? s.position : 0));
+  const activeDuration = useVoiceStore((s) => (s.messageId === messageId ? s.duration : 0));
+  const toggle = useVoiceStore((s) => s.toggle);
+
+  // Reproductor LOCAL: solo para saber cuánto dura la nota antes de tocarla.
+  // Mientras esta nota es la activa se le pasa `null` (no carga nada): quien
+  // manda entonces es el reproductor global.
+  const meta = useAudioPlayer(isActive ? null : { uri }, { updateInterval: 1000 });
+  const metaStatus = useAudioPlayerStatus(meta);
 
   useEffect(() => {
-    if (status.didJustFinish) {
-      player.seekTo(0);
-    }
-  }, [status.didJustFinish]);
+    if (!isActive && metaStatus.duration > 0) rememberDuration(uri, metaStatus.duration);
+  }, [isActive, metaStatus.duration, uri]);
 
-  const togglePlay = async () => {
-    try {
-      if (isPlaying) {
-        player.pause();
-      } else {
-        await setAudioModeAsync({ playsInSilentMode: true });
-        player.play();
-      }
-    } catch {}
+  const duration = isActive
+    ? activeDuration || cachedDuration(uri)
+    : metaStatus.duration || cachedDuration(uri);
+  const position = isActive ? activePosition : 0;
+  const progress = duration > 0 ? Math.min(1, position / duration) : 0;
+
+  const togglePlay = () => {
+    toggle({ uri, messageId, conversationId, title: senderName || 'Nota de voz' }).catch(() => {});
   };
 
   // La burbuja propia solo es oscura (azul) en tema oscuro; en claro es verde
@@ -62,7 +73,7 @@ export function VoicePlayer({ uri, isMine, onLongPress }: Props) {
         delayLongPress={400}
         style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: buttonBg, alignItems: 'center', justifyContent: 'center' }}
       >
-        {status.isBuffering && !isPlaying ? (
+        {isBuffering ? (
           <ActivityIndicator size="small" color={iconColor} />
         ) : (
           <Text style={{ color: iconColor, fontSize: 14, marginLeft: isPlaying ? 0 : 2 }}>{isPlaying ? '⏸' : '▶'}</Text>

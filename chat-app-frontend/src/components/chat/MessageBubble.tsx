@@ -7,7 +7,7 @@ import { LinkPreview } from './LinkPreview';
 import { useTheme } from '../../context/ThemeContext';
 import { parseFormatting, type FmtSegment } from '../../utils/chatFormat';
 import { splitMentions } from '../../utils/mentions';
-import { PollBubble } from './PollBubble';
+import { PollBubble, type PollUser } from './PollBubble';
 import { cld } from '../../lib/cldImage';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
@@ -314,6 +314,10 @@ interface Props {
   onReplyPress?: (messageId?: string) => void;
   /** Votar en una encuesta (índice de la opción tocada). */
   onVote?: (msg: Message, optionIndex: number) => void;
+  /** Participantes del chat (id → nombre y avatar): las caras de los votantes. */
+  pollUsers?: Map<string, PollUser>;
+  /** Abre "Detalles de la encuesta". */
+  onPollDetail?: (msg: Message) => void;
   /** Cerrar la votación (solo el autor; el backend lo vuelve a comprobar). */
   onClosePoll?: (msg: Message) => void;
   /** Botón "Mensaje" de una tarjeta de contacto compartido. */
@@ -323,7 +327,7 @@ interface Props {
   highlighted?: boolean;
 }
 
-function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, mentionUsers, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, onBiblePress, onVote, onClosePoll, highlighted = false }: Props) {
+function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, mentionUsers, onLongPress, onDownload, showAvatar = true, onCallBack, onReact, onReactDetail, onAvatarPress, onReplyPress, onContactPress, onBiblePress, onVote, onClosePoll, pollUsers, onPollDetail, highlighted = false }: Props) {
   const { colors } = useTheme();
   const isDark = colors.bgPrimary === '#0A0A0A';
   const senderColorKey = item.senderId.name;
@@ -567,7 +571,14 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
           }, bubbleShadow]}
         >
           {item.replyTo && <ReplyPreview reply={item.replyTo} isMine={isMine} colors={colors} onPress={() => onReplyPress?.(item.replyTo?.messageId)} />}
-          <VoicePlayer uri={item.content} isMine={isMine} onLongPress={() => onLongPress(item)} />
+          <VoicePlayer
+            uri={item.content}
+            isMine={isMine}
+            messageId={item._id}
+            conversationId={item.conversationId}
+            senderName={senderLabel}
+            onLongPress={() => onLongPress(item)}
+          />
           <View style={{ marginTop: 2 }}>{timestamp}</View>
         </Pressable>
       )}
@@ -672,7 +683,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             borderTopLeftRadius: isMine ? 18 : 4,
             backgroundColor: bubbleBg,
             padding: 12,
-            maxWidth: 300,
+            maxWidth: 320,
           }, bubbleShadow]}
         >
           <PollBubble
@@ -682,14 +693,15 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
             textColor={bubbleText}
             subtextColor={bubbleSubtext}
             onVote={(optionIndex) => onVote?.(item, optionIndex)}
+            users={pollUsers}
+            bubbleBg={bubbleBg}
+            onSeeVotes={() => onPollDetail?.(item)}
+            timestamp={timestamp}
             // Solo el autor cierra su encuesta. El backend lo vuelve a comprobar
             // (autor o admin del grupo): la UI decide qué se ve, no quién puede.
             canClose={isMine}
             onClose={() => onClosePoll?.(item)}
           />
-          <Text style={{ color: bubbleSubtext, fontSize: 10, alignSelf: 'flex-end', marginTop: 6 }}>
-            {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
         </Pressable>
       )}
 

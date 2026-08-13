@@ -17,9 +17,25 @@ export type MessageType = 'text' | 'image' | 'audio' | 'video' | 'document' | 'c
  * `multiple` decide si se puede marcar más de una opción — para "¿qué días
  * puedes?" es imprescindible; para "¿nos vemos el sábado?", no.
  */
+export interface IPollVoteStamp {
+  user: Types.ObjectId;
+  at: Date;
+}
+
 export interface IPollOption {
   text: string;
   votes: Types.ObjectId[];
+  /**
+   * Cuándo votó cada uno esta opción. Va en un arreglo APARTE y no dentro de
+   * `votes` porque `votes` es la verdad del recuento y se manipula con
+   * operadores atómicos (`$addToSet` / `$pull` por valor escalar); con objetos
+   * ahí dentro, `$addToSet` dejaría de deduplicar (dos sellos con hora distinta
+   * son dos elementos distintos) y cada doble toque contaría dos veces.
+   *
+   * Es opcional: las encuestas de antes de "Ver votos" no lo tienen, y la lista
+   * de votantes se pinta igual, solo que sin la hora.
+   */
+  votedAt?: IPollVoteStamp[];
 }
 
 export interface IPoll {
@@ -150,6 +166,13 @@ const MessageSchema = new Schema<IMessage>(
               _id: false,
               text: { type: String, required: true },
               votes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+              votedAt: [
+                {
+                  _id: false,
+                  user: { type: Schema.Types.ObjectId, ref: 'User' },
+                  at: { type: Date, default: Date.now },
+                },
+              ],
             },
           ],
           multiple: { type: Boolean, default: false },

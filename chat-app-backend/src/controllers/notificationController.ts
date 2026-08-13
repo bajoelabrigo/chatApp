@@ -16,6 +16,7 @@ type NotificationKind =
   | 'missed_call'
   | 'prayer'
   | 'prayer_pray'
+  | 'poll_vote'
   | 'activity'
   | 'reminder'
   | 'material'
@@ -279,6 +280,65 @@ export async function getNotifications(req: Request, res: Response) {
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
         .slice(0, 30)
         .forEach((it) => items.push(it));
+
+      // ── 3c. Alguien votó MIS encuestas ───────────────────────────────────
+      //
+      // No hay colección de avisos: se calcula igual que "está orando por ti",
+      // leyendo el sello de hora que `poll:vote` deja en `poll.options[].votedAt`.
+      // Las encuestas anteriores a ese campo no salen aquí (no hay forma de saber
+      // cuándo se votaron), pero se siguen votando y viendo con normalidad.
+      const myPolls = await Message.find({
+        senderId: userObjId,
+        type: 'poll',
+        isDeletedForEveryone: { $ne: true },
+        createdAt: { $gte: windowStart },
+      })
+        .select('poll conversationId')
+        .populate('conversationId', 'groupName isGroup')
+        .lean();
+
+      const pollItems: NotificationItem[] = [];
+      const voterIds = new Set<string>();
+      for (const m of myPolls as any[]) {
+        for (const opt of m.poll?.options ?? []) {
+          for (const st of opt.votedAt ?? []) {
+            const uid = st?.user?.toString();
+            if (!uid || uid === userId) continue; // mi propio voto no es novedad
+            if (!st.at || new Date(st.at) < windowStart) continue;
+            voterIds.add(uid);
+            pollItems.push({
+              id: `pollvote:${m._id}:${uid}:${opt.text}`,
+              kind: 'poll_vote',
+              title: '',
+              body: `${opt.text} · ${(m.poll?.question ?? '').slice(0, 70)}`,
+              timestamp: st.at,
+              isNew: new Date(st.at).getTime() > lastSeen.getTime(),
+              nav: { screen: 'chat', id: m.conversationId?._id?.toString() || m.conversationId?.toString() },
+            });
+          }
+        }
+      }
+      if (pollItems.length) {
+        // Los nombres se piden UNA vez para todos los votantes: un populate por
+        // voto sería una consulta por cara.
+        const voters = await User.find({ _id: { $in: [...voterIds] } })
+          .select('name avatar')
+          .lean();
+        const byId = new Map(voters.map((u: any) => [u._id.toString(), u]));
+        pollItems
+          .map((it) => {
+            const uid = it.id.split(':')[2];
+            const u = byId.get(uid);
+            return {
+              ...it,
+              title: `📊 ${u?.name || 'Alguien'} votó tu encuesta`,
+              avatar: u?.avatar,
+            };
+          })
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 30)
+          .forEach((it) => items.push(it));
+      }
 
       // ── 4. Actividades que creé o a las que me comprometí ────────────────
       const myCommitments = await ActivityCommitment.find({ userId, isActive: true })

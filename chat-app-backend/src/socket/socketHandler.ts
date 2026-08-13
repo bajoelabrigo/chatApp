@@ -664,16 +664,30 @@ export function setupSocketHandlers(io: Server) {
 
         const yaVotada = (options[idx].votes ?? []).some((v: any) => v.toString() === userId);
 
+        // Sello de la hora del voto, en un arreglo espejo (`votedAt`) que viaja
+        // pegado a `votes`: es lo que enseña "Ver votos" bajo cada nombre. Se
+        // mueve SIEMPRE en el mismo update que el voto — si se quedara atrás, la
+        // lista mostraría la hora de un voto que ya se retiró.
+        const ahora = new Date();
+
         if (yaVotada) {
           // Desmarcar.
           await Message.updateOne(
             { _id: messageId },
-            { $pull: { [`poll.options.${idx}.votes`]: userId } as any }
+            {
+              $pull: {
+                [`poll.options.${idx}.votes`]: userId,
+                [`poll.options.${idx}.votedAt`]: { user: userId },
+              },
+            } as any
           );
         } else if (message.poll.multiple) {
           await Message.updateOne(
             { _id: messageId },
-            { $addToSet: { [`poll.options.${idx}.votes`]: userId } as any }
+            {
+              $addToSet: { [`poll.options.${idx}.votes`]: userId },
+              $push: { [`poll.options.${idx}.votedAt`]: { user: userId, at: ahora } },
+            } as any
           );
         } else {
           // Respuesta única: se retira el voto de las OTRAS opciones y se pone en
@@ -690,12 +704,16 @@ export function setupSocketHandlers(io: Server) {
           // que se excluye del $pull.
           const pull: Record<string, unknown> = {};
           options.forEach((_, i) => {
-            if (i !== idx) pull[`poll.options.${i}.votes`] = userId;
+            if (i !== idx) {
+              pull[`poll.options.${i}.votes`] = userId;
+              pull[`poll.options.${i}.votedAt`] = { user: userId };
+            }
           });
 
           await Message.updateOne({ _id: messageId }, {
             ...(Object.keys(pull).length ? { $pull: pull } : {}),
             $addToSet: { [`poll.options.${idx}.votes`]: userId },
+            $push: { [`poll.options.${idx}.votedAt`]: { user: userId, at: ahora } },
           } as any);
         }
 
@@ -705,6 +723,45 @@ export function setupSocketHandlers(io: Server) {
           conversationId,
           poll: updated?.poll,
         });
+
+        // 🔔 Aviso al AUTOR de la encuesta: alguien acaba de votarla.
+        //
+        // Solo al añadir un voto (retirarlo no se avisa: sería un aviso de que
+        // ya no hay novedad), nunca a uno mismo, y respetando el silencio del
+        // chat. Como en los mensajes, el push nativo/web se manda solo si no
+        // tiene socket abierto — si está dentro, las barras ya se le mueven en
+        // vivo. La campana de la app lo lista igual (se calcula de `votedAt`).
+        const autorId = message.senderId.toString();
+        const silenciado = ((conversation as any).mutedBy ?? []).some(
+          (u: any) => u.toString() === autorId
+        );
+        if (!yaVotada && autorId !== userId && !silenciado && !isUserOnline(autorId)) {
+          const votante = await User.findById(userId).select('name avatar').lean();
+          const nombre = votante?.name || 'Alguien';
+          const opcion = options[idx].text;
+          const aviso = {
+            title: `📊 ${nombre} votó tu encuesta`,
+            body: `${opcion} · ${message.poll.question}`.slice(0, 120),
+          };
+          sendWebPushToUsers(
+            [autorId],
+            {
+              ...aviso,
+              url: '/chat',
+              // `tag` por encuesta: varios votos seguidos actualizan el mismo
+              // aviso en vez de llenar la bandeja.
+              tag: `poll-${messageId}`,
+              icon: votante?.avatar,
+              badge: 'chat',
+            },
+            'messages'
+          );
+          sendExpoPushToUsers(
+            [autorId],
+            { ...aviso, data: { type: 'chat', conversationId } },
+            'messages'
+          );
+        }
       } catch (err) {
         console.error('poll:vote:', err);
       }

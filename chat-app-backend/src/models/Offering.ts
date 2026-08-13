@@ -31,7 +31,7 @@ export interface IOffering extends Document {
   // Origen del registro: PayPal (flujo automático) o manual (lo anotó un admin
   // por un pago recibido fuera de la app: transferencia, efectivo, Zelle…).
   source?: 'paypal' | 'manual';
-  method?: string;      // efectivo | transferencia | paypal | zelle | otro
+  method?: string;      // efectivo | transferencia | paypal | zelle | western_union | yape | otro
   note?: string;
   donorName?: string;   // ofrenda de alguien SIN cuenta (externo)
   donorEmail?: string;

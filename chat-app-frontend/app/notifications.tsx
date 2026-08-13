@@ -32,7 +32,7 @@ function relativeTime(iso: string): string {
 }
 
 const KIND_ORDER: NotificationKind[] = [
-  'reminder', 'material', 'group_join', 'chat', 'missed_call', 'prayer_pray', 'prayer', 'activity',
+  'reminder', 'material', 'group_join', 'chat', 'missed_call', 'poll_vote', 'prayer_pray', 'prayer', 'activity',
 ];
 const KIND_TITLE: Record<NotificationKind, string> = {
   reminder: 'Hoy',
@@ -40,6 +40,7 @@ const KIND_TITLE: Record<NotificationKind, string> = {
   group_join: 'Grupos',
   chat: 'Mensajes',
   missed_call: 'Llamadas perdidas',
+  poll_vote: 'Votos en tus encuestas',
   prayer_pray: 'Oraciones por tus peticiones',
   prayer: 'Peticiones de oración',
   activity: 'Actividades',
@@ -52,6 +53,7 @@ function kindIcon(kind: NotificationKind): keyof typeof Ionicons.glyphMap {
     case 'group_join': return 'person-add';
     case 'chat': return 'chatbubble-ellipses';
     case 'missed_call': return 'call';
+    case 'poll_vote': return 'stats-chart';
     case 'prayer_pray': return 'people';
     case 'prayer': return 'heart';
     case 'activity': return 'flame';
@@ -65,6 +67,7 @@ function kindColor(kind: NotificationKind, colors: any): string {
     case 'group_join': return '#22C55E';
     case 'chat': return colors.accent;
     case 'missed_call': return colors.danger;
+    case 'poll_vote': return '#0EA5E9';
     case 'prayer_pray': return '#8B5CF6';
     case 'prayer': return '#22C55E';
     case 'activity': return '#F59E0B';
@@ -93,9 +96,12 @@ export default function NotificationsScreen() {
 
   const sections = useMemo(() => {
     const grouped: Record<NotificationKind, NotificationItem[]> = {
-      reminder: [], material: [], group_join: [], chat: [], missed_call: [], prayer_pray: [], prayer: [], activity: [],
+      reminder: [], material: [], group_join: [], chat: [], missed_call: [], poll_vote: [], prayer_pray: [], prayer: [], activity: [],
     };
-    for (const it of items) grouped[it.kind].push(it);
+    // Con `?.`: un tipo de aviso que estrene el servidor y este bundle todavía no
+    // conozca se ignora, en vez de tumbar la pantalla entera con un push sobre
+    // undefined (pasa con cada APK que aún no bajó la actualización OTA).
+    for (const it of items) grouped[it.kind]?.push(it);
     return KIND_ORDER
       .filter((k) => grouped[k].length > 0)
       .map((k) => ({ key: k, title: KIND_TITLE[k], data: grouped[k] }));

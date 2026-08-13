@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import { useVoiceStore } from '../store/useVoiceStore';
 
 const STORAGE_KEY = 'app_ringtone_id';
 
@@ -40,6 +41,9 @@ async function resolveUri(module: number): Promise<string> {
 
 async function playLoop(module: number, volume = 1.0): Promise<void> {
   await stop();
+  // Una nota de voz sonando taparía el tono de llamada (el reproductor de notas
+  // sigue vivo aunque se salga del chat).
+  useVoiceStore.getState().pause();
   try {
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
     const uri = await resolveUri(module);

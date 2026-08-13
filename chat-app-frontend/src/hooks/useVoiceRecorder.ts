@@ -6,6 +6,7 @@ import {
   setAudioModeAsync,
   RecordingPresets,
 } from 'expo-audio';
+import { useVoiceStore } from '../store/useVoiceStore';
 
 // Grabación de notas de voz.
 //
@@ -65,6 +66,10 @@ export function useVoiceRecorder({ onRecorded }: Options) {
     if (isRecordingRef.current) return;
 
     try {
+      // Grabar y reproducir a la vez no tiene sentido (y en Android se pelean
+      // por la sesión de audio): la nota que estuviera sonando se pausa.
+      useVoiceStore.getState().pause();
+
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
         Alert.alert('Permiso denegado', 'Activa el micrófono en Ajustes.');
