@@ -873,7 +873,14 @@ Estrategia de 3 pasos para compartir HolyChat **fuera de la Play Store** (empeza
 
 Nota: la Play Store queda como opción futura (cuota única $25, requiere AAB, política de privacidad, y revisar el tema PayPal/ofrendas vs Google Play Billing — las donaciones de organizaciones sin ánimo de lucro pueden estar exentas).
 
+## Lectura en voz alta de la Biblia (móvil) — ya activa
+
+`expo-speech` es un **módulo nativo**: no se activa con `eas update`. Estuvo escrito y sin funcionar desde el 2026-07-11 hasta el APK del **2026-07-13** (build `e8353a0e`, perfil `preview`, runtime 1.0.3, versionCode 4), que lo incluyó. Desde ahí el botón de escuchar sale solo (`src/hooks/useSpeech.ts` + barra de reproducción en `app/(tabs)/bible.tsx`).
+
+**No quitar el `require('expo-speech')` dentro de `try/catch` ni la bandera `available`**: quien siga con un APK anterior a ese build no tiene el módulo, y sin la guarda la pantalla de la Biblia crashearía en vez de esconder el botón. Misma regla para cualquier módulo nativo nuevo que llegue por OTA.
+
+La versión web usa la Web Speech API del navegador, sin dependencias.
+
 ## Pending work
 
-- **Lectura en voz alta de la Biblia en el móvil — ESPERANDO EL PRÓXIMO `eas build`** (2026-07-11). El código ya está escrito y typechequea (`src/hooks/useSpeech.ts` + botón y barra de reproducción en `app/(tabs)/bible.tsx`), y `expo-speech` ya está en `package.json`. Pero `expo-speech` es un **módulo nativo**: no se activa con `eas update`, hace falta compilar un APK nuevo. Por eso `useSpeech` hace `require('expo-speech')` dentro de un `try/catch` y expone `available`: en los APKs actuales el módulo nativo no existe, `available` es false y el botón de escuchar simplemente no aparece (en vez de crashear). **Al hacer el siguiente build se activa solo, sin tocar código.** La versión web ya está en producción (usa la Web Speech API del navegador, sin dependencias).
 - **Migrar expo-av** — `expo-av` muestra warning de deprecación en SDK 54. Migrar a `expo-audio` y `expo-video` en algún momento (no urgente).
