@@ -406,6 +406,16 @@ Compartir con enlace + QR (añadido 2026-06-23). Tres superficies: materiales, l
 - **nginx** (`/etc/nginx/sites-available/holyholyholy`; copia versionada en `holy_app/deploy/nginx-holyholyholy.conf`): un `map $http_user_agent $holy_is_bot` (contexto http) + `location ~ ^/materiales/(?<mslug>[^/]+)/?$` que enruta SOLO bots a `/api/share/material/<slug>` (humanos → SPA). Patrón seguro `error_page 418 = @og_material` (evita el combo problemático `if + proxy_pass`). Deploy nginx: backup → `scp` el archivo → `nginx -t && systemctl reload nginx`.
 - WhatsApp **cachea** las previews por URL y no tiene "scrape again" público (Facebook sí: developers.facebook.com/tools/debug). Para forzar refresco al probar: añadir `?v=2` al final de la URL.
 
+**Un post SIN foto propia no puede caer en "el logo + la URL dos veces"** (arreglado 2026-08-17; era el caso de los VIDEOS, lo que más se comparte). `title`/`description` salían de `content`, que en un post de YouTube es solo la URL. `/api/share/post/:id` resuelve ahora, por este orden: material enlazado → pasaje bíblico → **video de YouTube** → cualquier otro enlace. Reglas al tocarlo:
+- **El texto del autor va SIEMPRE sin URLs** (`caption = textOnly.replace(/https?:\/\/\S+/gi,'')`). Sin eso, el enlace acaba de título Y de descripción.
+- **El título del video se pide por oEmbed** (`https://www.youtube.com/oembed?url=…`, sin API key, cacheado 6 h en memoria). Con `live.youtubeVideoId` manda el directo y el título lleva "🔴 EN VIVO".
+- **La miniatura decide si la tarjeta es grande o pequeña**: por debajo de 600px de ancho Facebook pinta la tarjeta chica. `hqdefault` son 480x360 → hay que probar `maxresdefault` (1280x720) y `sddefault` (640x480) con HEAD antes, **en paralelo** (el scraper no espera). Y declarar el tamaño REAL en `og:image:width/height`: `ogHtml` los omite si no se saben (portada ajena) para que FB no recorte por donde no toca.
+- Con video se manda `og:type: video.other` + `og:video*` apuntando al `/embed/` de YouTube (es lo que hace youtube.com y por lo que su tarjeta se ve así).
+- **El resto de enlaces (TikTok, Instagram, noticias) se resuelven con `GET /public/link-preview` del chat-backend** — no duplicar aquí el raspado ni el oEmbed de TikTok.
+- **El 302 a humanos va ANTES de armar el OG**: si no, quien pincha el enlace espera a oEmbed y a los HEAD para nada.
+- `ogHtml` **escapa `image`/`shareUrl`/`humanUrl`**: esa portada viene de un sitio ajeno y unas comillas dentro romperían la etiqueta.
+- Comprobarlo sin desplegar: montar `shareRoutes` en un express suelto contra la base real y pedirlo con `user-agent: facebookexternalhit`.
+
 ## Nombre del video en los enlaces (YouTube / TikTok)
 
 La metadata la sirve `GET /public/link-preview` del chat-backend (`publicController.ts`) y la consumen los tres sitios: posts de la web, chat web y chat móvil.
