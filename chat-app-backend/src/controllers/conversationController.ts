@@ -307,10 +307,22 @@ export async function getMessages(req: Request, res: Response) {
     const query: any = { conversationId };
     if (before) query.createdAt = { $lt: new Date(before as string) };
 
+    // `-readBy`: es la lista de TODOS los que han leido cada mensaje, y en un
+    // grupo grande crece hasta ser la mayor parte del documento. Se vio en el
+    // log: con `limit=50` fijo, las paginas pasaban de 79 KB a 216 KB segun se
+    // retrocedia, porque los mensajes antiguos los ha leido ya todo el mundo.
+    // Ningun cliente lo usa — el doble tic sale de `status`, y los contadores
+    // de no leidos de `/conversations`.
+    //
+    // `.lean()`: no hacen falta documentos de Mongoose, esto solo se serializa.
+    // El esquema no tiene virtuals ni transformaciones `toJSON`, asi que el JSON
+    // resultante es identico.
     const messages = await Message.find(query)
+      .select('-readBy')
       .populate('senderId', 'name avatar isSocio')
       .sort({ createdAt: -1 })
-      .limit(Number(limit));
+      .limit(Number(limit))
+      .lean();
 
     res.json(messages.reverse());
   } catch {

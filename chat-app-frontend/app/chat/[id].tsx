@@ -546,18 +546,32 @@ export default function ChatScreen() {
     }
   }, [typingUsers, conversationId, user?.id]);
 
+  // El guardia va en un ref, NO en el state `loadingMore`: `onScroll` dispara
+  // cada 100 ms (scrollEventThrottle) y `setLoadingMore(true)` no se refleja
+  // hasta el siguiente render, así que el segundo disparo seguía leyendo
+  // `loadingMore === false` en su clausura vieja y pedía la MISMA página otra
+  // vez. Se veía en el log del servidor: dos GET idénticos con el mismo
+  // `?before=`, separados por 157 ms. Mismo motivo por el que `isOpen` es un
+  // ref en los PanResponder de las filas deslizables.
+  const loadingMoreRef = useRef(false);
   const loadMore = useCallback(async () => {
-    if (!token || loadingMore || !hasMore || conversationMessages.length === 0) return;
+    if (!token || loadingMoreRef.current || !hasMore || conversationMessages.length === 0) return;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     const oldest = conversationMessages[0];
     try {
       const older = await getMessages(token, conversationId, oldest.createdAt);
       prependMessages(conversationId, older);
       setHasMore(older.length === 50);
+    } catch {
+      // Sin `catch`, cortar la petición (salir del chat a media carga) dejaba
+      // una promesa rechazada sin manejar. No se toca `hasMore`: el siguiente
+      // scroll vuelve a intentarlo.
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [token, loadingMore, hasMore, conversationMessages, conversationId]);
+  }, [token, hasMore, conversationMessages, conversationId]);
 
   // Al venir del buscador global: cargar (si hace falta) y hacer scroll + resaltar
   // el mensaje exacto. Carga páginas más viejas hasta encontrarlo (cap de seguridad).

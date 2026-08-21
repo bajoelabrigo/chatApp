@@ -107,8 +107,21 @@ export async function getNotifications(req: Request, res: Response) {
 
     const items: NotificationItem[] = [];
 
-    // ── 1. Chats con mensajes sin leer ──────────────────────────────────────
-    const unreadAgg = await Message.aggregate([
+    // ── Todas las consultas independientes, de una sola vez ─────────────────
+    //
+    // Antes cada una era un `await` suelto y se ejecutaban EN FILA: 14 idas y
+    // vueltas a Atlas para armar UNA respuesta. Con ~250 ms de latencia al
+    // cluster, eso son los ~3,6 s que se veian en el log de PM2 — y se pagaban
+    // enteros incluso cuando la respuesta acababa siendo un 304, porque el ETag
+    // se calcula despues de haber hecho todo el trabajo.
+    //
+    // Una Query de Mongoose NO toca la base hasta que se await/then, asi que
+    // definirlas aqui no ejecuta nada: solo el Promise.all las dispara, juntas.
+    // Los bucles que construyen los items siguen abajo, sin tocar y en el mismo
+    // orden, asi que la respuesta es identica byte a byte.
+    const hayGrupos = groupIds.length > 0;
+
+    const q_unreadAgg = Message.aggregate([
       {
         $match: {
           conversationId: { $in: convIds },
@@ -119,6 +132,101 @@ export async function getNotifications(req: Request, res: Response) {
       },
       { $group: { _id: '$conversationId', count: { $sum: 1 } } },
     ]);
+
+    const q_missedCalls = Message.find({
+      conversationId: { $in: convIds },
+      type: 'call',
+      callStatus: 'missed',
+      deletedFor: { $ne: userObjId },
+      createdAt: { $gte: windowStart },
+    })
+      .populate('senderId', 'name avatar')
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    const q_prayers = PrayerRequest.find({
+      groupId: { $in: groupIds },
+      isAnswered: false,
+      authorId: { $ne: userObjId },
+      createdAt: { $gte: windowStart },
+    })
+      .populate('authorId', 'name avatar')
+      .populate('groupId', 'groupName groupAvatar')
+      .sort({ createdAt: -1 })
+      .limit(40)
+      .lean();
+
+    const q_myPrayers = PrayerRequest.find({
+      authorId: userObjId,
+      'prayingUsers.0': { $exists: true },
+    })
+      .populate('prayingUsers.userId', 'name avatar')
+      .populate('groupId', 'groupName groupAvatar')
+      .lean();
+
+    const q_myPolls = Message.find({
+      senderId: userObjId,
+      type: 'poll',
+      isDeletedForEveryone: { $ne: true },
+      createdAt: { $gte: windowStart },
+    })
+      .select('poll conversationId')
+      .populate('conversationId', 'groupName isGroup')
+      .lean();
+
+    const q_myCommitments = ActivityCommitment.find({ userId, isActive: true })
+      .select('activityId')
+      .lean();
+
+    const q_tzDoc = ActivityCommitment.findOne({ userId })
+      .select('timezone')
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const q_groupCommitments = ActivityCommitment.find({ userId, isActive: true })
+      .populate('activityId', 'name emoji')
+      .populate('groupId', 'groupName')
+      .lean();
+
+    const q_personalCommitments = PersonalCommitment.find({ userId, isActive: true }).lean();
+
+    const q_recentMaterials = Material.find({
+      published: true,
+      $or: [
+        { notifiedAt: { $gte: windowStart } },
+        { notifiedAt: null, createdAt: { $gte: windowStart } },
+      ],
+    })
+      .sort({ notifiedAt: -1, createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    const [
+      unreadAgg,
+      missedCalls,
+      prayers,
+      myPrayers,
+      myPolls,
+      myCommitments,
+      tzDoc,
+      groupCommitments,
+      personalCommitments,
+      recentMaterials,
+    ] = await Promise.all([
+      q_unreadAgg,
+      q_missedCalls,
+      hayGrupos ? q_prayers : Promise.resolve([] as any[]),
+      hayGrupos ? q_myPrayers : Promise.resolve([] as any[]),
+      hayGrupos ? q_myPolls : Promise.resolve([] as any[]),
+      hayGrupos ? q_myCommitments : Promise.resolve([] as any[]),
+      q_tzDoc,
+      q_groupCommitments,
+      q_personalCommitments,
+      q_recentMaterials,
+    ]);
+
+    // ── 1. Chats con mensajes sin leer ──────────────────────────────────────
 
     for (const u of unreadAgg) {
       const conv = convMap.get(u._id.toString());
@@ -167,17 +275,6 @@ export async function getNotifications(req: Request, res: Response) {
     // ── 2. Llamadas perdidas ────────────────────────────────────────────────
     // Se notifica a AMBOS lados: al receptor ("Llamada perdida") y a quien llamó
     // ("Llamada no contestada"). El mensaje guarda senderId = quien llamó.
-    const missedCalls = await Message.find({
-      conversationId: { $in: convIds },
-      type: 'call',
-      callStatus: 'missed',
-      deletedFor: { $ne: userObjId },
-      createdAt: { $gte: windowStart },
-    })
-      .populate('senderId', 'name avatar')
-      .sort({ createdAt: -1 })
-      .limit(30)
-      .lean();
 
     for (const call of missedCalls) {
       const conv = convMap.get(call.conversationId.toString());
@@ -217,17 +314,6 @@ export async function getNotifications(req: Request, res: Response) {
 
     // ── 3. Peticiones de oración de mis grupos (no mías, sin responder) ──────
     if (groupIds.length > 0) {
-      const prayers = await PrayerRequest.find({
-        groupId: { $in: groupIds },
-        isAnswered: false,
-        authorId: { $ne: userObjId },
-        createdAt: { $gte: windowStart },
-      })
-        .populate('authorId', 'name avatar')
-        .populate('groupId', 'groupName groupAvatar')
-        .sort({ createdAt: -1 })
-        .limit(40)
-        .lean();
 
       for (const p of prayers) {
         const group = p.groupId as any;
@@ -247,13 +333,6 @@ export async function getNotifications(req: Request, res: Response) {
       }
 
       // ── 3b. Alguien empezó a orar por MIS peticiones ─────────────────────
-      const myPrayers = await PrayerRequest.find({
-        authorId: userObjId,
-        'prayingUsers.0': { $exists: true },
-      })
-        .populate('prayingUsers.userId', 'name avatar')
-        .populate('groupId', 'groupName groupAvatar')
-        .lean();
 
       const prayItems: NotificationItem[] = [];
       for (const p of myPrayers) {
@@ -287,15 +366,6 @@ export async function getNotifications(req: Request, res: Response) {
       // leyendo el sello de hora que `poll:vote` deja en `poll.options[].votedAt`.
       // Las encuestas anteriores a ese campo no salen aquí (no hay forma de saber
       // cuándo se votaron), pero se siguen votando y viendo con normalidad.
-      const myPolls = await Message.find({
-        senderId: userObjId,
-        type: 'poll',
-        isDeletedForEveryone: { $ne: true },
-        createdAt: { $gte: windowStart },
-      })
-        .select('poll conversationId')
-        .populate('conversationId', 'groupName isGroup')
-        .lean();
 
       const pollItems: NotificationItem[] = [];
       const voterIds = new Set<string>();
@@ -341,9 +411,6 @@ export async function getNotifications(req: Request, res: Response) {
       }
 
       // ── 4. Actividades que creé o a las que me comprometí ────────────────
-      const myCommitments = await ActivityCommitment.find({ userId, isActive: true })
-        .select('activityId')
-        .lean();
       const committedIds = myCommitments.map((c) => c.activityId);
 
       const activities = await GroupActivity.find({
@@ -379,10 +446,6 @@ export async function getNotifications(req: Request, res: Response) {
     // ── 5. Recordatorios de actividades de HOY (grupales + personales) ──────
     // Zona horaria de referencia para los compromisos personales (que no la
     // almacenan): se toma de cualquier compromiso grupal del usuario.
-    const tzDoc = await ActivityCommitment.findOne({ userId })
-      .select('timezone')
-      .sort({ updatedAt: -1 })
-      .lean();
     const fallbackTz = tzDoc?.timezone || 'UTC';
     const now = new Date();
 
@@ -416,10 +479,6 @@ export async function getNotifications(req: Request, res: Response) {
     };
 
     // Compromisos grupales (su activityId trae nombre/emoji; tienen timezone propia).
-    const groupCommitments = await ActivityCommitment.find({ userId, isActive: true })
-      .populate('activityId', 'name emoji')
-      .populate('groupId', 'groupName')
-      .lean();
     for (const c of groupCommitments) {
       const activity = c.activityId as any;
       const group = c.groupId as any;
@@ -435,7 +494,6 @@ export async function getNotifications(req: Request, res: Response) {
     }
 
     // Compromisos personales (sin grupo ni timezone propia → usa la de referencia).
-    const personalCommitments = await PersonalCommitment.find({ userId, isActive: true }).lean();
     for (const c of personalCommitments) {
       const reminder = buildReminder(
         'reminder-p',
@@ -449,16 +507,6 @@ export async function getNotifications(req: Request, res: Response) {
 
     // ── Materiales nuevos ───────────────────────────────────────────────────
     // Materiales publicados en la ventana que el usuario aún no ha visto/descargado.
-    const recentMaterials = await Material.find({
-      published: true,
-      $or: [
-        { notifiedAt: { $gte: windowStart } },
-        { notifiedAt: null, createdAt: { $gte: windowStart } },
-      ],
-    })
-      .sort({ notifiedAt: -1, createdAt: -1 })
-      .limit(20)
-      .lean();
 
     if (recentMaterials.length > 0) {
       const seen = await MaterialView.find({
