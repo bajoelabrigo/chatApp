@@ -10,6 +10,7 @@ import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PersonalCommitment } from '../models/PersonalCommitment';
 import { Material } from '../models/Material';
 import { MaterialView } from '../models/MaterialView';
+import { logger } from '../services/logger';
 
 type NotificationKind =
   | 'chat'
@@ -65,8 +66,27 @@ function previewOf(msg: any, isGroup: boolean, currentUserId: string): string {
   return content;
 }
 
+const log = logger('notifications');
+
+/**
+ * Cronometra una consulta del lote. Solo escribe con LOG_LEVEL=debug, asi que
+ * en marcha normal no cuesta nada mas que un Date.now().
+ *
+ * Existe porque tras paralelizar el endpoint sigue tardando ~2,5 s y el tiempo
+ * escala con el volumen de datos, no con el numero de viajes: ahora manda la
+ * consulta MAS LENTA del lote. Adivinar cual es sale caro; esto lo dice.
+ */
+function cron<T>(nombre: string, p: PromiseLike<T>): Promise<T> {
+  const t0 = Date.now();
+  return Promise.resolve(p).then((r) => {
+    log.debug(`${nombre}: ${Date.now() - t0} ms`);
+    return r;
+  });
+}
+
 export async function getNotifications(req: Request, res: Response) {
   try {
+    const tTotal = Date.now();
     const userId = (req as any).userId;
     const userObjId = new Types.ObjectId(userId);
 
@@ -214,16 +234,16 @@ export async function getNotifications(req: Request, res: Response) {
       personalCommitments,
       recentMaterials,
     ] = await Promise.all([
-      q_unreadAgg,
-      q_missedCalls,
-      hayGrupos ? q_prayers : Promise.resolve([] as any[]),
-      hayGrupos ? q_myPrayers : Promise.resolve([] as any[]),
-      hayGrupos ? q_myPolls : Promise.resolve([] as any[]),
-      hayGrupos ? q_myCommitments : Promise.resolve([] as any[]),
-      q_tzDoc,
-      q_groupCommitments,
-      q_personalCommitments,
-      q_recentMaterials,
+      cron('unreadAgg', q_unreadAgg),
+      cron('missedCalls', q_missedCalls),
+      cron('prayers', hayGrupos ? q_prayers : Promise.resolve([] as any[])),
+      cron('myPrayers', hayGrupos ? q_myPrayers : Promise.resolve([] as any[])),
+      cron('myPolls', hayGrupos ? q_myPolls : Promise.resolve([] as any[])),
+      cron('myCommitments', hayGrupos ? q_myCommitments : Promise.resolve([] as any[])),
+      cron('tzDoc', q_tzDoc),
+      cron('groupCommitments', q_groupCommitments),
+      cron('personalCommitments', q_personalCommitments),
+      cron('recentMaterials', q_recentMaterials),
     ]);
 
     // ── 1. Chats con mensajes sin leer ──────────────────────────────────────
@@ -391,9 +411,9 @@ export async function getNotifications(req: Request, res: Response) {
       if (pollItems.length) {
         // Los nombres se piden UNA vez para todos los votantes: un populate por
         // voto sería una consulta por cara.
-        const voters = await User.find({ _id: { $in: [...voterIds] } })
+        const voters = await cron('voters', User.find({ _id: { $in: [...voterIds] } })
           .select('name avatar')
-          .lean();
+          .lean());
         const byId = new Map(voters.map((u: any) => [u._id.toString(), u]));
         pollItems
           .map((it) => {
@@ -413,7 +433,7 @@ export async function getNotifications(req: Request, res: Response) {
       // ── 4. Actividades que creé o a las que me comprometí ────────────────
       const committedIds = myCommitments.map((c) => c.activityId);
 
-      const activities = await GroupActivity.find({
+      const activities = await cron('activities', GroupActivity.find({
         groupId: { $in: groupIds },
         isActive: true,
         createdAt: { $gte: windowStart },
@@ -422,7 +442,7 @@ export async function getNotifications(req: Request, res: Response) {
         .populate('groupId', 'groupName groupAvatar')
         .sort({ createdAt: -1 })
         .limit(40)
-        .lean();
+        .lean());
 
       const committedSet = new Set(committedIds.map((id) => id.toString()));
       for (const a of activities) {
@@ -509,12 +529,12 @@ export async function getNotifications(req: Request, res: Response) {
     // Materiales publicados en la ventana que el usuario aún no ha visto/descargado.
 
     if (recentMaterials.length > 0) {
-      const seen = await MaterialView.find({
+      const seen = await cron('seenMaterials', MaterialView.find({
         userId: userObjId,
         materialId: { $in: recentMaterials.map((m) => m._id) },
       })
         .select('materialId')
-        .lean();
+        .lean());
       const seenSet = new Set(seen.map((s) => s.materialId.toString()));
 
       for (const m of recentMaterials) {
@@ -560,6 +580,7 @@ export async function getNotifications(req: Request, res: Response) {
       return acc + (it.isNew ? 1 : 0);
     }, 0);
 
+    log.debug(`total ${Date.now() - tTotal} ms · ${visible.length} items`);
     res.json({ items: visible, unreadCount });
   } catch (err) {
     console.error('[notifications] error', err);
