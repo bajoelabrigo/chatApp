@@ -2,6 +2,7 @@ import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
+import morgan from 'morgan';
 import { Server } from 'socket.io';
 import { connectDB } from './config/database';
 import authRoutes from './routes/auth.routes';
@@ -26,6 +27,13 @@ import popupRoutes from './routes/popup.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 import { setIO } from './socket/ioSingleton';
 import { startCronJobs } from './services/cronService';
+import { logger, installProcessHandlers } from './services/logger';
+
+// Antes de nada: sin esto, una promesa sin `.catch` tumba el proceso entero
+// (Node 24) sin dejar ni una línea que diga de dónde salió.
+installProcessHandlers();
+
+const log = logger('app');
 
 const app = express();
 const server = http.createServer(app);
@@ -35,7 +43,20 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
+// Detrás de nginx (un solo salto). Sin esto `req.ip` sería siempre la IP del
+// proxy y los límites de `middleware/rateLimit.ts` se aplicarían a todos los
+// usuarios en bloque en vez de por cliente.
+app.set('trust proxy', 1);
+
 app.use(cors());
+
+// Una línea por petición, con marca de tiempo. Se salta /health porque el
+// chequeo de disponibilidad lo pide cada pocos segundos y ahogaría el log.
+// morgan NO registra cuerpos, así que las contraseñas no acaban en disco.
+app.use(morgan(':date[iso] HTTP  :method :url :status :res[content-length] - :response-time ms', {
+  skip: (req) => req.url === '/health',
+}));
+
 app.use(express.json());
 
 app.use('/auth', authRoutes);
@@ -69,10 +90,10 @@ connectDB()
   .then(() => {
     startCronJobs();
     server.listen(PORT, () => {
-      console.log(`Servidor corriendo en http://localhost:${PORT}`);
+      log.info(`Servidor escuchando en http://localhost:${PORT}`);
     });
   })
   .catch((err) => {
-    console.error('Error conectando a MongoDB:', err);
+    log.error('No se pudo conectar a MongoDB; el proceso no puede arrancar', err);
     process.exit(1);
   });

@@ -32,8 +32,10 @@ export interface IUser extends Document {
   emailVerified: boolean;
   verificationCode?: string;
   verificationCodeExpiry?: Date;
+  verificationAttempts?: number;
   resetCode?: string;
   resetCodeExpiry?: Date;
+  resetAttempts?: number;
   blockedUsers: Types.ObjectId[];
   // Grafo social compartido con la web (misma colección `users`). Ya se leían
   // vía strict:false desde `getMyConnections`; aquí quedan tipados de verdad.
@@ -107,8 +109,13 @@ const UserSchema = new Schema<IUser>(
     emailVerified:         { type: Boolean, default: false },
     verificationCode:      { type: String },
     verificationCodeExpiry:{ type: Date },
+    // Fallos consecutivos al introducir el codigo. Al llegar a MAX_CODE_ATTEMPTS
+    // el codigo queda invalidado y hay que pedir otro. Los usuarios ya creados
+    // no traen el campo: undefined cuenta como 0.
+    verificationAttempts:  { type: Number, default: 0 },
     resetCode:             { type: String },
     resetCodeExpiry:       { type: Date },
+    resetAttempts:         { type: Number, default: 0 },
     lastLogin:             { type: Date, default: Date.now },
     blockedUsers:          [{ type: Schema.Types.ObjectId, ref: 'User' }],
     followers:             [{ type: Schema.Types.ObjectId, ref: 'User' }],

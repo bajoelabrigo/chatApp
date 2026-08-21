@@ -4,14 +4,10 @@ import { verifyGoogleToken } from '../services/googleAuthService';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../services/jwtService';
 import { sendVerificationCode, sendPasswordResetCode } from '../services/emailService';
 import { User } from '../models/User';
-
-function randomCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
-
-function codeExpiry(): Date {
-  return new Date(Date.now() + 10 * 60 * 1000);
-}
+import {
+  randomCode, hashCode, codeExpiry, verifyCode, codeErrorMessage, codeErrorStatus,
+  MAX_CODE_ATTEMPTS,
+} from '../services/authCodes';
 
 // ── Google Sign-In ───────────────────────────────────────────
 export async function googleSignIn(req: Request, res: Response): Promise<void> {
@@ -84,8 +80,9 @@ export async function register(req: Request, res: Response): Promise<void> {
     if (existing) {
       if (!existing.emailVerified && existing.authProvider === 'email') {
         const code = randomCode();
-        existing.verificationCode = code;
+        existing.verificationCode = await hashCode(code);
         existing.verificationCodeExpiry = codeExpiry();
+        existing.verificationAttempts = 0;
         await existing.save();
         await sendVerificationCode(existing.email, existing.name, code);
         res.status(409).json({ error: 'Ya existe una cuenta pendiente de verificación. Reenvíamos el código.', resent: true, email: existing.email });
@@ -104,8 +101,9 @@ export async function register(req: Request, res: Response): Promise<void> {
       password: hashed,
       authProvider: 'email',
       emailVerified: false,
-      verificationCode: code,
+      verificationCode: await hashCode(code),
       verificationCodeExpiry: codeExpiry(),
+      verificationAttempts: 0,
     });
 
     await sendVerificationCode(user.email, user.name, code);
@@ -125,14 +123,27 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
     if (!user) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
     if (user.emailVerified) { res.status(400).json({ error: 'El correo ya está verificado' }); return; }
 
-    if (user.verificationCode !== code || !user.verificationCodeExpiry || user.verificationCodeExpiry < new Date()) {
-      res.status(400).json({ error: 'Código incorrecto o expirado' });
+    const verdict = await verifyCode(
+      { stored: user.verificationCode, expiry: user.verificationCodeExpiry, attempts: user.verificationAttempts },
+      String(code),
+    );
+    if (verdict !== 'ok') {
+      // Un fallo gasta intento. Si ese fallo agota el cupo se responde ya como
+      // bloqueado, en vez de decir "incorrecto" y bloquear calladamente.
+      let shown = verdict;
+      if (verdict === 'mismatch') {
+        user.verificationAttempts = (user.verificationAttempts ?? 0) + 1;
+        await user.save();
+        if (user.verificationAttempts >= MAX_CODE_ATTEMPTS) shown = 'locked';
+      }
+      res.status(codeErrorStatus(shown)).json({ error: codeErrorMessage(shown) });
       return;
     }
 
     user.emailVerified = true;
     user.verificationCode = undefined;
     user.verificationCodeExpiry = undefined;
+    user.verificationAttempts = 0;
     user.lastLogin = new Date();
     await user.save();
 
@@ -154,8 +165,9 @@ export async function resendCode(req: Request, res: Response): Promise<void> {
     if (!user || user.emailVerified) { res.json({ message: 'Si el correo existe, recibirás un nuevo código.' }); return; }
 
     const code = randomCode();
-    user.verificationCode = code;
+    user.verificationCode = await hashCode(code);
     user.verificationCodeExpiry = codeExpiry();
+    user.verificationAttempts = 0;
     await user.save();
     await sendVerificationCode(user.email, user.name, code);
     res.json({ message: 'Código reenviado' });
@@ -208,8 +220,9 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
     if (!user) { res.json({ message: 'Si el correo existe, recibirás un código.', sent: false }); return; }
 
     const code = randomCode();
-    user.resetCode = code;
+    user.resetCode = await hashCode(code);
     user.resetCodeExpiry = codeExpiry();
+    user.resetAttempts = 0;
     await user.save();
     await sendPasswordResetCode(user.email, user.name, code);
     res.json({ message: 'Código enviado', email: user.email, sent: true });
@@ -228,14 +241,25 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) { res.status(404).json({ error: 'Usuario no encontrado' }); return; }
 
-    if (user.resetCode !== code || !user.resetCodeExpiry || user.resetCodeExpiry < new Date()) {
-      res.status(400).json({ error: 'Código incorrecto o expirado' });
+    const verdict = await verifyCode(
+      { stored: user.resetCode, expiry: user.resetCodeExpiry, attempts: user.resetAttempts },
+      String(code),
+    );
+    if (verdict !== 'ok') {
+      let shown = verdict;
+      if (verdict === 'mismatch') {
+        user.resetAttempts = (user.resetAttempts ?? 0) + 1;
+        await user.save();
+        if (user.resetAttempts >= MAX_CODE_ATTEMPTS) shown = 'locked';
+      }
+      res.status(codeErrorStatus(shown)).json({ error: codeErrorMessage(shown) });
       return;
     }
 
     user.password = await bcrypt.hash(password, 12);
     user.resetCode = undefined;
     user.resetCodeExpiry = undefined;
+    user.resetAttempts = 0;
     user.emailVerified = true;
     await user.save();
 

@@ -254,6 +254,16 @@ La mayoría de usuarios entran a `holyholyholy.es` desde el móvil. Patrones apl
 - Refresh token: 7d — `JWT_REFRESH_SECRET`
 - Socket: mismo `JWT_SECRET` via `verifyToken()`
 
+**Códigos de un solo uso — DOS capas, y la que importa es la de la cuenta** (`src/services/authCodes.ts`, desde 2026-08-21). Un código de 6 dígitos son 1.000.000 de combinaciones; hasta esa fecha no había NINGÚN límite de intentos, así que dentro de la ventana de 10 minutos se podían probar todas y quedarse con la cuenta ajena vía `/auth/reset-password`.
+- **Capa 1 — por cuenta**: `verificationAttempts`/`resetAttempts` en `User`. A los `MAX_CODE_ATTEMPTS` (5) fallos el código queda invalidado y hay que pedir otro (**429**, no 400). Es la que corta el ataque de verdad: **no depende de la IP**, así que rotar de IP no la esquiva. Emitir un código nuevo reinicia el contador.
+- **Capa 2 — por IP**: `middleware/rateLimit.ts` (ver el gotcha de `X-Forwarded-For`). Es solo capa de volumen y puede desactivarse sola si nginx está mal configurado.
+- Los códigos se guardan **hasheados con bcrypt** (coste 10, no el 12 de las contraseñas: viven 10 min y admiten 5 pruebas). `isHashed()` detecta el formato, así que los códigos emitidos ANTES del cambio siguen valiendo en claro hasta caducar — sin eso, todo el que estuviera a mitad de un registro se habría quedado tirado en el despliegue.
+- `randomCode()` usa `crypto.randomInt`, no `Math.random()` (el generador de V8 no es criptográfico).
+- **El límite por IP va por IP y NUNCA por correo**: con el correo de clave, cualquiera podría dejar fuera a un usuario concreto pidiendo su cuenta en bucle.
+- Las rutas que MANDAN CORREO (`/register`, `/forgot-password`, `/resend-code`) tienen el límite más estricto (8/hora): además del abuso, protegen el SMTP — Hostinger corta la IP del VPS entera con `450 4.7.1 too many AUTH commands` (ver el apartado de correos).
+- `/auth/refresh` y `/auth/google-signin` **no llevan límite** a propósito: ahí la credencial ya es el token.
+- Cubierto por `scripts/authCodes.test.mjs` y `scripts/rateLimit.test.mjs`.
+
 **Cron jobs** (`src/services/cronService.ts`):
 - Cada minuto: push notifications de actividades (exacta y 15 min de anticipo), timezone-aware via `date-fns-tz`
 - Cada hora: email de resumen semanal los domingos a las 8am hora local del usuario
@@ -271,7 +281,7 @@ La mayoría de usuarios entran a `holyholyholy.es` desde el móvil. Patrones apl
 **PayPal** (`src/services/paypalService.ts`, `src/controllers/offeringController.ts`):
 - Sandbox vs live: variable `PAYPAL_MODE`
 - Único: `POST /offerings/order` → `approvalUrl` → usuario paga → `GET /offerings/capture`
-- Suscripción: `POST /offerings/subscription` con `tier` (sub_5/sub_10/sub_20) → `GET /offerings/sub-return`
+- Suscripción: `POST /offerings/subscription` con `tier` (sub_5/sub_10/sub_20/sub_50/sub_100/sub_200 — son SEIS) → `GET /offerings/sub-return`
 - Webhook: `POST /offerings/webhook` — verifica firma y maneja `PAYMENT.CAPTURE.COMPLETED`, `BILLING.SUBSCRIPTION.ACTIVATED/CANCELLED`
 - **Browser in-app**: `ofrendas.tsx` usa `WebBrowser.openAuthSessionAsync(url, 'chatapp://')`. Las páginas HTML de éxito/cancelación del backend redirigen a `chatapp://` con `window.location.href` tras 2 segundos, lo que cierra el browser automáticamente. El scheme `chatapp://` está definido en `app.json`.
 - `htmlPage()` en `offeringController.ts` acepta `autoClose: boolean` — pasar `true` en páginas de éxito/cancelación para activar el redirect.
@@ -758,7 +768,7 @@ No hay runner ni CI: son ficheros de `node:test` que se ejecutan a mano. **Al to
 |---|---|
 | `holy_app/frontend` | rangos y comparativas, libro de cuentas (duplicados, anulaciones, reembolsos parciales, monedas, CSV), render real de la gráfica, de las dos páginas de admin y del guarda `RequireAdmin` |
 | `holy_app/backend` | esquema de cuotas de socio, métricas comprometido/cobrado/retraso, esquema de gastos y conversión de dinero |
-| `chat-app-backend` | reembolsos de PayPal (importa de `dist/`, así que compila primero) |
+| `chat-app-backend` | reembolsos de PayPal, comisiones, códigos de un solo uso (caducidad/bloqueo/hasheo), límites de auth contra un servidor HTTP real, contrato de variables de entorno, y el logger (importa de `dist/`, así que compila primero) |
 
 `frontend/scripts/jsx-loader.mjs` es lo que permite importar `.jsx` desde Node sin Vite: compila JSX con esbuild, resuelve los imports sin extensión y sustituye `import.meta.env`. **Un `vite build` compila igual una página que revienta al pintarse** — por eso las pruebas de render montan los componentes con `react-dom/server`. En SSR no corren los efectos, así que lo que se prueba es el estado inicial (sin datos).
 
@@ -789,10 +799,10 @@ El contenido de un post es HTML de Quill: un editor vacío devuelve `<p><br></p>
 ### Backend (`chat-app-backend/.env`)
 ```
 PORT=3000
-MONGODB_URI=
+MONGO_URI=
 JWT_SECRET=
 JWT_REFRESH_SECRET=
-GOOGLE_CLIENT_ID=
+GOOGLE_WEB_CLIENT_ID=
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
@@ -811,9 +821,24 @@ PAYPAL_WEBHOOK_ID=
 PAYPAL_PLAN_SUB_5_ID=
 PAYPAL_PLAN_SUB_10_ID=
 PAYPAL_PLAN_SUB_20_ID=
+PAYPAL_PLAN_SUB_50_ID=
+PAYPAL_PLAN_SUB_100_ID=
+PAYPAL_PLAN_SUB_200_ID=
 BACKEND_URL=https://api.holyholyholy.es
+FRONTEND_URL=https://holyholyholy.es
+WEB_JWT_SECRET=
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:info@holyholyholy.es
 PEXELS_API_KEY=
 ```
+
+**Ojo con los nombres**: son `MONGO_URI` (no `MONGODB_URI`) y `GOOGLE_WEB_CLIENT_ID`
+(no `GOOGLE_CLIENT_ID`). Estuvieron mal escritos aquí hasta 2026-08-21 y esta
+sección es lo que un agente lee como verdad: con el nombre equivocado, "arreglar"
+el código para que encaje con la doc tumba el arranque (`config/database.ts` lanza
+`MONGO_URI no está definido en .env`). El contrato real lo fija
+`scripts/env.test.mjs`, que compara `.env.example` contra los `process.env.*` del código.
 
 `PEXELS_API_KEY` (opcional): clave gratuita de https://www.pexels.com/api/ para los fondos de foto de "compartir versículo como imagen". Solo el backend la usa (`/public/photos` busca, `/public/photo?url=` hace de proxy CORS para que html2canvas capture la foto sin manchar el canvas; el host se valida contra pexels/pixabay para evitar SSRF). Sin la clave, `/public/photos` devuelve 503 y la pestaña "Foto" del modal muestra un aviso; los temas de color siguen funcionando.
 
@@ -840,6 +865,20 @@ EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=4776256007-bisf5j580pn4se9tuhil5bkkc10u5umg.app
   proxy_set_header Connection "upgrade";
   ```
   Sin estos headers, el WebSocket no hace upgrade y todos los eventos de socket fallan silenciosamente (los mensajes parecen enviarse localmente con optimistic update pero no persisten en MongoDB). La sintoma clave: mensajes desaparecen al reiniciar la app.
+- **nginx `X-Forwarded-For` — sin esto el límite de intentos castiga a TODA la comunidad** (faltaba hasta 2026-08-21). El mismo `location /` debe incluir:
+  ```nginx
+  proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+  proxy_set_header X-Real-IP         $remote_addr;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  ```
+  nginx hace de proxy a `localhost:3000`, así que sin esa cabecera **todas** las peticiones llegan con la IP del proxy: `req.ip` es `127.0.0.1` para todo el mundo y los límites de `middleware/rateLimit.ts` se convierten en un cubo ÚNICO compartido — 20 logins cada 15 min para los ~500 usuarios juntos, y el primero que agote el cupo deja fuera al resto. `app.set('trust proxy', 1)` (en `app.ts`) es la otra mitad: sin él Express ignora la cabecera aunque llegue.
+  `$proxy_add_x_forwarded_for` **añade** la IP real al final de lo que mandara el cliente; combinado con `trust proxy: 1` Express lee esa última entrada, así que nadie se salta el límite mandando su propia cabecera.
+  Hay red de seguridad: si la cabecera NO llega, `rateLimit.ts` **desactiva el límite** y escribe un error (una sola vez) en vez de bloquear a todos — se prefiere perder la capa de volumen a dejar la app inservible; la protección del ataque real es el contador por cuenta de `authCodes.ts`, que no depende de la IP.
+  **Comprobarlo sin gastar cupo**: una petición y mirar las cabeceras. Si salen `RateLimit-Policy`/`RateLimit`, la IP real está llegando; si NO salen, la red de seguridad está actuando y nginx sigue mal.
+  ```powershell
+  curl.exe -s -i -X POST -H "Content-Type: application/json" -d "{}" https://api.holyholyholy.es/auth/verify-email
+  ```
+  El arreglo está guionizado y es idempotente: `chat-app-backend/deploy/fix-nginx-xff.sh` (copia de seguridad + `nginx -t` + revierte solo si no valida).
 - El archivo `.env` del frontend **no llega a EAS**. Cualquier `EXPO_PUBLIC_*` nueva debe añadirse también en `eas.json` bajo `env` en cada perfil.
 - `src/lib/` contiene los JSONs de la Biblia — TypeScript no los copia al compilar. Siempre subir junto con `dist/` al VPS.
 - `expo-av` está deprecado en SDK 54 (warning en logs) — funciona pero migrar eventualmente a `expo-audio` / `expo-video`.
