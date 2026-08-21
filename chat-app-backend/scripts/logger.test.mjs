@@ -97,3 +97,65 @@ test('el log HTTP no escribe la contraseña ni el código del cuerpo', async () 
   assert.equal(todo.includes('SuperSecreta123'), false, 'la contraseña NO puede acabar en el log');
   assert.equal(todo.includes('424242'), false, 'el código NO puede acabar en el log');
 });
+
+// ── Nivel debug (LOG_LEVEL) ──────────────────────────────────
+// Las trazas de `[react]` escribían 2 líneas por reacción y ahogaban el log de
+// PM2. Ni borrarlas (se pierde la depuración) ni dejarlas siempre (ruido): van
+// detrás de LOG_LEVEL=debug.
+import { habilitado, _releerNivel } from '../dist/services/logger.js';
+
+function conNivel(valor, fn) {
+  const antes = process.env.LOG_LEVEL;
+  if (valor === undefined) delete process.env.LOG_LEVEL; else process.env.LOG_LEVEL = valor;
+  _releerNivel();
+  try { return fn(); } finally {
+    if (antes === undefined) delete process.env.LOG_LEVEL; else process.env.LOG_LEVEL = antes;
+    _releerNivel();
+  }
+}
+
+test('por defecto (sin LOG_LEVEL) el debug está APAGADO y el resto encendido', () => {
+  conNivel(undefined, () => {
+    assert.equal(habilitado('debug'), false);
+    for (const l of ['info', 'warn', 'error']) assert.equal(habilitado(l), true, l);
+  });
+});
+
+test('LOG_LEVEL=debug enciende las trazas', () => {
+  conNivel('debug', () => assert.equal(habilitado('debug'), true));
+});
+
+test('LOG_LEVEL=warn silencia info y debug pero nunca los errores', () => {
+  conNivel('warn', () => {
+    assert.equal(habilitado('debug'), false);
+    assert.equal(habilitado('info'), false);
+    assert.equal(habilitado('warn'), true);
+    assert.equal(habilitado('error'), true);
+  });
+});
+
+test('un LOG_LEVEL absurdo cae a info, no apaga el log', () => {
+  conNivel('sandia', () => {
+    assert.equal(habilitado('info'), true);
+    assert.equal(habilitado('debug'), false);
+  });
+});
+
+test('una traza debug no escribe nada con el nivel por defecto', () => {
+  conNivel(undefined, () => {
+    const out = [];
+    const so = console.log; console.log = (m) => out.push(m);
+    try { logger('socket').debug('react recibido userId=1 msg=2'); } finally { console.log = so; }
+    assert.deepEqual(out, []);
+  });
+});
+
+test('la misma traza SÍ se escribe con LOG_LEVEL=debug', () => {
+  conNivel('debug', () => {
+    const out = [];
+    const so = console.log; console.log = (m) => out.push(m);
+    try { logger('socket').debug('react recibido userId=1 msg=2'); } finally { console.log = so; }
+    assert.equal(out.length, 1);
+    assert.match(out[0], /DEBUG \[socket\] react recibido/);
+  });
+});

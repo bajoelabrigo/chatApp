@@ -7,6 +7,7 @@ import { deleteCloudinaryAsset } from '../services/cloudinaryService';
 import { isGlobalAdmin } from '../services/adminService';
 import { sendWebPushToUsers } from '../services/webPushService';
 import { sendExpoPushToUsers } from '../services/pushService';
+import { logger } from '../services/logger';
 
 // userId -> Set of socketIds (un usuario puede tener múltiples conexiones)
 const onlineUsers = new Map<string, Set<string>>();
@@ -110,7 +111,7 @@ async function saveCallMessage(
     const populated = await message.populate('senderId', 'name avatar isSocio');
     io.to(conversationId).emit('message:new', populated);
   } catch (err) {
-    console.error('Error saving call message:', err);
+    log.error('No se pudo guardar el mensaje de llamada', err);
   }
 }
 
@@ -129,6 +130,8 @@ function removeOnlineUser(userId: string, socketId: string) {
 export function isUserOnline(userId: string): boolean {
   return onlineUsers.has(userId) && onlineUsers.get(userId)!.size > 0;
 }
+
+const log = logger('socket');
 
 export function setupSocketHandlers(io: Server) {
   // Middleware de autenticación Socket.io
@@ -763,7 +766,7 @@ export function setupSocketHandlers(io: Server) {
           );
         }
       } catch (err) {
-        console.error('poll:vote:', err);
+        log.error('poll:vote falló', err);
       }
     });
 
@@ -804,18 +807,18 @@ export function setupSocketHandlers(io: Server) {
           poll: updated?.poll,
         });
       } catch (err) {
-        console.error('poll:close:', err);
+        log.error('poll:close falló', err);
       }
     });
 
     socket.on('message:react', async (data: { messageId: string; conversationId: string; emoji: string }) => {
       try {
         const { messageId, conversationId, emoji } = data;
-        console.log(`[react] recv userId=${userId} msg=${messageId} conv=${conversationId} emoji=${emoji}`);
+        log.debug(`react recibido userId=${userId} msg=${messageId} conv=${conversationId} emoji=${emoji}`);
 
         const message = await Message.findOne({ _id: messageId, conversationId });
         if (!message) {
-          console.log(`[react] message NOT found: _id=${messageId} conv=${conversationId}`);
+          log.warn(`react sobre un mensaje inexistente: _id=${messageId} conv=${conversationId}`);
           return;
         }
 
@@ -848,10 +851,10 @@ export function setupSocketHandlers(io: Server) {
         reactions.push(...withoutUser);
 
         await Message.findByIdAndUpdate(messageId, { $set: { reactions } });
-        console.log(`[react] emitting to room=${conversationId} reactions=${JSON.stringify(reactions)}`);
+        log.debug(`react emitido a room=${conversationId} reactions=${JSON.stringify(reactions)}`);
         io.to(conversationId).emit('message:reaction', { messageId, conversationId, reactions });
       } catch (err) {
-        console.error('[react] ERROR:', err);
+        log.error('message:react falló', err);
       }
     });
 

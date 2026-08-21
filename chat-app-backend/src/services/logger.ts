@@ -8,7 +8,31 @@
  * se escribe.
  */
 
-export type LogLevel = 'info' | 'warn' | 'error';
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+const ORDEN: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
+
+/**
+ * `LOG_LEVEL` se lee de forma PEREZOSA y se cachea. Leerlo en la raíz del módulo
+ * daría `undefined`: en ESM los imports se evalúan antes que el `dotenv.config()`
+ * del que importa. Es la misma trampa que dejó el push web de la web caído meses
+ * (ver el apartado de Web Push en CLAUDE.md).
+ */
+let minimo: number | undefined;
+function nivelMinimo(): number {
+  if (minimo === undefined) {
+    const v = (process.env.LOG_LEVEL ?? 'info').toLowerCase() as LogLevel;
+    minimo = ORDEN[v] ?? ORDEN.info;
+  }
+  return minimo;
+}
+
+/** Solo para los tests: vuelve a leer LOG_LEVEL. */
+export function _releerNivel(): void { minimo = undefined; }
+
+export function habilitado(level: LogLevel): boolean {
+  return ORDEN[level] >= nivelMinimo();
+}
 
 /** `2026-08-21T00:31:04.512Z WARN  [paypal] mensaje` */
 export function formatLine(level: LogLevel, scope: string, message: string, at: Date = new Date()): string {
@@ -28,6 +52,7 @@ export function describe(value: unknown): { text: string; stack?: string } {
 }
 
 function emit(level: LogLevel, scope: string, message: string, extra?: unknown): void {
+  if (!habilitado(level)) return;
   const sink = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
   sink(formatLine(level, scope, message));
   if (extra !== undefined) {
@@ -38,6 +63,12 @@ function emit(level: LogLevel, scope: string, message: string, extra?: unknown):
 
 export function logger(scope: string) {
   return {
+    /**
+     * Apagado salvo con `LOG_LEVEL=debug`. Para trazas de alta frecuencia (una
+     * por reacción, por ejemplo): dejarlas siempre encendidas ahoga el log y
+     * borrarlas pierde la única forma de depurar el caso en producción.
+     */
+    debug: (message: string, extra?: unknown) => emit('debug', scope, message, extra),
     info:  (message: string, extra?: unknown) => emit('info',  scope, message, extra),
     warn:  (message: string, extra?: unknown) => emit('warn',  scope, message, extra),
     error: (message: string, extra?: unknown) => emit('error', scope, message, extra),
