@@ -57,6 +57,53 @@ Desde 2026-06-08, la app móvil (`chat-app-backend`) y la web (`holy_app`) **com
 
 ---
 
+---
+
+## Latencia de la base — cada viaje a Mongo cuesta ~205 ms (medido 2026-08-21)
+
+**El cluster de Atlas está en París y el VPS en São Paulo.** Son ~9.200 km:
+
+```
+ac-mb5jyfo-shard-00-00.uyjlwo2.mongodb.net
+  -> ec2-65-62-2-141.eu-west-3.compute.amazonaws.com   (AWS París)
+VPS 145.223.27.84                                       (Hostinger, São Paulo)
+```
+
+Y es el **plan gratuito**: el host real se llama `mtm-aws-euw3-2-m0-11-shard-00-00`
+— la `m0` es la pista. CPU compartida, límites de conexión y estrangulamiento.
+
+**La regla práctica: `tiempo de respuesta ≈ (viajes SECUENCIALES a Mongo) × 205 ms`.**
+Verificado midiendo cada consulta de `/notifications` con `LOG_LEVEL=debug`: da igual
+lo que haga la consulta —un `findOne` por `_id`, un agregado sobre miles de mensajes—
+todas tardan ~205 ms. **No son consultas lentas: es la distancia.** Lo que importa al
+optimizar un endpoint aquí NO es afinar consultas ni añadir índices, es **reducir el
+número de idas y vueltas**: agrupar en `Promise.all` y evitar `populate` anidados
+(`.populate({path:'lastMessage', populate:{path:'senderId'}})` son varios viajes él solo).
+
+Esto ya se aplicó en `getNotifications` (14 viajes → ~6, o sea 3,6 s → 1,2 s) y es el
+patrón a seguir en cualquier endpoint que se note lento. Hay un test que lo vigila:
+`scripts/notificationsPerf.test.mjs`.
+
+**DECISIÓN (2026-08-21): NO se migra el cluster de región.** Mover Atlas a `sa-east-1`
+bajaría ese 205 ms a ~2 ms —un factor de ~40 en TODOS los endpoints— pero no arregla
+ningún problema que el usuario note: el chat va por WebSocket con actualización
+optimista (no espera a Mongo), la app arranca con datos cacheados de Zustand, y
+`/notifications` es un sondeo de fondo. Un M0 no se puede cambiar de región: habría que
+crear cluster nuevo, migrar con `mongodump`/`mongorestore`, parar el servicio y cambiar
+`MONGO_URI` en **los dos** backends a la vez. Riesgo y trabajo real para algo que nadie
+percibe. Aplazado a propósito.
+
+**Las dos señales que SÍ obligarían a hacerlo** (vigilar, no tocar hasta entonces):
+1. **Almacenamiento del M0 cerca de los 512 MB.** Al llenarse fallan las ESCRITURAS —
+   eso sí es una caída real, y forzaría la migración con prisas. Es lo único de esto
+   que puede morder sin avisar. Se mira en el panel de Atlas.
+2. **`MongoNetworkTimeoutError` / `ReplicaSetNoPrimary` frecuentes** en
+   `/root/.pm2/logs/chat-backend-error.log`. A 2026-08-21 son esporádicos y el backend
+   reconecta solo; si se vuelven habituales, el sospechoso es el plan M0 compartido,
+   no la región.
+
+---
+
 ## Seminario web (`holy_app`) — gotchas
 
 El "seminario" es una `Activity` con `seminar.enabled` (`activityModel.js`). Toda la lógica vive en `seminarController.js` + `submissionController.js` (backend) y `frontend/src/components/seminario/`.
