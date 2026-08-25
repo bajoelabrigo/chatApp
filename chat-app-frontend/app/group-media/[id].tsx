@@ -8,7 +8,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/useAuthStore';
 import { useTheme } from '../../src/context/ThemeContext';
-import { cld } from '../../src/lib/cldImage';
+import { cld, videoPlayUrl } from '../../src/lib/cldImage';
 import {
   getGroupMedia,
   type GroupMedia,
@@ -91,7 +91,7 @@ function FileTile({ file, colors }: { file: GroupMediaFile; colors: any }) {
   const url = cleanUrl(file.url);
   return (
     <TouchableOpacity
-      onPress={() => Linking.openURL(url)}
+      onPress={() => Linking.openURL(isVideo(file.url) ? videoPlayUrl(url) : url)}
       activeOpacity={0.8}
       style={{ flex: 1 / 3, aspectRatio: 1, margin: 3, borderRadius: 10, overflow: 'hidden', backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border }}
     >

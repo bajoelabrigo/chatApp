@@ -8,7 +8,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { parseFormatting, type FmtSegment } from '../../utils/chatFormat';
 import { splitMentions } from '../../utils/mentions';
 import { PollBubble, type PollUser } from './PollBubble';
-import { cld } from '../../lib/cldImage';
+import { cld, videoPlayUrl } from '../../lib/cldImage';
 
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 const EMOJI_ONLY_REGEX = /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\s]+$/u;
@@ -503,7 +503,7 @@ function MessageBubbleComponent({ item, isMine, currentUserId, isGroup = false, 
       {/* VIDEO */}
       {isVideo && !isDeleted && (
         <Pressable
-          onPress={() => Linking.openURL(item.content)}
+          onPress={() => Linking.openURL(videoPlayUrl(item.content))}
           onLongPress={() => onLongPress(item)}
           delayLongPress={400}
           style={[{

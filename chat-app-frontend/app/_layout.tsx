@@ -183,6 +183,9 @@ function RootLayoutInner() {
         <Stack.Screen name="call" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="group-call" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="live-reading/[id]" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="reels" options={{ animation: 'fade' }} />
+        <Stack.Screen name="reel-create" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="stories" options={{ animation: 'fade' }} />
         <Stack.Screen name="contact/[id]" />
         <Stack.Screen name="u/[id]" />
         <Stack.Screen name="g/[id]" />

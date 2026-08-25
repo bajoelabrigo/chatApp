@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import path from 'path';
-import { getDailyRef, localDateKey, BOOK_NAMES_EN } from '../lib/dailyVerses';
-import { BOOK_NAMES } from '../lib/readingPlans';
+import { getDailyRef, localDateKey } from '../lib/dailyVerses';
+import { BibleLang, namesFor } from '../lib/bibleNames';
+import { fetchChapter as bibliaFetchChapter, searchBible as bibliaSearch, englishBookNames } from '../services/bibliaService';
 import { TOPICS, TOPIC_CATEGORIES, getTopic } from '../lib/bibleTopics';
 
 type BibleData = Record<string, Record<string, Record<string, string>>>;
@@ -12,20 +13,61 @@ type BibleData = Record<string, Record<string, Record<string, string>>>;
 // para uso sin conexión— excede con mucho el límite de cita libre (500
 // versículos). Todas las versiones que quedan son de dominio público.
 // NO volver a añadirla sin licencia por escrito.
-const ALLOWED_VERSIONS = ['RV1909', 'RVA', 'SSE', 'KJV', 'WEB', 'ASV', 'BBE'] as const;
+const ALLOWED_VERSIONS = ['RV1909', 'RVA', 'SSE', 'RV1865', 'KJV', 'WEB', 'ASV', 'BBE', 'DARBY', 'YLT', 'ACV', 'ANDERSON', 'CPDV', 'DRC', 'GENEVA1599', 'HAWEIS', 'JPS', 'KJVPCE', 'NOYES', 'OEB', 'OEBUK', 'RNKJV', 'ROTHERHAM', 'RWEBSTER', 'TCNT', 'TYNDALE', 'UKJV', 'WEBSTER', 'MARTIN', 'SVV', 'ELBERFELDER', 'SYNODAL', 'ESPERANTO', 'VAMVAS', 'RVR60'] as const;
 type VersionId = typeof ALLOWED_VERSIONS[number];
 
 // Versión por defecto cuando el cliente no manda ninguna (o manda una retirada).
 const DEFAULT_VERSION: VersionId = 'RV1909';
 
-const VERSION_META: Record<VersionId, { name: string; short: string; lang: 'es' | 'en' }> = {
+// Versiones "solo en línea": se sirven verso a verso desde api.biblia.com bajo la
+// licencia de la plataforma (la key está en el servidor). NO tienen JSON local:
+// `/bible/download` las rechaza (400) y el cliente no ofrece descarga offline.
+// La RVR1960 tiene copyright de Sociedades Bíblicas Unidas: solo se puede
+// DISTRIBUIR COMPLETA con licencia por escrito; en streaming es la vía legal.
+const REMOTE_VERSIONS: Partial<Record<VersionId, { bibleId: string }>> = {
+  RVR60: { bibleId: 'rvr60' },
+};
+const isRemote = (v: VersionId): boolean => v in REMOTE_VERSIONS;
+
+const VERSION_META: Record<VersionId, { name: string; short: string; lang: BibleLang; remote?: boolean }> = {
   RV1909:  { name: 'Reina Valera 1909',          short: 'RV 1909',  lang: 'es' },
   RVA:     { name: 'Reina Valera Actualizada',   short: 'RVA',      lang: 'es' },
   SSE:     { name: 'Sagradas Escrituras 1569',   short: 'SSE 1569', lang: 'es' },
+  RV1865:  { name: 'Reina Valera 1865',          short: 'RV 1865',  lang: 'es' },
   KJV:     { name: 'King James Version',         short: 'KJV',      lang: 'en' },
   WEB:     { name: 'World English Bible',        short: 'WEB',      lang: 'en' },
   ASV:     { name: 'American Standard Version',  short: 'ASV',      lang: 'en' },
   BBE:     { name: 'Bible in Basic English',     short: 'BBE',      lang: 'en' },
+  DARBY:   { name: 'Darby Bible',                short: 'Darby',    lang: 'en' },
+  YLT:     { name: "Young's Literal Translation", short: 'YLT',     lang: 'en' },
+  // ── Lote 2026-08-21: dominio público desde scrollmapper/bible_databases ──
+  ACV:      { name: 'A Conservative Version',            short: 'ACV',       lang: 'en' },
+  ANDERSON: { name: 'Anderson New Testament 1864',       short: 'Anderson',  lang: 'en' },
+  CPDV:     { name: 'Catholic Public Domain Version',    short: 'CPDV',      lang: 'en' },
+  DRC:      { name: 'Douay-Rheims 1899 (Challoner)',     short: 'DRC',       lang: 'en' },
+  GENEVA1599: { name: 'Geneva Bible 1599',               short: 'Geneva',    lang: 'en' },
+  HAWEIS:   { name: 'Haweis New Testament 1795',         short: 'Haweis',    lang: 'en' },
+  JPS:      { name: 'JPS 1917 (Antiguo Testamento)',     short: 'JPS',       lang: 'en' },
+  KJVPCE:   { name: 'King James Version (Pure Cambridge)', short: 'KJV PCE', lang: 'en' },
+  NOYES:    { name: 'Noyes Translation 1869',            short: 'Noyes',     lang: 'en' },
+  OEB:      { name: 'Open English Bible',                short: 'OEB',       lang: 'en' },
+  OEBUK:    { name: 'Open English Bible (UK)',           short: 'OEB (UK)',  lang: 'en' },
+  RNKJV:    { name: 'Restored Name King James Version',  short: 'RNKJV',     lang: 'en' },
+  ROTHERHAM: { name: 'Rotherham Emphasized Bible 1902',  short: 'Rotherham', lang: 'en' },
+  RWEBSTER: { name: 'Revised Webster 1833',              short: 'Rev. Webster', lang: 'en' },
+  TCNT:     { name: 'Twentieth Century New Testament 1904', short: 'TCNT',   lang: 'en' },
+  TYNDALE:  { name: 'Tyndale Bible 1534',                short: 'Tyndale',   lang: 'en' },
+  UKJV:     { name: 'Updated King James Version',        short: 'UKJV',      lang: 'en' },
+  WEBSTER:  { name: "Webster's Bible 1833",              short: 'Webster',   lang: 'en' },
+  // ── Lote 2026-08-21 (idiomas): dominio público desde scrollmapper ──
+  MARTIN:     { name: 'Bible David Martin 1744',   short: 'Martin',     lang: 'fr' },
+  SVV:        { name: 'Statenvertaling 1637',      short: 'SVV',        lang: 'nl' },
+  ELBERFELDER: { name: 'Unrevidierte Elberfelder 1905', short: 'Elberfelder', lang: 'de' },
+  SYNODAL:    { name: 'Ruso Sinodal 1876',         short: 'Sinodal',    lang: 'ru' },
+  ESPERANTO:  { name: 'Londona Biblio (Esperanto)', short: 'Esperanto', lang: 'eo' },
+  VAMVAS:     { name: 'Vamvas 1850 (Griego)',      short: 'Vamvas',     lang: 'el' },
+  // ── Solo en línea (api.biblia.com, copyright SBU) ──
+  RVR60:      { name: 'Reina Valera 1960',         short: 'RVR60',      lang: 'es', remote: true },
 };
 
 const lib = path.join(__dirname, '../lib/bible');
@@ -58,6 +100,9 @@ function getVersionData(req: Request): { data: BibleData; books: string[] } | nu
   const v = (ALLOWED_VERSIONS as readonly string[]).includes(raw)
     ? (raw as VersionId)
     : DEFAULT_VERSION;
+  // Las remotas no tienen JSON local: quien llegue aquí (sin rama remota) debe
+  // degradar a null en vez de intentar `require` de un archivo inexistente.
+  if (isRemote(v)) return null;
   return loadVersion(v);
 }
 
@@ -95,10 +140,13 @@ export function dailyVerseFor(dateKey: string, version: string = DEFAULT_VERSION
   const versionId = (ALLOWED_VERSIONS as readonly string[]).includes(version)
     ? (version as VersionId)
     : DEFAULT_VERSION;
+  // Las versiones solo-en-línea no tienen daily (evita llamadas extra a la API):
+  // la tarjeta se oculta en el cliente (captura el 404).
+  if (isRemote(versionId)) return null;
   const { data } = loadVersion(versionId);
 
   const ref = getDailyRef(dateKey);
-  const names = VERSION_META[versionId].lang === 'en' ? BOOK_NAMES_EN : BOOK_NAMES;
+  const names = namesFor(VERSION_META[versionId].lang);
   const book = names[ref.book];
   const text = data[book]?.[String(ref.chapter)]?.[String(ref.verse)];
   if (!text) return null;
@@ -125,8 +173,10 @@ export function getDailyVerse(req: Request, res: Response) {
 
   const verse = dailyVerseFor(dateKey, resolveVersionId(req));
   if (!verse) {
-    // No debería pasar (los pasajes están verificados contra las 7 versiones),
-    // pero si una versión tuviera un hueco, mejor un 404 claro que un crash.
+    // No debería pasar (los pasajes del versículo del día están verificados
+    // contra las versiones), pero si una versión tuviera un hueco —p.ej. la
+    // RV1865 o el Darby omiten algunos versículos que otras ediciones sí traen—,
+    // mejor un 404 claro que un crash.
     res.status(404).json({ error: 'Versículo no disponible en esta versión' });
     return;
   }
@@ -134,25 +184,70 @@ export function getDailyVerse(req: Request, res: Response) {
 }
 
 export function getBooks(req: Request, res: Response) {
+  const version = resolveVersionId(req);
+  // Remotas: la Biblia es completa, así que la lista de libros es el orden
+  // canónico del idioma (sin llamada a la API).
+  if (isRemote(version)) {
+    res.json(namesFor(VERSION_META[version].lang));
+    return;
+  }
   const vd = getVersionData(req);
   if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
   res.json(vd.books);
 }
 
+// Estructura de capítulos de referencia (RV1909, Biblia completa) para servir
+// la lista de capítulos de las versiones remotas sin llamar a la API.
+let remoteChapterMap: Record<string, string[]> | null = null;
+function remoteChapters(): Record<string, string[]> {
+  if (!remoteChapterMap) {
+    const { data } = loadVersion('RV1909');
+    remoteChapterMap = Object.fromEntries(
+      Object.entries(data).map(([book, chs]) => [book, Object.keys(chs)])
+    );
+  }
+  return remoteChapterMap;
+}
+
 export function getChapters(req: Request, res: Response) {
+  const version = resolveVersionId(req);
+  const book = decodeURIComponent(req.params.book);
+  if (isRemote(version)) {
+    const chs = remoteChapters()[book];
+    if (!chs) { res.status(404).json({ error: 'Libro no encontrado' }); return; }
+    res.json(chs);
+    return;
+  }
   const vd = getVersionData(req);
   if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
-  const book = decodeURIComponent(req.params.book);
   const bookData = vd.data[book];
   if (!bookData) { res.status(404).json({ error: 'Libro no encontrado' }); return; }
   res.json(Object.keys(bookData));
 }
 
-export function getVerses(req: Request, res: Response) {
-  const vd = getVersionData(req);
-  if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
+export async function getVerses(req: Request, res: Response) {
+  const version = resolveVersionId(req);
   const book = decodeURIComponent(req.params.book);
   const { chapter } = req.params;
+
+  // Rama remota: se pide el capítulo a api.biblia.com con el nombre de libro en
+  // inglés (la API referencia así todos los idiomas), mapeado por índice canónico.
+  if (isRemote(version)) {
+    try {
+      const esNames = namesFor(VERSION_META[version].lang);
+      const idx = esNames.indexOf(book);
+      if (idx < 0) { res.status(404).json({ error: 'Libro no encontrado' }); return; }
+      const bookEn = englishBookNames()[idx];
+      const verses = await bibliaFetchChapter(REMOTE_VERSIONS[version]!.bibleId, bookEn, chapter);
+      res.json(verses);
+    } catch (err: any) {
+      res.status(502).json({ error: err?.message === 'BIBLIA_API_KEY no configurada' ? err.message : 'No se pudo obtener la versión en línea' });
+    }
+    return;
+  }
+
+  const vd = getVersionData(req);
+  if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
   const chapterData = vd.data[book]?.[chapter];
   if (!chapterData) { res.status(404).json({ error: 'Capítulo no encontrado' }); return; }
   res.json(Object.entries(chapterData).map(([verse, text]) => ({ verse, text: text.trim() })));
@@ -166,9 +261,8 @@ export function getVerses(req: Request, res: Response) {
 const fold = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-export function searchVerses(req: Request, res: Response) {
-  const vd = getVersionData(req);
-  if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
+export async function searchVerses(req: Request, res: Response) {
+  const version = resolveVersionId(req);
   const raw = (req.query.q as string | undefined)?.trim();
   if (!raw || raw.length < 3) {
     res.status(400).json({ error: 'La búsqueda debe tener al menos 3 caracteres' });
@@ -176,12 +270,50 @@ export function searchVerses(req: Request, res: Response) {
   }
   const q = fold(raw);
 
-  // Filtro por testamento. Va DENTRO de la búsqueda, no después: como se corta a
-  // 100 resultados, filtrar a posteriori dejaba el Nuevo Testamento vacío (los
-  // 100 primeros aciertos se agotan en el Antiguo).
   const testament = req.query.testament as 'ot' | 'nt' | undefined;
-  const names = VERSION_META[resolveVersionId(req)].lang === 'en' ? BOOK_NAMES_EN : BOOK_NAMES;
   const bookFilter = (req.query.book as string | undefined)?.trim();
+  const paged = req.query.paged === '1';
+  const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
+  const limit = Math.min(
+    100,
+    Math.max(1, parseInt(String(req.query.limit ?? (paged ? '50' : '100')), 10) || 50)
+  );
+
+  // Rama remota: la búsqueda la hace api.biblia.com (la local escanearía 31.000
+  // versos de un JSON que no existe). Se traen hasta 1.000 y se filtran/pagean
+  // aquí con las mismas reglas que la búsqueda local.
+  if (isRemote(version)) {
+    try {
+      const names = namesFor(VERSION_META[version].lang);
+      const enNames = englishBookNames();
+      const hits = await bibliaSearch(REMOTE_VERSIONS[version]!.bibleId, raw);
+      const inScopeRemote = (bookEs: string): boolean => {
+        if (bookFilter && bookEs !== bookFilter) return false;
+        if (testament !== 'ot' && testament !== 'nt') return true;
+        const i = names.indexOf(bookEs);
+        if (i < 0) return true;
+        return testament === 'ot' ? i < 39 : i >= 39;
+      };
+      const results: { book: string; chapter: string; verse: string; text: string }[] = [];
+      let total = 0;
+      for (const hit of hits) {
+        const bookEs = names[enNames.indexOf(hit.bookEn)] ?? hit.bookEn;
+        if (!inScopeRemote(bookEs)) continue;
+        total++;
+        if (total > offset && results.length < limit) {
+          results.push({ book: bookEs, chapter: hit.chapter, verse: hit.verse, text: hit.text });
+        }
+      }
+      res.json(paged ? { results, total, offset } : results);
+    } catch (err: any) {
+      res.status(502).json({ error: err?.message === 'BIBLIA_API_KEY no configurada' ? err.message : 'No se pudo buscar en la versión en línea' });
+    }
+    return;
+  }
+
+  const vd = getVersionData(req);
+  if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
+  const names = namesFor(VERSION_META[version].lang);
 
   const inScope = (book: string): boolean => {
     if (bookFilter && book !== bookFilter) return false;
@@ -198,18 +330,6 @@ export function searchVerses(req: Request, res: Response) {
     ...names.filter((b) => vd.data[b]),
     ...vd.books.filter((b) => !names.includes(b)),
   ];
-
-  // Se recorre la Biblia entera para poder decir CUÁNTOS resultados hay; solo se
-  // materializa la página pedida. El escaneo es de ~31.000 versículos ya en
-  // memoria: milisegundos.
-  const paged = req.query.paged === '1';
-  const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
-  // Los clientes viejos (sin `paged`) recibían hasta 100 de golpe: se les
-  // mantiene ese tope para no cambiarles el comportamiento.
-  const limit = Math.min(
-    100,
-    Math.max(1, parseInt(String(req.query.limit ?? (paged ? '50' : '100')), 10) || 50)
-  );
 
   const results: { book: string; chapter: string; verse: string; text: string }[] = [];
   let total = 0;
@@ -274,7 +394,7 @@ function loadXrefs(): XrefData {
  * referencias" en vez de apuntar al libro equivocado.
  */
 function bookNames(version: VersionId): string[] {
-  return VERSION_META[version].lang === 'en' ? BOOK_NAMES_EN : BOOK_NAMES;
+  return namesFor(VERSION_META[version].lang);
 }
 
 export interface XrefResult {
@@ -332,6 +452,9 @@ function resolveTargets(
  */
 export function getChapterXrefCounts(req: Request, res: Response) {
   const version = resolveVersionId(req);
+  // Remotas: el recuento necesita el texto local (no se pide a la API); el
+  // cliente degrada en silencio a "sin referencias".
+  if (isRemote(version)) { res.json({}); return; }
   const names = bookNames(version);
   const book = decodeURIComponent(req.params.book);
   const bookIdx = names.indexOf(book);
@@ -365,6 +488,11 @@ export function getChapterXrefCounts(req: Request, res: Response) {
  */
 export function getVerseXrefs(req: Request, res: Response) {
   const version = resolveVersionId(req);
+  // Remotas: sin texto local no se pueden resolver los pasajes destino.
+  if (isRemote(version)) {
+    res.status(404).json({ error: 'Referencias no disponibles en esta versión' });
+    return;
+  }
   const { data } = loadVersion(version);
   const names = bookNames(version);
 
@@ -435,6 +563,11 @@ export function getTopicDetail(req: Request, res: Response) {
   }
 
   const version = resolveVersionId(req);
+  // Remotas: los temas resuelven el texto desde el JSON local.
+  if (isRemote(version)) {
+    res.status(404).json({ error: 'Temas no disponibles en esta versión' });
+    return;
+  }
   const { data } = loadVersion(version);
   const names = bookNames(version);
 
@@ -480,6 +613,14 @@ export function getTopicDetail(req: Request, res: Response) {
 }
 
 export function downloadBible(req: Request, res: Response) {
+  const version = resolveVersionId(req);
+  // Las versiones solo-en-línea NO se pueden descargar: sería distribuir el
+  // texto completo con copyright (RVR60 © Sociedades Bíblicas Unidas). El
+  // cliente tampoco ofrece el botón de descarga para ellas.
+  if (isRemote(version)) {
+    res.status(400).json({ error: 'Esta versión solo está disponible en línea' });
+    return;
+  }
   const vd = getVersionData(req);
   if (!vd) { res.status(400).json({ error: 'Versión no válida' }); return; }
   const payload: BibleData = {};

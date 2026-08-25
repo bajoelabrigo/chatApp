@@ -15,6 +15,8 @@ import {
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
+import { langFlag } from '../../constants/bible';
+import { LangFilterChips } from '../bible/VersionPickerModal';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useBibleStore, type BibleFavorite } from '../../store/useBibleStore';
 import {
@@ -64,14 +66,42 @@ const MIN_FONT = 13;
 const MAX_FONT = 26;
 
 // La RVR1960 se retiró por copyright (ver RETIRED_VERSIONS en bibleService).
-const VERSION_META: Record<string, { name: string; short: string; lang: string }> = {
+const VERSION_META: Record<string, { name: string; short: string; lang: string; remote?: boolean }> = {
   RV1909:  { name: 'Reina Valera 1909',         short: 'RV 1909',  lang: 'es' },
   RVA:     { name: 'Reina Valera Actualizada',  short: 'RVA',      lang: 'es' },
   SSE:     { name: 'Sagradas Escrituras 1569',  short: 'SSE 1569', lang: 'es' },
+  RV1865:  { name: 'Reina Valera 1865',         short: 'RV 1865',  lang: 'es' },
   KJV:     { name: 'King James Version',        short: 'KJV',      lang: 'en' },
   WEB:     { name: 'World English Bible',       short: 'WEB',      lang: 'en' },
   ASV:     { name: 'American Standard Version', short: 'ASV',      lang: 'en' },
   BBE:     { name: 'Bible in Basic English',    short: 'BBE',      lang: 'en' },
+  DARBY:   { name: 'Darby Bible',               short: 'Darby',    lang: 'en' },
+  YLT:     { name: "Young's Literal Translation", short: 'YLT',    lang: 'en' },
+  ACV:      { name: 'A Conservative Version',            short: 'ACV',       lang: 'en' },
+  ANDERSON: { name: 'Anderson New Testament 1864',       short: 'Anderson',  lang: 'en' },
+  CPDV:     { name: 'Catholic Public Domain Version',    short: 'CPDV',      lang: 'en' },
+  DRC:      { name: 'Douay-Rheims 1899 (Challoner)',     short: 'DRC',       lang: 'en' },
+  GENEVA1599: { name: 'Geneva Bible 1599',               short: 'Geneva',    lang: 'en' },
+  HAWEIS:   { name: 'Haweis New Testament 1795',         short: 'Haweis',    lang: 'en' },
+  JPS:      { name: 'JPS 1917 (Antiguo Testamento)',     short: 'JPS',       lang: 'en' },
+  KJVPCE:   { name: 'King James Version (Pure Cambridge)', short: 'KJV PCE', lang: 'en' },
+  NOYES:    { name: 'Noyes Translation 1869',            short: 'Noyes',     lang: 'en' },
+  OEB:      { name: 'Open English Bible',                short: 'OEB',       lang: 'en' },
+  OEBUK:    { name: 'Open English Bible (UK)',           short: 'OEB (UK)',  lang: 'en' },
+  RNKJV:    { name: 'Restored Name King James Version',  short: 'RNKJV',     lang: 'en' },
+  ROTHERHAM: { name: 'Rotherham Emphasized Bible 1902',  short: 'Rotherham', lang: 'en' },
+  RWEBSTER: { name: 'Revised Webster 1833',              short: 'Rev. Webster', lang: 'en' },
+  TCNT:     { name: 'Twentieth Century New Testament 1904', short: 'TCNT',   lang: 'en' },
+  TYNDALE:  { name: 'Tyndale Bible 1534',                short: 'Tyndale',   lang: 'en' },
+  UKJV:     { name: 'Updated King James Version',        short: 'UKJV',      lang: 'en' },
+  WEBSTER:  { name: "Webster's Bible 1833",              short: 'Webster',   lang: 'en' },
+  MARTIN:     { name: 'Bible David Martin 1744',   short: 'Martin',     lang: 'fr' },
+  SVV:        { name: 'Statenvertaling 1637',      short: 'SVV',        lang: 'nl' },
+  ELBERFELDER: { name: 'Unrevidierte Elberfelder 1905', short: 'Elberfelder', lang: 'de' },
+  SYNODAL:    { name: 'Ruso Sinodal 1876',         short: 'Sinodal',    lang: 'ru' },
+  ESPERANTO:  { name: 'Londona Biblio (Esperanto)', short: 'Esperanto', lang: 'eo' },
+  VAMVAS:     { name: 'Vamvas 1850 (Griego)',      short: 'Vamvas',     lang: 'el' },
+  RVR60:      { name: 'Reina Valera 1960',         short: 'RVR60',      lang: 'es', remote: true },
 };
 
 // Ids de todas las versiones (para consultar cuáles están descargadas).
@@ -108,6 +138,10 @@ export default function BibleModal({ visible, onClose, onSendBible }: Props) {
 
   // Version picker
   const [versionPickerOpen, setVersionPickerOpen] = useState(false);
+  const [pickerLang, setPickerLang] = useState('all');
+  useEffect(() => {
+    if (versionPickerOpen) setPickerLang('all');
+  }, [versionPickerOpen]);
   const [availableVersions, setAvailableVersions] = useState<BibleVersion[]>([]);
   const [downloadedVersions, setDownloadedVersions] = useState<Set<string>>(new Set());
 
@@ -608,41 +642,51 @@ export default function BibleModal({ visible, onClose, onSendBible }: Props) {
               Versión de la Biblia
             </Text>
 
-            {(availableVersions.length > 0
-              ? availableVersions
-              : Object.entries(VERSION_META).map(([id, m]) => ({ id, name: m.name, short: m.short, lang: m.lang as 'es' | 'en' }))
-            ).map((v) => {
-              const isActive = v.id === selectedVersion;
-              const isDownloaded = downloadedVersions.has(v.id);
-              const langEmoji = v.lang === 'en' ? '🇬🇧' : '🇪🇸';
+            {(() => {
+              const list = availableVersions.length > 0
+                ? availableVersions
+                : Object.entries(VERSION_META).map(([id, m]) => ({ id, name: m.name, short: m.short, lang: m.lang, remote: m.remote }));
+              const filtered = pickerLang === 'all' ? list : list.filter((v) => v.lang === pickerLang);
               return (
-                <TouchableOpacity
-                  key={v.id}
-                  onPress={() => handleSelectVersion(v.id)}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center',
-                    paddingHorizontal: 20, paddingVertical: 14,
-                    borderBottomWidth: 1, borderBottomColor: colors.borderLight,
-                    backgroundColor: isActive ? colors.accent + '15' : 'transparent',
-                  }}
-                >
-                  <Text style={{ fontSize: 22, marginRight: 12 }}>{langEmoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: isActive ? '700' : '500' }}>
-                      {v.name}
-                    </Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>{v.short}</Text>
-                  </View>
-                  {isDownloaded && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#22c55e22', marginRight: 8 }}>
-                      <Ionicons name="checkmark-circle" size={13} color="#22c55e" />
-                      <Text style={{ color: '#22c55e', fontSize: 11, fontWeight: '600' }}>Sin conexión</Text>
-                    </View>
-                  )}
-                  {isActive && <Ionicons name="checkmark" size={18} color={colors.accent} />}
-                </TouchableOpacity>
+                <>
+                  <LangFilterChips list={list} value={pickerLang} onChange={setPickerLang} colors={colors} />
+                  {filtered.map((v) => {
+                    const isActive = v.id === selectedVersion;
+                    const isDownloaded = downloadedVersions.has(v.id);
+                    const langEmoji = langFlag(v.lang);
+                    return (
+                      <TouchableOpacity
+                        key={v.id}
+                        onPress={() => handleSelectVersion(v.id)}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center',
+                          paddingHorizontal: 20, paddingVertical: 14,
+                          borderBottomWidth: 1, borderBottomColor: colors.borderLight,
+                          backgroundColor: isActive ? colors.accent + '15' : 'transparent',
+                        }}
+                      >
+                        <Text style={{ fontSize: 22, marginRight: 12 }}>{langEmoji}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: isActive ? '700' : '500' }}>
+                            {v.name}
+                          </Text>
+                          <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
+                            {v.short}{v.remote ? ' · ☁️ en línea' : ''}
+                          </Text>
+                        </View>
+                        {isDownloaded && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: '#22c55e22', marginRight: 8 }}>
+                            <Ionicons name="checkmark-circle" size={13} color="#22c55e" />
+                            <Text style={{ color: '#22c55e', fontSize: 11, fontWeight: '600' }}>Sin conexión</Text>
+                          </View>
+                        )}
+                        {isActive && <Ionicons name="checkmark" size={18} color={colors.accent} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
               );
-            })}
+            })()}
 
             <TouchableOpacity
               onPress={() => setVersionPickerOpen(false)}

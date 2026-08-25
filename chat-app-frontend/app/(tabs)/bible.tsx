@@ -1332,6 +1332,8 @@ export default function BibleScreen() {
 
   const handleDownload = async (version: string) => {
     if (!token || downloadingVersion) return;
+    // Las versiones "solo en línea" (RVR60, copyright SBU) no se descargan.
+    if (VERSION_META[version]?.remote) return;
     setDownloadingVersion(version);
     setDownloadProgress(0);
     try {
@@ -1375,7 +1377,7 @@ export default function BibleScreen() {
 
   // ─── Derived ──────────────────────────────────────────────
   const sortedBooks = useMemo(() => {
-    const locale = (VERSION_META[selectedVersion]?.lang === 'en') ? 'en' : 'es';
+    const locale = VERSION_META[selectedVersion]?.lang ?? 'es';
     if (bookOrder === 'alphabetical') {
       return [...books].sort((a, b) => a.localeCompare(b, locale));
     }
@@ -1701,16 +1703,32 @@ export default function BibleScreen() {
         onPray={prayForFeed}
       />
 
-      <DownloadBanner
-        version={selectedVersion}
-        isDownloaded={downloadedVersions.has(selectedVersion)}
-        isDownloading={downloadingVersion === selectedVersion}
-        progress={downloadProgress}
-        colors={colors}
-        onDownload={() => handleDownload(selectedVersion)}
-        onCancel={handleCancelDownload}
-        onDelete={() => handleDeleteDownload(selectedVersion)}
-      />
+      {VERSION_META[selectedVersion]?.remote ? (
+        // Versión solo en línea: sin descarga offline + atribución exigida por
+        // la licencia de la plataforma (RVR60 © Sociedades Bíblicas Unidas).
+        <View
+          style={{
+            paddingVertical: 10, paddingHorizontal: 16,
+            backgroundColor: colors.bgSecondary,
+            borderTopWidth: 1, borderTopColor: colors.borderLight,
+          }}
+        >
+          <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center' }}>
+            ☁️ Solo lectura en línea · Reina Valera 1960 © Sociedades Bíblicas Unidas
+          </Text>
+        </View>
+      ) : (
+        <DownloadBanner
+          version={selectedVersion}
+          isDownloaded={downloadedVersions.has(selectedVersion)}
+          isDownloading={downloadingVersion === selectedVersion}
+          progress={downloadProgress}
+          colors={colors}
+          onDownload={() => handleDownload(selectedVersion)}
+          onCancel={handleCancelDownload}
+          onDelete={() => handleDeleteDownload(selectedVersion)}
+        />
+      )}
     </>
   );
 

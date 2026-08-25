@@ -1,6 +1,7 @@
-import { View, Text, TouchableOpacity, Modal, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { VERSION_META } from '../../constants/bible';
+import { VERSION_META, langFlag, langLabel } from '../../constants/bible';
 import type { BibleVersion } from '../../services/bibleService';
 
 // Lista de versiones para elegir. La usan dos modales:
@@ -16,8 +17,62 @@ export const versionList = (available: BibleVersion[]): BibleVersion[] =>
         id,
         name: m.name,
         short: m.short,
-        lang: m.lang as 'es' | 'en',
+        lang: m.lang,
+        remote: m.remote,
       }));
+
+// ─── Chips de idioma: "Todos" + un chip por idioma con su recuento ────────────
+// El usuario elige el idioma y solo se muestran las biblias de ese idioma.
+export function LangFilterChips({
+  list,
+  value,
+  onChange,
+  colors,
+}: {
+  list: BibleVersion[];
+  value: string;
+  onChange: (lang: string) => void;
+  colors: any;
+}) {
+  const langs = [...new Set(list.map((v) => v.lang).filter(Boolean))];
+  const chip = (active: boolean) => ({
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: active ? colors.accent : colors.bgTertiary,
+    borderWidth: 1,
+    borderColor: active ? colors.accent : colors.border,
+  });
+  const chipText = (active: boolean) => ({
+    color: active ? '#fff' : colors.textPrimary,
+    fontSize: 13,
+    fontWeight: '600' as const,
+  });
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={{ flexGrow: 0, marginBottom: 6 }}
+      contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+    >
+      <TouchableOpacity onPress={() => onChange('all')} style={chip(value === 'all')}>
+        <Text style={chipText(value === 'all')}>Todos ({list.length})</Text>
+      </TouchableOpacity>
+      {langs.map((lang) => {
+        const count = list.filter((v) => v.lang === lang).length;
+        const active = value === lang;
+        return (
+          <TouchableOpacity key={lang} onPress={() => onChange(lang)} style={chip(active)}>
+            <Text style={chipText(active)}>
+              {langFlag(lang)} {langLabel(lang)} ({count})
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
 
 interface Props {
   visible: boolean;
@@ -48,6 +103,14 @@ export function VersionPickerModal({
   onDownload,
   onCancelDownload,
 }: Props) {
+  const [langFilter, setLangFilter] = useState('all');
+  useEffect(() => {
+    if (visible) setLangFilter('all');
+  }, [visible]);
+
+  const list = versionList(versions);
+  const filtered = langFilter === 'all' ? list : list.filter((v) => v.lang === langFilter);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable
@@ -66,7 +129,9 @@ export function VersionPickerModal({
               Versión de la Biblia
             </Text>
 
-            {versionList(versions).map((v) => {
+            <LangFilterChips list={list} value={langFilter} onChange={setLangFilter} colors={colors} />
+
+            {filtered.map((v) => {
               const isActive = v.id === selectedVersion;
               const isDownloaded = downloadedVersions.has(v.id);
               const isDownloading = downloadingVersion === v.id;
@@ -83,13 +148,15 @@ export function VersionPickerModal({
                   }}
                 >
                   <Text style={{ fontSize: 22, marginRight: 12 }}>
-                    {v.lang === 'en' ? '🇬🇧' : '🇪🇸'}
+                    {langFlag(v.lang)}
                   </Text>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: isActive ? '700' : '500' }}>
                       {v.name}
                     </Text>
-                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>{v.short}</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 1 }}>
+                      {v.short}{v.remote ? ' · ☁️ en línea' : ''}
+                    </Text>
                   </View>
 
                   {isDownloaded ? (
@@ -154,6 +221,14 @@ export function ComparePickerModal({
   onClose,
   onSelect,
 }: CompareProps) {
+  const [langFilter, setLangFilter] = useState('all');
+  useEffect(() => {
+    if (visible) setLangFilter('all');
+  }, [visible]);
+
+  const list = versionList(versions).filter((v) => v.id !== selectedVersion);
+  const filtered = langFilter === 'all' ? list : list.filter((v) => v.lang === langFilter);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable
@@ -172,30 +247,32 @@ export function ComparePickerModal({
               Comparar con…
             </Text>
 
+            <LangFilterChips list={list} value={langFilter} onChange={setLangFilter} colors={colors} />
+
             {/* No tiene sentido comparar una versión consigo misma */}
-            {versionList(versions)
-              .filter((v) => v.id !== selectedVersion)
-              .map((v) => {
-                const isActive = v.id === compareVersion;
-                return (
-                  <TouchableOpacity
-                    key={v.id}
-                    onPress={() => onSelect(v.id)}
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 12,
-                      paddingHorizontal: 20, paddingVertical: 15,
-                      backgroundColor: isActive ? colors.accent + '15' : 'transparent',
-                    }}
-                  >
-                    <Text style={{ fontSize: 18 }}>{v.lang === 'en' ? '🇬🇧' : '🇪🇸'}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{v.name}</Text>
-                      <Text style={{ color: colors.textMuted, fontSize: 12 }}>{v.short}</Text>
-                    </View>
-                    {isActive && <Ionicons name="checkmark-circle" size={20} color={colors.accent} />}
-                  </TouchableOpacity>
-                );
-              })}
+            {filtered.map((v) => {
+              const isActive = v.id === compareVersion;
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  onPress={() => onSelect(v.id)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    paddingHorizontal: 20, paddingVertical: 15,
+                    backgroundColor: isActive ? colors.accent + '15' : 'transparent',
+                  }}
+                >
+                  <Text style={{ fontSize: 18 }}>{langFlag(v.lang)}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{v.name}</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12 }}>
+                      {v.short}{v.remote ? ' · ☁️ en línea' : ''}
+                    </Text>
+                  </View>
+                  {isActive && <Ionicons name="checkmark-circle" size={20} color={colors.accent} />}
+                </TouchableOpacity>
+              );
+            })}
 
             <TouchableOpacity
               onPress={() => onSelect(null)}

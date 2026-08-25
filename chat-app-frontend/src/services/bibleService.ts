@@ -19,7 +19,9 @@ export interface BibleVersion {
   id: string;
   name: string;
   short: string;
-  lang: 'es' | 'en';
+  lang: string;
+  // Solo lectura en línea (RVR60): no se descarga para offline.
+  remote?: boolean;
 }
 
 type LocalBible = Record<string, Record<string, Record<string, string>>>;

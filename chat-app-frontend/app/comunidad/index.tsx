@@ -10,6 +10,7 @@ import { usePostsStore } from '../../src/store/usePostsStore';
 import { getFeed, type Post } from '../../src/services/postService';
 import { getConnectionRequests } from '../../src/services/connectionService';
 import { PostCard } from '../../src/components/comunidad/PostCard';
+import { StoriesRow } from '../../src/components/comunidad/StoriesRow';
 
 const SCOPE_KEY = 'comunidad_feed_scope';
 const LIMIT = 10;
@@ -149,9 +150,34 @@ export default function ComunidadScreen() {
         <FlatList
           data={posts}
           keyExtractor={(p) => p._id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+          contentContainerStyle={{ paddingBottom: 40 }}
+          ListHeaderComponent={
+            <>
+              {/* Historias (24 h) + acceso a Reels */}
+              <StoriesRow />
+              <TouchableOpacity
+                onPress={() => router.push('/reels' as any)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 8,
+                  marginHorizontal: 14, marginBottom: 10,
+                  paddingHorizontal: 14, paddingVertical: 10,
+                  borderRadius: 14, backgroundColor: colors.bgSecondary,
+                  borderWidth: 1, borderColor: colors.border,
+                }}
+              >
+                <Ionicons name="play-circle" size={20} color={colors.accent} />
+                <Text style={{ color: colors.textPrimary, fontWeight: '700', flex: 1 }}>Reels</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>Ver →</Text>
+              </TouchableOpacity>
+              <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+                <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 }}>Publicaciones</Text>
+              </View>
+            </>
+          }
           renderItem={({ item }) => (
-            <PostCard post={item} onChange={upsertPost} onRemove={removePost} />
+            <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+              <PostCard post={item} onChange={upsertPost} onRemove={removePost} />
+            </View>
           )}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.accent} />}
           onEndReached={loadMore}

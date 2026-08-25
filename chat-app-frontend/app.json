@@ -2,7 +2,7 @@
   "expo": {
     "name": "HolyChat",
     "slug": "chat-app",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -24,7 +24,7 @@
     },
     "android": {
       "package": "com.chatapp",
-      "versionCode": 4,
+      "versionCode": 5,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -71,7 +71,8 @@
         }
       ],
       "expo-web-browser",
-      "expo-font"
+      "expo-font",
+      "expo-video"
     ],
     "updates": {
       "url": "https://u.expo.dev/fd20a97c-6470-4f96-9bd3-0ecb586a4816"

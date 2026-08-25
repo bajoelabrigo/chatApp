@@ -24,6 +24,7 @@ import connectionRoutes from './routes/connection.routes';
 import seminarRoutes from './routes/seminar.routes';
 import publicRoutes from './routes/public.routes';
 import popupRoutes from './routes/popup.routes';
+import reelRoutes from './routes/reel.routes';
 import { setupSocketHandlers } from './socket/socketHandler';
 import { setIO } from './socket/ioSingleton';
 import { startCronJobs } from './services/cronService';
@@ -78,6 +79,7 @@ app.use('/connections', connectionRoutes);
 app.use('/seminars', seminarRoutes);
 app.use('/public', publicRoutes);
 app.use('/popup', popupRoutes);
+app.use('/reels', reelRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });

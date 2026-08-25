@@ -64,3 +64,22 @@ export function cld(url: string | null | undefined, width?: number, opts: Opts =
 
   return `${url.slice(0, at + marker.length)}${parts.join(',')}/${rest}`;
 }
+
+/**
+ * URL de REPRODUCCIÓN de un video de Cloudinary (espejo en holy_app:
+ * `holy_app/frontend/src/lib/cldImage.js`).
+ *
+ * Los videos se suben como vinieron (Android/Chrome suelen mandar WebM), y
+ * **Safari/iPhone NO reproduce WebM** → el video se ve negro en iOS. `f_mp4`
+ * pide a Cloudinary el MISMO video en contenedor MP4 con codec H.264/AAC, que
+ * iOS sí reproduce. Solo toca `/video/upload/`; cualquier otra URL (previa
+ * local, YouTube, descarga) se devuelve intacta.
+ *
+ * Para ABRIR/COMPARTIR/descargar se usa SIEMPRE la URL original, no esta.
+ */
+export function videoPlayUrl(url: string | null | undefined): string {
+  if (!url || typeof url !== 'string') return url as string;
+  const marker = '/video/upload/';
+  if (!url.includes(marker)) return url;
+  return url.replace(marker, `${marker}f_mp4/`);
+}
