@@ -25,6 +25,7 @@ export interface IReel extends Document {
   thumbUrl?: string;
   likes: Types.ObjectId[];
   views: { userId: Types.ObjectId; at: Date }[];
+  comments: { userId: Types.ObjectId; text: string; at: Date }[];
   expiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -45,6 +46,14 @@ const ReelSchema = new Schema<IReel>(
     views: [
       {
         userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    comments: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        text: { type: String, maxlength: 1000, trim: true },
         at: { type: Date, default: Date.now },
         _id: false,
       },

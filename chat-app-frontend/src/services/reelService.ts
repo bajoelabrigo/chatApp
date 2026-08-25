@@ -24,6 +24,7 @@ export interface Reel {
   expiresAt: string | null;
   likeCount: number;
   viewCount: number;
+  commentCount: number;
   liked: boolean;
   viewed: boolean;
 }
@@ -91,6 +92,24 @@ export async function getReelViewers(token: string, id: string): Promise<ReelVie
 
 export async function deleteReel(token: string, id: string): Promise<void> {
   await api.delete(`/reels/${id}`, auth(token));
+}
+
+export interface ReelComment {
+  userId: string;
+  name: string;
+  avatar?: string;
+  text: string;
+  at: string;
+}
+
+export async function addReelComment(token: string, id: string, text: string): Promise<{ ok: boolean; commentCount: number }> {
+  const { data } = await api.post(`/reels/${id}/comments`, { text }, auth(token));
+  return data;
+}
+
+export async function getReelComments(token: string, id: string): Promise<ReelComment[]> {
+  const { data } = await api.get<ReelComment[]>(`/reels/${id}/comments`, auth(token));
+  return data;
 }
 
 /** Metadata de YouTube para el formulario (preview antes de publicar). */

@@ -7,6 +7,8 @@ import {
   toggleLike,
   addView,
   getViewers,
+  addComment,
+  getComments,
   deleteReel,
   getYouTubeMetaEndpoint,
 } from '../controllers/reelController';
@@ -25,6 +27,8 @@ router.post('/', createReel);
 router.post('/:id/like', toggleLike);
 router.post('/:id/view', addView);
 router.get('/:id/views', getViewers);
+router.post('/:id/comments', addComment);
+router.get('/:id/comments', getComments);
 router.delete('/:id', deleteReel);
 
 export default router;

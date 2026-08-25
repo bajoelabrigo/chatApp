@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image,
+  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -11,11 +11,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { getReels, toggleReelLike, addReelView, type Reel } from '../src/services/reelService';
+import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, type Reel, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl } from '../src/lib/cldImage';
 import { timeAgo } from '../src/utils/timeAgo';
 
-// Feed vertical de Reels (cortos permanentes, estilo Instagram).
+// Feed vertical de Reels (cortos permanentes, estilo Instagram) con barra de
+// acción vertical (me gusta / comentar / compartir / eliminar).
 const PAGE = 10;
 
 function ReelVideo({ reel, active }: { reel: Reel; active: boolean }) {
@@ -41,7 +42,7 @@ function ReelYouTube({ reel }: { reel: Reel }) {
   return (
     <WebView
       source={{
-        uri: `https://www.youtube.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1`,
+        uri: `https://www.youtube.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0`,
       }}
       style={{ flex: 1, backgroundColor: '#000' }}
       allowsFullscreenVideo
@@ -56,13 +57,16 @@ function ReelYouTube({ reel }: { reel: Reel }) {
 
 export default function ReelsScreen() {
   const { colors } = useTheme();
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
   const { reels, setReels, appendReels, updateLike, updateViewed } = useReelsStore();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [commentReel, setCommentReel] = useState<Reel | null>(null);
+  const [comments, setComments] = useState<ReelComment[]>([]);
+  const [commentText, setCommentText] = useState('');
   const viewedRef = useRef<Set<string>>(new Set());
   const { height } = useWindowDimensions();
 
@@ -108,8 +112,48 @@ export default function ReelsScreen() {
     } catch { /* best-effort */ }
   };
 
+  const onComment = (reel: Reel) => {
+    setCommentReel(reel);
+    setComments([]);
+    setCommentText('');
+    if (token) getReelComments(token, reel.id).then(setComments).catch(() => {});
+  };
+
+  const onShare = async (reel: Reel) => {
+    const text = reel.caption || reel.youtubeTitle || 'Mira este reel en HolyChat';
+    try {
+      await Share.share({ message: `${text}\nhttps://holyholyholy.es/reels` });
+    } catch { /* best-effort */ }
+  };
+
+  const onDelete = (reel: Reel) => {
+    Alert.alert('Eliminar', '¿Eliminar este reel?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar', style: 'destructive',
+        onPress: async () => {
+          if (!token) return;
+          try {
+            await deleteReel(token, reel.id);
+            setReels(reels.filter((r) => r.id !== reel.id));
+          } catch { /* best-effort */ }
+        },
+      },
+    ]);
+  };
+
+  const sendComment = async () => {
+    if (!token || !commentReel || !commentText.trim()) return;
+    try {
+      await addReelComment(token, commentReel.id, commentText.trim());
+      setCommentText('');
+      setComments(await getReelComments(token, commentReel.id));
+    } catch { /* best-effort */ }
+  };
+
   const renderItem = ({ item }: { item: Reel }) => {
     const isActive = item.id === activeId;
+    const isMine = item.author.id === user?.id;
     return (
       <View style={{ height, backgroundColor: '#000' }}>
         {item.youtubeVideoId ? (
@@ -118,16 +162,26 @@ export default function ReelsScreen() {
           <ReelVideo reel={item} active={isActive} />
         )}
 
-        {/* Capa de info derecha: like, autor, caption */}
-        <View
-          style={{
-            position: 'absolute', right: 12, bottom: 110, alignItems: 'center', gap: 18,
-          }}
-        >
+        {/* Barra de acción vertical (derecha) */}
+        <View style={{ position: 'absolute', right: 12, bottom: 110, alignItems: 'center', gap: 18 }}>
           <Pressable onPress={() => onLike(item)} style={{ alignItems: 'center', gap: 3 }}>
             <Ionicons name={item.liked ? 'heart' : 'heart-outline'} size={32} color={item.liked ? '#ff2d55' : '#fff'} />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{item.likeCount}</Text>
           </Pressable>
+          <Pressable onPress={() => onComment(item)} style={{ alignItems: 'center', gap: 3 }}>
+            <Ionicons name="chatbubble-outline" size={28} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{item.commentCount ?? 0}</Text>
+          </Pressable>
+          <Pressable onPress={() => onShare(item)} style={{ alignItems: 'center', gap: 3 }}>
+            <Ionicons name="share-social-outline" size={28} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
+          </Pressable>
+          {isMine && (
+            <Pressable onPress={() => onDelete(item)} style={{ alignItems: 'center', gap: 3 }}>
+              <Ionicons name="trash-outline" size={28} color="#ff2d55" />
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Eliminar</Text>
+            </Pressable>
+          )}
         </View>
 
         <View style={{ position: 'absolute', left: 14, right: 70, bottom: 70 }}>
@@ -198,6 +252,49 @@ export default function ReelsScreen() {
           }
         />
       )}
+
+      {/* Hoja de comentarios */}
+      <Modal visible={!!commentReel} transparent animationType="slide" onRequestClose={() => setCommentReel(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setCommentReel(null)}>
+          <Pressable style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30, maxHeight: '65%' }} onPress={() => {}}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center', paddingVertical: 14 }}>
+              Comentarios ({comments.length})
+            </Text>
+            <FlatList
+              data={comments}
+              keyExtractor={(c) => `${c.userId}-${c.at}`}
+              style={{ flexGrow: 0 }}
+              renderItem={({ item }) => (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 20, paddingVertical: 8 }}>
+                  {item.avatar ? (
+                    <Image source={{ uri: item.avatar }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+                  ) : (
+                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: '#fff', fontWeight: '700' }}>{item.name[0]?.toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1, backgroundColor: colors.bgPrimary, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>{item.name}</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{item.text}</Text>
+                  </View>
+                </View>
+              )}
+            />
+            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 10 }}>
+              <TextInput
+                value={commentText}
+                onChangeText={setCommentText}
+                placeholder="Escribe un comentario…"
+                placeholderTextColor={colors.textSecondary}
+                style={{ flex: 1, backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 }}
+              />
+              <TouchableOpacity onPress={sendComment} style={{ backgroundColor: colors.accent, width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="send" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

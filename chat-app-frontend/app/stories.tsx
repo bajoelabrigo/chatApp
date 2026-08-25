@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image,
+  View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image, TextInput, Share, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -13,22 +13,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { addReelView, getReelViewers, type Reel, type ReelViewer } from '../src/services/reelService';
+import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl } from '../src/lib/cldImage';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
-// avanzar/retroceder y (para las propias) quién la vio.
+// avanzar/retroceder, barra de acción (me gusta / comentar / compartir /
+// eliminar) y (para las propias) quién la vio.
 const TAP_GAP = 90; // franja central: pausar/reanudar
 
 function StoryItem({
-  story, index, total, active, paused, onNext, onPrev, onTogglePause, onOpenViewers,
+  story, index, total, active, paused, onNext, onPrev, onTogglePause, onOpenViewers, onOpenComments,
 }: {
   story: Reel; index: number; total: number; active: boolean;
   paused: boolean; onNext: () => void; onPrev: () => void;
-  onTogglePause: () => void; onOpenViewers: () => void;
+  onTogglePause: () => void; onOpenViewers: () => void; onOpenComments: () => void;
 }) {
   const { colors } = useTheme();
-  const { user } = useAuthStore();
+  const { token, user } = useAuthStore();
+  const { updateLike, removeReel } = useReelsStore();
   const isMine = story.author.id === user?.id;
 
   const player = useVideoPlayer(story.videoUrl ? videoPlayUrl(story.videoUrl) : '', (p) => { p.loop = false; });
@@ -59,11 +61,41 @@ function StoryItem({
     return () => pulse.stopAnimation();
   }, [story.youtubeVideoId]);
 
+  const onLike = async () => {
+    if (!token) return;
+    try {
+      const { liked, count } = await toggleReelLike(token, story.id);
+      updateLike(story.id, liked, count);
+    } catch { /* best-effort */ }
+  };
+
+  const onShare = async () => {
+    const text = story.caption || story.youtubeTitle || 'Mira esta historia en HolyChat';
+    try { await Share.share({ message: `${text}\nhttps://holyholyholy.es/reels` }); } catch { /* best-effort */ }
+  };
+
+  const onDelete = () => {
+    Alert.alert('Eliminar', '¿Eliminar esta historia?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar', style: 'destructive',
+        onPress: async () => {
+          if (!token) return;
+          try {
+            await deleteReel(token, story.id);
+            removeReel(story.id);
+            router.back();
+          } catch { /* best-effort */ }
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       {story.youtubeVideoId ? (
         <WebView
-          source={{ uri: `https://www.youtube.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1` }}
+          source={{ uri: `https://www.youtube.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0` }}
           style={{ flex: 1 }}
           allowsFullscreenVideo
           javaScriptEnabled
@@ -115,16 +147,38 @@ function StoryItem({
         </TouchableOpacity>
       </View>
 
+      {/* Barra de acción vertical (derecha) */}
+      <View style={{ position: 'absolute', right: 12, bottom: 90, zIndex: 20, alignItems: 'center', gap: 18 }}>
+        <Pressable onPress={onLike} style={{ alignItems: 'center', gap: 3 }}>
+          <Ionicons name={story.liked ? 'heart' : 'heart-outline'} size={30} color={story.liked ? '#ff2d55' : '#fff'} />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{story.likeCount}</Text>
+        </Pressable>
+        <Pressable onPress={onOpenComments} style={{ alignItems: 'center', gap: 3 }}>
+          <Ionicons name="chatbubble-outline" size={26} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{story.commentCount ?? 0}</Text>
+        </Pressable>
+        <Pressable onPress={onShare} style={{ alignItems: 'center', gap: 3 }}>
+          <Ionicons name="share-social-outline" size={26} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
+        </Pressable>
+        {isMine && (
+          <Pressable onPress={onDelete} style={{ alignItems: 'center', gap: 3 }}>
+            <Ionicons name="trash-outline" size={26} color="#ff2d55" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Eliminar</Text>
+          </Pressable>
+        )}
+      </View>
+
       {/* Pie: caption */}
       {!!story.caption && (
-        <View style={{ position: 'absolute', bottom: 40, left: 16, right: 16 }}>
+        <View style={{ position: 'absolute', bottom: 40, left: 16, right: 70 }}>
           <Text style={{ color: '#fff', fontSize: 15, lineHeight: 20 }} numberOfLines={3}>{story.caption}</Text>
         </View>
       )}
 
       {/* Zonas táctiles */}
       <Pressable style={[StyleSheet.absoluteFillObject, { zIndex: 10 }] as any} onPress={(e) => {
-        const { locationX, pageX } = e.nativeEvent;
+        const { pageX } = e.nativeEvent;
         const width = globalWidth();
         if (pageX < width / 3) onPrev();
         else if (pageX > width - width / 3) onNext();
@@ -142,11 +196,14 @@ export default function StoriesScreen() {
   const { colors } = useTheme();
   const { index: indexParam } = useLocalSearchParams<{ index?: string }>();
   const { stories, updateViewed } = useReelsStore();
-  const { token, user } = useAuthStore();
+  const { token } = useAuthStore();
   const [current, setCurrent] = useState(Math.max(0, parseInt(indexParam ?? '0', 10) || 0));
   const [paused, setPaused] = useState(false);
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewers, setViewers] = useState<ReelViewer[]>([]);
+  const [commentStory, setCommentStory] = useState<Reel | null>(null);
+  const [comments, setComments] = useState<ReelComment[]>([]);
+  const [commentText, setCommentText] = useState('');
   const viewedRef = useRef<Set<string>>(new Set());
   const { width } = useWindowDimensions();
   _width = width;
@@ -175,6 +232,22 @@ export default function StoriesScreen() {
     setViewersOpen(true);
     setViewers([]);
     try { setViewers(await getReelViewers(token, story.id)); } catch { /* sin viewers */ }
+  };
+
+  const openComments = (story: Reel) => {
+    setCommentStory(story);
+    setComments([]);
+    setCommentText('');
+    if (token) getReelComments(token, story.id).then(setComments).catch(() => {});
+  };
+
+  const sendComment = async () => {
+    if (!token || !commentStory || !commentText.trim()) return;
+    try {
+      await addReelComment(token, commentStory.id, commentText.trim());
+      setCommentText('');
+      setComments(await getReelComments(token, commentStory.id));
+    } catch { /* best-effort */ }
   };
 
   if (stories.length === 0) {
@@ -214,6 +287,7 @@ export default function StoriesScreen() {
               onPrev={() => { if (index > 0) { setPaused(false); flatRef.current?.scrollToIndex({ index: index - 1, animated: true }); } }}
               onTogglePause={() => setPaused((p) => !p)}
               onOpenViewers={() => openViewers(item)}
+              onOpenComments={() => openComments(item)}
             />
           </View>
         )}
@@ -248,6 +322,49 @@ export default function StoriesScreen() {
               />
             )}
           </View>
+        </Pressable>
+      </Modal>
+
+      {/* Hoja de comentarios */}
+      <Modal visible={!!commentStory} transparent animationType="slide" onRequestClose={() => setCommentStory(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setCommentStory(null)}>
+          <Pressable style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30, maxHeight: '65%' }} onPress={() => {}}>
+            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center', paddingVertical: 14 }}>
+              Comentarios ({comments.length})
+            </Text>
+            <FlatList
+              data={comments}
+              keyExtractor={(c) => `${c.userId}-${c.at}`}
+              style={{ flexGrow: 0 }}
+              renderItem={({ item }) => (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 20, paddingVertical: 8 }}>
+                  {item.avatar ? (
+                    <Image source={{ uri: item.avatar }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+                  ) : (
+                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: '#fff', fontWeight: '700' }}>{item.name[0]?.toUpperCase()}</Text>
+                    </View>
+                  )}
+                  <View style={{ flex: 1, backgroundColor: colors.bgPrimary, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>{item.name}</Text>
+                    <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{item.text}</Text>
+                  </View>
+                </View>
+              )}
+            />
+            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 10 }}>
+              <TextInput
+                value={commentText}
+                onChangeText={setCommentText}
+                placeholder="Escribe un comentario…"
+                placeholderTextColor={colors.textSecondary}
+                style={{ flex: 1, backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 }}
+              />
+              <TouchableOpacity onPress={sendComment} style={{ backgroundColor: colors.accent, width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="send" size={16} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </View>

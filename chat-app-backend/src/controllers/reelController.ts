@@ -38,6 +38,7 @@ function serialize(reel: IReel & { authorId: AuthorDoc }, me: string) {
     expiresAt: reel.expiresAt ?? null,
     likeCount: (reel.likes || []).length,
     viewCount: (reel.views || []).length,
+    commentCount: (reel.comments || []).length,
     liked,
     viewed,
   };
@@ -215,6 +216,56 @@ export async function getViewers(req: Request, res: Response) {
     res.json(viewers);
   } catch {
     res.status(500).json({ error: 'Error obteniendo viewers' });
+  }
+}
+
+// ── Comentarios (un hilo plano por reel/historia) ─────────────────────────────
+export async function addComment(req: Request, res: Response) {
+  const userId = (req as any).userId as string;
+  const { id } = req.params;
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 1000) : '';
+  if (!text) { res.status(400).json({ error: 'El comentario está vacío' }); return; }
+  try {
+    const reel = await Reel.findByIdAndUpdate(
+      id,
+      { $push: { comments: { userId: new Types.ObjectId(userId), text, at: new Date() } } },
+      { new: true }
+    ).lean();
+    if (!reel) { res.status(404).json({ error: 'Reel no encontrado' }); return; }
+    res.json({ ok: true, commentCount: (reel.comments ?? []).length });
+  } catch {
+    res.status(500).json({ error: 'Error añadiendo comentario' });
+  }
+}
+
+export async function getComments(req: Request, res: Response) {
+  const { id } = req.params;
+  try {
+    const reel = await Reel.findById(id).lean();
+    if (!reel) { res.status(404).json({ error: 'Reel no encontrado' }); return; }
+    const comments = await Reel.aggregate([
+      { $match: { _id: reel._id } },
+      { $unwind: '$comments' },
+      { $sort: { 'comments.at': -1 } },
+      { $limit: 200 },
+      {
+        $lookup: { from: 'users', localField: 'comments.userId', foreignField: '_id', as: 'user' },
+      },
+      { $unwind: '$user' },
+      {
+        $project: {
+          _id: 0,
+          userId: '$user._id',
+          name: '$user.name',
+          avatar: '$user.avatar',
+          text: '$comments.text',
+          at: '$comments.at',
+        },
+      },
+    ]);
+    res.json(comments);
+  } catch {
+    res.status(500).json({ error: 'Error obteniendo comentarios' });
   }
 }
 
