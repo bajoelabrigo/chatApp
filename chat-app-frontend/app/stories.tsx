@@ -63,9 +63,14 @@ function StoryItem({
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       {story.youtubeVideoId ? (
         <WebView
-          source={{ uri: `https://www.youtube.com/embed/${story.youtubeVideoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1` }}
+          source={{ uri: `https://www.youtube.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1` }}
           style={{ flex: 1 }}
           allowsFullscreenVideo
+          javaScriptEnabled
+          domStorageEnabled
+          mediaPlaybackRequiresUserAction={false}
+          allowsInlineMediaPlayback
+          originWhitelist={['*']}
         />
       ) : (
         <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />

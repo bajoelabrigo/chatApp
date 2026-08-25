@@ -11,3 +11,6 @@ chatapp.apk
 Thumbs.db
 .vscode/
 .idea/
+
+.ssh-askpass.cmd
+diag-*.js

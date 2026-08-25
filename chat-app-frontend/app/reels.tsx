@@ -41,10 +41,15 @@ function ReelYouTube({ reel }: { reel: Reel }) {
   return (
     <WebView
       source={{
-        uri: `https://www.youtube.com/embed/${reel.youtubeVideoId}?autoplay=1&playsinline=1&rel=0&modestbranding=1`,
+        uri: `https://www.youtube.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1`,
       }}
       style={{ flex: 1, backgroundColor: '#000' }}
       allowsFullscreenVideo
+      javaScriptEnabled
+      domStorageEnabled
+      mediaPlaybackRequiresUserAction={false}
+      allowsInlineMediaPlayback
+      originWhitelist={['*']}
     />
   );
 }
