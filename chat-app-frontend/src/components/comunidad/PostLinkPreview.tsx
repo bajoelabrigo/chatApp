@@ -84,6 +84,9 @@ function GenericCard({ url, colors }: { url: string; colors: any }) {
     );
   }
 
+  // Tarjeta al estilo de Facebook: imagen grande y, bajo ella, una franja con
+  // el DOMINIO en mayúsculas y el título en negrita. Espejo de
+  // `holy_app/frontend/src/components/LinkPreview.jsx`.
   return (
     <TouchableOpacity
       activeOpacity={0.9}
@@ -93,22 +96,28 @@ function GenericCard({ url, colors }: { url: string; colors: any }) {
       {!!data.image && (
         <Image
           source={{ uri: cld(data.image, 360) }}
-          style={{ width: '100%', height: 180, backgroundColor: colors.bgTertiary }}
+          style={{ width: '100%', height: 200, backgroundColor: colors.bgTertiary }}
           resizeMode="cover"
         />
       )}
-      <View style={{ padding: 12 }}>
-        {!!data.title && (
-          <Text numberOfLines={2} style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14 }}>{data.title}</Text>
-        )}
-        {!!data.description && (
-          <Text numberOfLines={2} style={{ color: colors.textSecondary, fontSize: 12.5, marginTop: 4 }}>{data.description}</Text>
-        )}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10 }}>
-          <Text numberOfLines={1} style={{ color: colors.textMuted, fontSize: 11, flex: 1 }}>{data.publisher}</Text>
-          <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 5 }}>
-            <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Ver detalles</Text>
-          </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.bgTertiary, paddingHorizontal: 12, paddingVertical: 9 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={{ color: colors.textMuted, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            {hostnameOf(data.url)}
+          </Text>
+          {!!data.title && (
+            <Text numberOfLines={2} style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14.5, marginTop: 1 }}>
+              {data.title}
+            </Text>
+          )}
+          {!!data.description && (
+            <Text numberOfLines={1} style={{ color: colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              {data.description}
+            </Text>
+          )}
+        </View>
+        <View style={{ borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgPrimary, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 5 }}>
+          <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700' }}>Ver detalles</Text>
         </View>
       </View>
     </TouchableOpacity>

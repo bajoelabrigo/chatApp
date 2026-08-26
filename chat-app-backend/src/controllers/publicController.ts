@@ -200,9 +200,14 @@ async function buildPreview(rawUrl: string): Promise<LinkPreviewData | null> {
     });
     const ct = r.headers.get('content-type') || '';
     if (!r.ok || !ct.includes('html')) return null;
-    // Solo necesitamos el <head>; cortamos a 256 KB para no descargar de más.
+    // Solo necesitamos el <head>, así que se corta para no descargar de más.
+    // ⚠️ En YouTube NO basta con 256 KB: la página de un canal (/@handle) mete
+    // cientos de KB de JS en el propio <head> y los `og:` aparecen pasados los
+    // 700 KB — medido contra el canal real. Con el corte pequeño no se
+    // encontraba ningún meta y el enlace salía sin vista previa.
+    const maxHtml = /(^|\.)youtube\.com$/i.test(u.hostname) ? 2_000_000 : 262_144;
     const buf = await r.arrayBuffer();
-    html = Buffer.from(buf.slice(0, 262144)).toString('utf8');
+    html = Buffer.from(buf.slice(0, maxHtml)).toString('utf8');
   } catch {
     return null;
   }

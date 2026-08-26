@@ -15,7 +15,9 @@ const TTL = 1000 * 60 * 60 * 24 * 30; // 30 días para previas buenas
 // TTL corto para los "sin preview": un fallo pasajero no debe envenenar la
 // caché un mes entero.
 const TTL_NULL = 1000 * 60 * 30;
-const VERSION = 'v1';
+// v2: hasta v1 las URLs venían pegadas al texto por los `&nbsp;` de Quill y
+// se cachearon previas nulas; con clave nueva se vuelven a pedir.
+const VERSION = 'v2';
 const keyFor = (url: string) => `linkpreview:${VERSION}:${url}`;
 
 export interface LinkMeta {
@@ -117,9 +119,12 @@ export function useLinkMeta(url?: string | null) {
   return { data, loading };
 }
 
-// Mismo regex que `utils/extraLinks.js` de la web: no se cuela el marcado del
-// texto enriquecido porque excluye < > " '.
-const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+// ⚠️ El contenido de un post creado en la web es HTML de Quill, y Quill
+// escribe los espacios como `&nbsp;`. Un regex que solo excluya espacios y
+// `<>"'` hace que la URL se trague todo el texto siguiente
+// ("…/@canal&nbsp;ya&nbsp;llego&nbsp;a…") y la vista previa nunca resuelve.
+// Espejo de `holy_app/frontend/src/utils/extraLinks.js`.
+const URL_RE = /https?:\/\/(?:(?!&nbsp;|&#160;|&#xa0;|&quot;|&lt;|&gt;)[^\s<>"'])+/gi;
 
 /** URLs del texto de un post, sin repetir y sin la puntuación final. */
 export function extractLinks(text?: string | null): string[] {
@@ -127,7 +132,8 @@ export function extractLinks(text?: string | null): string[] {
   const found = text.match(URL_RE) ?? [];
   const out: string[] = [];
   for (const raw of found) {
-    const url = raw.replace(/[).,;:!?]+$/, '');
+    // `&amp;` es como viaja un `&` dentro del HTML; el destino real lo lleva sin escapar.
+    const url = raw.replace(/&amp;/gi, '&').replace(/[).,;:!?]+$/, '');
     if (!out.includes(url)) out.push(url);
   }
   return out;
