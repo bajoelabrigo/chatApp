@@ -42,7 +42,7 @@ function ReelYouTube({ reel }: { reel: Reel }) {
   return (
     <WebView
       source={{
-        uri: `https://www.youtube.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0`,
+        uri: `https://www.youtube-nocookie.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0`,
       }}
       style={{ flex: 1, backgroundColor: '#000' }}
       allowsFullscreenVideo
@@ -50,6 +50,9 @@ function ReelYouTube({ reel }: { reel: Reel }) {
       domStorageEnabled
       mediaPlaybackRequiresUserAction={false}
       allowsInlineMediaPlayback
+      thirdPartyCookiesEnabled
+      allowsProtectedMedia
+      userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
       originWhitelist={['*']}
     />
   );
@@ -211,7 +214,12 @@ export default function ReelsScreen() {
       <StatusBar style="light" />
       <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }} edges={['top']}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 }}>
-          <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800' }}>Reels</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800' }}>Reels</Text>
+          </View>
           <TouchableOpacity
             onPress={() => router.push('/reel-create' as any)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}

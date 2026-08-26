@@ -1,13 +1,14 @@
 import { useCallback } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useReelsStore } from '../../store/useReelsStore';
 import { getStories } from '../../services/reelService';
+import { VideoPreviewCard } from './VideoPreviewCard';
 
-// Carrusel de historias (avatares con anillo) que va arriba del feed. Tocar
-// una abre el visor; el "+" lleva a crear una historia (24 h).
+// Carrusel de historias (tarjetas pequeñas con previo de video) que va arriba
+// del feed, igual que la web. Tocar una abre el visor; "+" crea una historia.
 export function StoriesRow() {
   const { token } = useAuthStore();
   const { stories, setStories } = useReelsStore();
@@ -23,46 +24,27 @@ export function StoriesRow() {
 
   return (
     <View style={{ paddingVertical: 10 }}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 14 }}>
-        {/* Tu historia: crear */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 12 }}>
+        {/* Crear historia */}
         <TouchableOpacity
           onPress={() => router.push('/reel-create' as any)}
-          style={{ alignItems: 'center', width: 66, gap: 4 }}
+          activeOpacity={0.85}
+          style={{ width: 100, aspectRatio: 9 / 16, borderRadius: 14, borderWidth: 2, borderStyle: 'dashed', borderColor: '#3b82f6', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(59,130,246,0.08)' }}
         >
-          <View style={{ width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: '#3b82f6', alignItems: 'center', justifyContent: 'center' }}>
-            <Ionicons name="add" size={30} color="#3b82f6" />
+          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#3b82f6', alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="add" size={22} color="#fff" />
           </View>
-          <Text style={{ fontSize: 11, color: '#888', textAlign: 'center' }} numberOfLines={1}>Tu historia</Text>
+          <Text style={{ color: '#3b82f6', fontSize: 12, fontWeight: '700' }}>Crear</Text>
         </TouchableOpacity>
 
-        {/* Historias activas */}
-        {stories.map((story) => {
-          const seen = story.viewed;
-          return (
-            <TouchableOpacity
-              key={story.id}
-              onPress={() => router.push({ pathname: '/stories', params: { index: String(stories.indexOf(story)) } } as any)}
-              style={{ alignItems: 'center', width: 66, gap: 4 }}
-            >
-              <View
-                style={{
-                  width: 60, height: 60, borderRadius: 30, padding: 2.5,
-                  borderWidth: 2, borderColor: seen ? '#9ca3af' : '#3b82f6',
-                  backgroundColor: '#fff',
-                }}
-              >
-                {story.author.avatar ? (
-                  <Image source={{ uri: story.author.avatar }} style={{ width: '100%', height: '100%', borderRadius: 28 }} resizeMode="cover" />
-                ) : (
-                  <View style={{ flex: 1, borderRadius: 28, backgroundColor: '#d1d5db', alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontSize: 20, fontWeight: '700', color: '#4b5563' }}>{story.author.name[0]?.toUpperCase()}</Text>
-                  </View>
-                )}
-              </View>
-              <Text style={{ fontSize: 11, color: '#666', textAlign: 'center' }} numberOfLines={1}>{story.author.name}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        {stories.map((story) => (
+          <VideoPreviewCard
+            key={story.id}
+            reel={story}
+            size="sm"
+            onPress={() => router.push({ pathname: '/stories', params: { index: String(stories.indexOf(story)) } } as any)}
+          />
+        ))}
       </ScrollView>
     </View>
   );

@@ -83,3 +83,16 @@ export function videoPlayUrl(url: string | null | undefined): string {
   if (!url.includes(marker)) return url;
   return url.replace(marker, `${marker}f_mp4/`);
 }
+
+/**
+ * Miniatura (primer fotograma) de un video de Cloudinary, para las tarjetas de
+ * previo de historias/reels. `so_1` toma el fotograma 1 y `.jpg` lo entrega
+ * como imagen. Solo toca `/video/upload/`; cualquier otra URL (YouTube, previa
+ * local) se devuelve intacta.
+ */
+export function videoThumbUrl(url: string | null | undefined, width = 320): string {
+  if (!url || typeof url !== 'string') return url as string;
+  const marker = '/video/upload/';
+  if (!url.includes(marker)) return url;
+  return url.replace(marker, `${marker}so_1,w_${width}/`).replace(/\.[^/.]+$/, '.jpg');
+}

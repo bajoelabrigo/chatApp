@@ -95,13 +95,16 @@ function StoryItem({
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       {story.youtubeVideoId ? (
         <WebView
-          source={{ uri: `https://www.youtube.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0` }}
+          source={{ uri: `https://www.youtube-nocookie.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0` }}
           style={{ flex: 1 }}
           allowsFullscreenVideo
           javaScriptEnabled
           domStorageEnabled
           mediaPlaybackRequiresUserAction={false}
           allowsInlineMediaPlayback
+          thirdPartyCookiesEnabled
+          allowsProtectedMedia
+          userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
           originWhitelist={['*']}
         />
       ) : (

@@ -11,6 +11,7 @@ import { getFeed, type Post } from '../../src/services/postService';
 import { getConnectionRequests } from '../../src/services/connectionService';
 import { PostCard } from '../../src/components/comunidad/PostCard';
 import { StoriesRow } from '../../src/components/comunidad/StoriesRow';
+import { ReelsStrip } from '../../src/components/comunidad/ReelsStrip';
 
 const SCOPE_KEY = 'comunidad_feed_scope';
 const LIMIT = 10;
@@ -30,6 +31,7 @@ export default function ComunidadScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [mediaTab, setMediaTab] = useState<'stories' | 'reels'>('stories');
 
   const posts = scope === 'discover' ? discoverFeed : friendsFeed;
 
@@ -153,22 +155,20 @@ export default function ComunidadScreen() {
           contentContainerStyle={{ paddingBottom: 40 }}
           ListHeaderComponent={
             <>
-              {/* Historias (24 h) + acceso a Reels */}
-              <StoriesRow />
-              <TouchableOpacity
-                onPress={() => router.push('/reels' as any)}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 8,
-                  marginHorizontal: 14, marginBottom: 10,
-                  paddingHorizontal: 14, paddingVertical: 10,
-                  borderRadius: 14, backgroundColor: colors.bgSecondary,
-                  borderWidth: 1, borderColor: colors.border,
-                }}
-              >
-                <Ionicons name="play-circle" size={20} color={colors.accent} />
-                <Text style={{ color: colors.textPrimary, fontWeight: '700', flex: 1 }}>Reels</Text>
-                <Text style={{ color: colors.textMuted, fontSize: 12 }}>Ver →</Text>
-              </TouchableOpacity>
+              {/* Pestañas Historias / Reels (juntas, como en la web) */}
+              <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
+                {([['stories', 'Historias'], ['reels', 'Reels']] as const).map(([key, label]) => (
+                  <TouchableOpacity
+                    key={key}
+                    onPress={() => setMediaTab(key)}
+                    style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999, backgroundColor: mediaTab === key ? colors.accent : colors.bgSecondary }}
+                  >
+                    <Text style={{ color: mediaTab === key ? '#fff' : colors.textSecondary, fontWeight: '700', fontSize: 14 }}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {mediaTab === 'stories' ? <StoriesRow /> : <ReelsStrip />}
               <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
                 <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 }}>Publicaciones</Text>
               </View>
