@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -11,6 +11,8 @@ import { usePostsStore } from '../../src/store/usePostsStore';
 import { cld } from '../../src/lib/cldImage';
 import { uploadFile } from '../../src/services/uploadService';
 import { createPost } from '../../src/services/postService';
+import { PostLinkPreview } from '../../src/components/comunidad/PostLinkPreview';
+import { extractLinks } from '../../src/lib/linkMeta';
 import { emojiPickerTheme } from '../../src/components/comunidad/reactions';
 import BibleModal from '../../src/components/chat/BibleModal';
 import type { SharedBible } from '../../src/services/conversationService';
@@ -21,6 +23,14 @@ export default function CreatePostScreen() {
   const { setFeed, discoverFeed, friendsFeed } = usePostsStore();
 
   const [text, setText] = useState('');
+  // El texto se retrasa antes de buscar enlaces: si no, cada tecla de una URL a
+  // medio escribir ("https://h", "https://ho"…) sería una petición distinta.
+  const [settledText, setSettledText] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setSettledText(text), 700);
+    return () => clearTimeout(t);
+  }, [text]);
+  const links = useMemo(() => extractLinks(settledText), [settledText]);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -139,6 +149,11 @@ export default function CreatePostScreen() {
               maxLength={4000}
             />
           </View>
+
+          {/* Previa de los enlaces escritos: lo que se verá al publicar. */}
+          {links.map((link) => (
+            <PostLinkPreview key={link} url={link} colors={colors} />
+          ))}
 
           {imageUri && (
             <View style={{ marginTop: 16, position: 'relative' }}>

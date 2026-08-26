@@ -39,7 +39,12 @@ export function ReelsStrip() {
           <Text style={{ color: '#888', fontSize: 13, paddingVertical: 20 }}>Todavía no hay reels.</Text>
         ) : (
           reels.map((reel) => (
-            <VideoPreviewCard key={reel.id} reel={reel} size="lg" onPress={() => router.push('/reels' as any)} />
+            <VideoPreviewCard
+              key={reel.id}
+              reel={reel}
+              size="lg"
+              onPress={() => router.push({ pathname: '/reels', params: { id: reel.id } } as any)}
+            />
           ))
         )}
       </ScrollView>

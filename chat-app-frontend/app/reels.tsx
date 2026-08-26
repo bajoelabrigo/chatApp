@@ -3,7 +3,9 @@ import {
   View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+
+const goBack = () => { if (router.canGoBack()) router.back(); else router.replace('/comunidad' as any); };
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,6 +14,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, type Reel, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl } from '../src/lib/cldImage';
+import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { timeAgo } from '../src/utils/timeAgo';
 
 // Feed vertical de Reels (cortos permanentes, estilo Instagram) con barra de
@@ -22,10 +25,14 @@ function ReelVideo({ reel, active }: { reel: Reel; active: boolean }) {
   const player = useVideoPlayer(videoPlayUrl(reel.videoUrl), (p) => {
     p.loop = true;
   });
+  // Sin limpieza que toque el reproductor: al salir de la pantalla expo-video
+  // ya lo libera, y llamar `pause()` sobre un objeto liberado revienta el
+  // render (pantalla en blanco).
   useEffect(() => {
-    if (active) player.play();
-    else player.pause();
-    return () => player.pause();
+    try {
+      if (active) player.play();
+      else player.pause();
+    } catch { /* liberado */ }
   }, [active, player]);
   return (
     <VideoView
@@ -37,32 +44,60 @@ function ReelVideo({ reel, active }: { reel: Reel; active: boolean }) {
   );
 }
 
-function ReelYouTube({ reel }: { reel: Reel }) {
-  // En el WebView de Android el embed de YouTube da error 153. Más fiable:
-  // miniatura + botón de play que abre el video en la app/navegador de YouTube.
+function ReelYouTube({ reel, active }: { reel: Reel; active: boolean }) {
+  // Si el dueño del video prohibió el embed (101/150), el reproductor no puede
+  // hacer nada: se cae a la miniatura y se abre en la app de YouTube.
+  const [failed, setFailed] = useState<number | null>(null);
+  const [muted, setMuted] = useState(true);
+
+  if (failed !== null) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${reel.youtubeVideoId}`).catch(() => {})}
+        style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
+      >
+        {reel.thumbUrl ? (
+          <Image source={{ uri: reel.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+        ) : (
+          <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{reel.youtubeTitle}</Text>
+        )}
+        <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="play" size={32} color="#fff" />
+        </View>
+        <Text style={{ position: 'absolute', bottom: 150, color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
+          Ver en YouTube (no se pudo incrustar · {failed})
+        </Text>
+      </TouchableOpacity>
+    );
+  }
+
   return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${reel.youtubeVideoId}`).catch(() => {})}
-      style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
-    >
-      {reel.thumbUrl ? (
-        <Image source={{ uri: reel.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
-      ) : (
-        <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{reel.youtubeTitle}</Text>
-      )}
-      <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
-        <Ionicons name="play" size={32} color="#fff" />
-      </View>
-    </TouchableOpacity>
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <YouTubeEmbed
+        videoId={reel.youtubeVideoId!}
+        playing={active}
+        muted={muted}
+        onError={(code) => setFailed(code)}
+      />
+      <Pressable
+        onPress={() => setMuted((m) => !m)}
+        style={{ position: 'absolute', right: 14, top: 100, width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#fff" />
+      </Pressable>
+    </View>
   );
 }
 
 export default function ReelsScreen() {
   const { colors } = useTheme();
+  // Reel concreto al que hay que saltar (se toca una tarjeta del carrusel); sin
+  // él, el feed abría siempre por el primero.
+  const { id: openId } = useLocalSearchParams<{ id?: string }>();
   const { token, user } = useAuthStore();
   const { reels, setReels, appendReels, updateLike, updateViewed } = useReelsStore();
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(openId ?? null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -160,7 +195,7 @@ export default function ReelsScreen() {
     return (
       <View style={{ height, backgroundColor: '#000' }}>
         {item.youtubeVideoId ? (
-          <ReelYouTube reel={item} />
+          <ReelYouTube reel={item} active={isActive} />
         ) : (
           <ReelVideo reel={item} active={isActive} />
         )}
@@ -214,12 +249,16 @@ export default function ReelsScreen() {
       <StatusBar style="light" />
       <SafeAreaView style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }} edges={['top']}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="arrow-back" size={24} color="#fff" />
-            </TouchableOpacity>
+          {/* Flecha y título son un solo botón de volver: tocar "Reels"
+              también sale, que es lo que se espera al leerlo como cabecera. */}
+          <TouchableOpacity
+            onPress={goBack}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800' }}>Reels</Text>
-          </View>
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={() => router.push('/reel-create' as any)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}
@@ -237,8 +276,11 @@ export default function ReelsScreen() {
       ) : (
         <FlatList
           data={reels}
+          initialScrollIndex={Math.max(0, reels.findIndex((r) => r.id === openId))}
+          onScrollToIndexFailed={() => { /* getItemLayout lo evita; nunca romper la pantalla */ }}
           keyExtractor={(r) => r.id}
           renderItem={renderItem}
+          getItemLayout={(_, i) => ({ length: height, offset: height * i, index: i })}
           pagingEnabled
           showsVerticalScrollIndicator={false}
           onViewableItemsChanged={onViewableItemsChanged}

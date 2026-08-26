@@ -2,7 +2,7 @@ import 'react-native-get-random-values';
 import '../global.css';
 import { useEffect, useRef, useState } from 'react';
 import { Platform, View, Text, TouchableOpacity, Image, Modal } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { registerGlobals } from '@livekit/react-native';
 import { useAuthStore } from '../src/store/useAuthStore';
@@ -307,5 +307,28 @@ export default function RootLayout() {
     <ThemeProvider>
       <RootLayoutInner />
     </ThemeProvider>
+  );
+}
+
+// Pantalla de error en vez de pantalla en blanco. Un fallo al pintar cualquier
+// ruta dejaba la app en blanco sin ninguna pista (y sin adb no hay forma de
+// leer el log); así al menos se ve el motivo y se puede volver.
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#111', padding: 24, justifyContent: 'center' }}>
+      <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 10 }}>Algo falló en esta pantalla</Text>
+      <Text style={{ color: '#f87171', fontSize: 13, marginBottom: 20 }}>{error?.message ?? 'Error desconocido'}</Text>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <TouchableOpacity onPress={retry} style={{ backgroundColor: '#3b82f6', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 }}>
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Reintentar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/(tabs)/chats' as any); }}
+          style={{ backgroundColor: '#374151', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 20 }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700' }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }

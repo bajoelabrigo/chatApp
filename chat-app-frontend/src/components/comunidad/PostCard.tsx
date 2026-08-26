@@ -14,6 +14,8 @@ import { reactToPost, savePost, hidePost, deletePost, sharePost, type Post, type
 import { ReactionsBar, QuickReactionRow, emojiPickerTheme } from './reactions';
 import { ImageViewerModal } from './ImageViewerModal';
 import { PostOptionsSheet } from './PostOptionsSheet';
+import { PostLinkPreview } from './PostLinkPreview';
+import { extractLinks } from '../../lib/linkMeta';
 
 const LINKED_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   activity: 'flame', plan: 'book', prayer: 'hand-left', answered: 'checkmark-circle',
@@ -233,6 +235,7 @@ export function PostCard({
   const openProfile = () => router.push(`/profile/${post.author._id}` as any);
 
   const commentCount = post.comments?.length ?? 0;
+  const links = useMemo(() => extractLinks(post.content), [post.content]);
 
   return (
     <View style={{ backgroundColor: colors.bgSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 12 }}>
@@ -258,6 +261,12 @@ export function PostCard({
           <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
+
+      {/* Vistas previas de los enlaces del texto — igual que la web, van sobre
+          el texto (que sigue mostrando el enlace escrito). */}
+      {links.map((link) => (
+        <PostLinkPreview key={link} url={link} colors={colors} />
+      ))}
 
       {/* Texto */}
       {!!post.content && (

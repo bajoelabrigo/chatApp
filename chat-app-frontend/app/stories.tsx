@@ -4,6 +4,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+
+// Volver: si esta pantalla se abrió por enlace directo no hay historial y
+// `router.back()` deja la app en blanco.
+const goBack = () => { if (router.canGoBack()) router.back(); else router.replace('/comunidad' as any); };
 import { StatusBar } from 'expo-status-bar';
 import { Animated } from 'react-native';
 import { useEvent } from 'expo';
@@ -14,6 +18,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl } from '../src/lib/cldImage';
+import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
 // avanzar/retroceder, barra de acción (me gusta / comentar / compartir /
@@ -32,7 +37,15 @@ function StoryItem({
   const { updateLike, removeReel } = useReelsStore();
   const isMine = story.author.id === user?.id;
 
-  const player = useVideoPlayer(story.videoUrl ? videoPlayUrl(story.videoUrl) : '', (p) => { p.loop = false; });
+  // YouTube: progreso propio (el IFrame API lo reporta) y respaldo si el video
+  // no se puede incrustar (el dueño lo prohibió).
+  const [ytFailed, setYtFailed] = useState<number | null>(null);
+  const [ytMuted, setYtMuted] = useState(true);
+  const [ytProgress, setYtProgress] = useState(0);
+
+  // `null` cuando la historia es de YouTube: crear un reproductor con una
+  // fuente vacía es lo que dejaba la pantalla en blanco al cerrar.
+  const player = useVideoPlayer(story.videoUrl ? videoPlayUrl(story.videoUrl) : null, (p) => { p.loop = false; });
   const event = useEvent(player, 'timeUpdate', {
     currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0,
   });
@@ -40,25 +53,28 @@ function StoryItem({
   const duration = player.duration;
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
+  // Ver la nota de `reels.tsx`: nada de tocar el reproductor en la limpieza.
   useEffect(() => {
-    if (active && !paused) player.play();
-    else player.pause();
-    return () => player.pause();
-  }, [active, paused, player]);
+    if (!story.videoUrl) return;
+    try {
+      if (active && !paused) player.play();
+      else player.pause();
+    } catch { /* liberado */ }
+  }, [active, paused, player, story.videoUrl]);
 
   useEffect(() => {
     if (!story.videoUrl) return;
     const sub = player.addListener('playToEnd', () => onNext());
-    return () => sub.remove();
-  }, [player, onNext]);
+    return () => { try { sub.remove(); } catch { /* liberado */ } };
+  }, [player, onNext, story.videoUrl]);
 
-  // YouTube: sin eventos de progreso → barra indeterminada.
+  // Respaldo de YouTube (sin reproductor): barra indeterminada.
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    if (!story.youtubeVideoId) return;
+    if (!story.youtubeVideoId || ytFailed === null) return;
     Animated.loop(Animated.timing(pulse, { toValue: 1, duration: 8000, useNativeDriver: false })).start();
     return () => pulse.stopAnimation();
-  }, [story.youtubeVideoId]);
+  }, [story.youtubeVideoId, ytFailed]);
 
   const onLike = async () => {
     if (!token) return;
@@ -83,7 +99,7 @@ function StoryItem({
           try {
             await deleteReel(token, story.id);
             removeReel(story.id);
-            router.back();
+            goBack();
           } catch { /* best-effort */ }
         },
       },
@@ -93,20 +109,44 @@ function StoryItem({
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       {story.youtubeVideoId ? (
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${story.youtubeVideoId}`).catch(() => {})}
-          style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
-        >
-          {story.thumbUrl ? (
-            <Image source={{ uri: story.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
-          ) : (
-            <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{story.youtubeTitle}</Text>
-          )}
-          <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
-            <Ionicons name="play" size={32} color="#fff" />
-          </View>
-        </TouchableOpacity>
+        ytFailed !== null ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${story.youtubeVideoId}`).catch(() => {})}
+            // zIndex por ENCIMA de las zonas táctiles (zIndex 10): si no, la
+            // capa de avanzar/pausar se come el toque y el play no hace nada.
+            style={{ ...StyleSheet.absoluteFillObject, zIndex: 30, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {story.thumbUrl ? (
+              <Image source={{ uri: story.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+            ) : (
+              <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{story.youtubeTitle}</Text>
+            )}
+            <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="play" size={32} color="#fff" />
+            </View>
+            <Text style={{ position: 'absolute', bottom: 150, color: 'rgba(255,255,255,0.8)', fontSize: 12 }}>
+              Ver en YouTube (no se pudo incrustar · {ytFailed})
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <YouTubeEmbed
+              videoId={story.youtubeVideoId}
+              playing={active && !paused}
+              muted={ytMuted}
+              onEnd={onNext}
+              onError={(code) => setYtFailed(code)}
+              onProgress={(t, d) => setYtProgress(d > 0 ? Math.min(1, t / d) : 0)}
+            />
+            <Pressable
+              onPress={() => setYtMuted((m) => !m)}
+              style={{ position: 'absolute', right: 14, top: 100, zIndex: 20, width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Ionicons name={ytMuted ? 'volume-mute' : 'volume-high'} size={20} color="#fff" />
+            </Pressable>
+          </>
+        )
       ) : (
         <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />
       )}
@@ -114,7 +154,7 @@ function StoryItem({
       {/* Barra de progreso */}
       <View style={{ position: 'absolute', top: 46, left: 10, right: 10, flexDirection: 'row', gap: 4 }}>
         {Array.from({ length: total }).map((_, i) => {
-          const fill = i < index ? 1 : i > index ? 0 : story.youtubeVideoId ? null : progress;
+          const fill = i < index ? 1 : i > index ? 0 : story.youtubeVideoId ? (ytFailed !== null ? null : ytProgress) : progress;
           return (
             <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.35)', overflow: 'hidden' }}>
               {fill !== null ? (
@@ -145,7 +185,7 @@ function StoryItem({
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{story.viewCount}</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity onPress={goBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Ionicons name="close" size={26} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -213,8 +253,11 @@ export default function StoriesScreen() {
 
   const flatRef = useRef<FlatList<Reel>>(null);
   useEffect(() => {
+    // `findIndex` devuelve -1 si la historia desapareció del store; con ese
+    // índice `scrollToIndex` lanza y la pantalla se queda en blanco.
+    if (current < 0 || current >= stories.length) return;
     flatRef.current?.scrollToIndex({ index: current, animated: false });
-  }, [current]);
+  }, [current, stories.length]);
 
   const markViewed = useCallback((story: Reel) => {
     if (!token || viewedRef.current.has(story.id)) return;
@@ -225,7 +268,8 @@ export default function StoriesScreen() {
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     const item = viewableItems?.[0]?.item as Reel | undefined;
     if (item) {
-      setCurrent(stories.findIndex((s) => s.id === item.id));
+      const i = stories.findIndex((s) => s.id === item.id);
+      if (i >= 0) setCurrent(i);
       markViewed(item);
     }
   }).current;
@@ -257,7 +301,7 @@ export default function StoriesScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: '#888' }}>No hay historias activas</Text>
-        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 16, backgroundColor: colors.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 }}>
+        <TouchableOpacity onPress={goBack} style={{ marginTop: 16, backgroundColor: colors.accent, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 }}>
           <Text style={{ color: '#fff', fontWeight: '700' }}>Volver</Text>
         </TouchableOpacity>
       </View>
@@ -286,7 +330,7 @@ export default function StoriesScreen() {
               total={stories.length}
               active={index === current}
               paused={paused}
-              onNext={() => { if (index < stories.length - 1) { setPaused(false); flatRef.current?.scrollToIndex({ index: index + 1, animated: true }); } else router.back(); }}
+              onNext={() => { if (index < stories.length - 1) { setPaused(false); flatRef.current?.scrollToIndex({ index: index + 1, animated: true }); } else goBack(); }}
               onPrev={() => { if (index > 0) { setPaused(false); flatRef.current?.scrollToIndex({ index: index - 1, animated: true }); } }}
               onTogglePause={() => setPaused((p) => !p)}
               onOpenViewers={() => openViewers(item)}
