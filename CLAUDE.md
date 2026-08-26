@@ -138,13 +138,33 @@ Las 34 versiones actuales son **todas de dominio público**: `RV1909` (por defec
 
 ## Reels e Historias (cortos verticales ≤60 s, 2026-08-24)
 
-Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed vertical. Dos orígenes: video subido (reutiliza `/upload`) o **enlace de YouTube** (el cliente lo reproduce con WebView del embed; el backend resuelve ID/título/miniatura con `src/lib/youtube.ts` → oEmbed, cacheado 6 h).
+Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed vertical. Dos orígenes: video subido (reutiliza `/upload`) o **enlace de YouTube** (el móvil lo reproduce con `YouTubeEmbed` — ver el apartado siguiente, NO con el embed a pelo; el backend resuelve ID/título/miniatura con `src/lib/youtube.ts` → oEmbed, cacheado 6 h).
 
 - **Backend**: modelo `Reel` (`src/models/Reel.ts`, `expiresAt` con TTL para stories) + `reelController.ts` + rutas `/reels` (todas con auth): `GET /` (feed paginado), `GET /stories` (activas ≤24 h), `POST /` (crear con `videoUrl`/`cloudinaryPublicId` o `youtubeUrl`), `POST /:id/like` (toggle), `POST /:id/view` (una por usuario, `$ne` atómico), `GET /:id/views` (solo autor), `DELETE /:id`, `GET /youtube-meta?url=` (preview del formulario).
 - **Móvil**: rutas `app/reels.tsx` (feed vertical, autoplay con `expo-video`, like, paginación), `app/stories.tsx` (visor a pantalla completa con barras de progreso vía `useEvent(player,'timeUpdate')`, tocar lados para avanzar, sheet de viewers para las propias), `app/reel-create.tsx` (grabar con `expo-camera` ≤60 s / galería `expo-image-picker` / pegar enlace YouTube + caption + tipo). Carrusel `StoriesRow` como header de Comunidad + botón Reels.
 - **Web (`holy_app`)**: `src/lib/reelService.js` (usa `chatApi`, que ya adjunta el token) + `src/components/reels/` (`StoriesRow` en el feed de Home con `useQuery(["reelStories"])` refrescada cada minuto, `StoryViewer` overlay con `<video>` muted (autoplay exige muted en navegador) o iframe de YouTube, `ReelCreateModal` con file input (duración ≤60 s medida con `video.onloadedmetadata`) o enlace YouTube) + `src/pages/ReelsPage.jsx` (ruta `/reels`, un video a la vez con like y navegación ↑/↓). El visor y el modal viven en `Home.jsx`. (2026-08-24) En el feed de Home hay ahora **carruseles de previo de video**: `VideoPreviewCard` (hover reproduce el video silenciado; miniatura + iframe para YouTube, `<video preload="metadata">` para los subidos) en `StoriesRow` (tarjetas pequeñas `w-28 aspect-[9/16]` bajo el editor) y `ReelsStrip` (tarjetas grandes `w-40 aspect-[9/16]`) intercalado **tras cada 2 publicaciones** (`(i+1)%2===0` en `Home.jsx`); `SuggestedPeopleStrip` rediseñado.
 - **⚠️ Módulos nativos nuevos** (`expo-video`, `expo-camera`, `react-native-webview`): estos reels NO funcionan en Expo Go ni en el APK anterior — requieren `eas build` y reinstalar. Las pantallas se importan perezosamente (expo-router), así que la app vieja arranca bien; solo esas rutas fallarían.
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
+
+## YouTube en el móvil — el embed NUNCA como URL del WebView (2026-08-25)
+
+`source={{ uri: 'https://www.youtube.com/embed/<id>' }}` es lo que produce el **error 153**: así el WebView es el marco superior y el reproductor llega **sin referer**, o sea un embed en un sitio no autorizado. Añadir `mute=1`, `domStorageEnabled` u `originWhitelist` no toca la causa. Lo correcto es servir un **HTML propio con el iframe dentro** y declarar `baseUrl` (el documento pasa a tener ese origen) — es lo que hace `react-native-youtube-iframe`, replicado sin dependencia en `src/components/comunidad/YouTubeEmbed.tsx`.
+
+- **150/152/153 son la misma familia: «embed no autorizado en ESTE contexto»**, y el contexto es el par (origen del documento, host del reproductor). Por eso el componente prueba **contextos en cascada** (`CONTEXTS`): primero `holyholyholy.es` —donde el embed ya funciona en la web—, luego el host `youtube-nocookie.com`, y por último `youtube.com`. Solo si los tres fallan se propaga `onError`.
+- **El código de error distingue el diagnóstico**: que llegue un 15x significa que el reproductor CARGÓ (el IFrame API respondió) → no es códecs ni emulador. Un WebView sin códecs da 5 o pantalla negra. El respaldo enseña el número en pantalla a propósito: sin adb es la única forma de saberlo.
+- El `userAgent` se fija a Chrome de Android — el del WebView lleva `; wv` y YouTube trata esos embeds distinto.
+- **`pointerEvents="none"` en el WebView**: los toques son de las capas de acciones que van encima (me gusta, avanzar historia). Sin eso el WebView se los queda y un toque abre la app de YouTube. Corolario: cualquier respaldo tocable debe ir con `zIndex` **por encima** de la capa de zonas táctiles de `stories.tsx` (que es `zIndex: 10`), o el botón no hace nada.
+- El API se carga siempre desde `www.youtube.com/iframe_api`; el host alternativo solo se pasa como opción `host` del `YT.Player`.
+- El control (play/pausa, silencio) va por `injectJavaScript`, no recreando el HTML: recrearlo recarga el WebView. El HTML solo se rehace al cambiar de video o de contexto.
+
+**Dos trampas de estas pantallas que dejaban PANTALLA EN BLANCO** (un crash de render no enseña nada en producción):
+
+- **Nada de tocar el reproductor de `expo-video` en la limpieza de un efecto.** `return () => player.pause()` revienta al salir de la pantalla: expo-video ya liberó el objeto nativo y llamar un método sobre un `SharedObject` liberado lanza. Igual `useVideoPlayer('')` para las historias de YouTube — la fuente vacía es inválida; `VideoSource` admite **`null`**, que es lo que hay que pasar cuando no hay video.
+- **`scrollToIndex` con índice `-1`** (lo que devuelve `findIndex` si el elemento ya no está en el store) también lanza. Comprobar el rango antes.
+
+**Abrir la lista por el elemento tocado: `initialScrollIndex`, no un efecto.** El carrusel pasa el id (`router.push({ pathname: '/reels', params: { id } })`) y `reels.tsx` lo resuelve con `initialScrollIndex` + `getItemLayout`. Un efecto con `listRef.current?.scrollToIndex(...)` **no funciona** aquí: mientras la pantalla enseña el indicador de carga la `FlatList` no existe, el `?.` se traga la llamada en silencio y el "ya salté" queda marcado. La lista solo se monta cuando la carga terminó, así que en ese momento el índice ya es correcto — es lo que `stories.tsx` hacía bien desde el principio.
+
+**`ErrorBoundary` en `app/_layout.tsx`**: un fallo al pintar cualquier ruta muestra el mensaje del error en vez de dejar la app en blanco. Es el sustituto del logcat — **el adb de BlueStacks no sirve** para diagnosticar (`logcat` y `pull` fallan, y su `HD-Adb` se pelea por el puerto 5037 con el adb del SDK).
 
 ## Videos que no se veían en iPhone (2026-08-24) — `videoPlayUrl`
 
@@ -511,6 +531,7 @@ La metadata la sirve `GET /public/link-preview` del chat-backend (`publicControl
 - Las **miniaturas de TikTok van firmadas y caducan** (`x-expires`) — la caché de previas dura 30 días, así que `LinkPreview` esconde la imagen con `onError` en vez de dejar el icono de rota.
 - **`LiteYouTube` muestra el nombre del video** bajo la miniatura cuando se le pasa `url` (sin `url` no pinta pie: es lo que necesita `DownloadApp`, que ya pone su propio título). La metadata y su caché (`localStorage`, clave `linkpreview:<v>:`) viven en **`frontend/src/lib/linkMeta.js`** (`useLinkMeta`), compartidas con `LinkPreview` para no pedir dos veces lo mismo.
 - Los enlaces de YouTube que no dan `videoId` (listas, canales, `/shorts/` antes de soportarlo) **no pueden devolver `null`** o el enlace desaparece del post sin dejar rastro: caen a `LinkPreview`.
+- **En el móvil (2026-08-25)** los posts pintan la misma tarjeta: `src/lib/linkMeta.ts` (hook + `extractLinks`, caché en AsyncStorage 30 d / 30 min los fallos) y `src/components/comunidad/PostLinkPreview.tsx` (imagen, título, descripción, sitio y "Ver detalles"; YouTube como facade que al tocar monta `YouTubeEmbed`), usada en `PostCard` y en el editor `comunidad/create.tsx` —ahí con retardo de 700 ms, o cada tecla de una URL a medio escribir sería una petición—. **El móvil NO necesita el caso especial de materiales que sí tiene la web**: `/public/link-preview` ya devuelve título, descripción y portada de un `/materiales/:slug` (verificado contra producción).
 
 ## Tipos de mensaje nuevos (leer antes de añadir uno)
 
