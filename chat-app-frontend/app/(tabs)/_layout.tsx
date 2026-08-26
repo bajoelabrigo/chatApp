@@ -1,5 +1,6 @@
-import { Tabs } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
+import { Text, TouchableOpacity } from 'react-native';
 import { useTheme } from '../../src/context/ThemeContext';
 import FloatingTabBar from '../../src/components/FloatingTabBar';
 
@@ -73,6 +74,14 @@ export default function TabsLayout() {
         name="menu"
         options={{
           title: 'Menú',
+          headerRight: () => (
+            <TouchableOpacity
+              onPress={() => router.navigate('/(tabs)/ofrendas' as any)}
+              style={{ marginRight: 14, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: colors.accent }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Hazte socio</Text>
+            </TouchableOpacity>
+          ),
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'grid' : 'grid-outline'}

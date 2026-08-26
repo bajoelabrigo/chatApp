@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image, TextInput, Share, Alert,
+  View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image, TextInput, Share, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -8,7 +8,6 @@ import { StatusBar } from 'expo-status-bar';
 import { Animated } from 'react-native';
 import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
@@ -94,19 +93,20 @@ function StoryItem({
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
       {story.youtubeVideoId ? (
-        <WebView
-          source={{ uri: `https://www.youtube-nocookie.com/embed/${story.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0` }}
-          style={{ flex: 1 }}
-          allowsFullscreenVideo
-          javaScriptEnabled
-          domStorageEnabled
-          mediaPlaybackRequiresUserAction={false}
-          allowsInlineMediaPlayback
-          thirdPartyCookiesEnabled
-          allowsProtectedMedia
-          userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          originWhitelist={['*']}
-        />
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${story.youtubeVideoId}`).catch(() => {})}
+          style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
+        >
+          {story.thumbUrl ? (
+            <Image source={{ uri: story.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+          ) : (
+            <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{story.youtubeTitle}</Text>
+          )}
+          <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="play" size={32} color="#fff" />
+          </View>
+        </TouchableOpacity>
       ) : (
         <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />
       )}

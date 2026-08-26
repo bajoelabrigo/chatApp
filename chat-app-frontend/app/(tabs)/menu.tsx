@@ -7,10 +7,8 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { searchBackgroundPhotos } from '../../src/services/bibleService';
 import { PhotoCard, photoCardChip } from '../../src/components/bible/PhotoCard';
 
-// Mismo "chasis" visual que la portada de la Biblia (PhotoCard: foto + velo +
-// texto blanco) — antes esto era una rejilla de cajitas con borde, muy pobre
-// al lado del resto de la app. Cada tarjeta es una entrada de este arreglo:
-// agregar una nueva es sumar un objeto, sin tocar el layout.
+// Menú principal de la app: una tarjeta por sección. El orden de este arreglo
+// es el orden en pantalla. Agregar una sección es sumar un objeto.
 type MenuCard = {
   key: string;
   label: string;
@@ -19,15 +17,19 @@ type MenuCard = {
   icon: keyof typeof Ionicons.glyphMap;
   route: string;
   query: string; // búsqueda de foto de fondo (Pexels)
-  fallback: string; // color si no hay foto (sin red o sin PEXELS_API_KEY)
+  fallback: string; // color si no hay foto
 };
 
 const CARDS: MenuCard[] = [
-  { key: 'ajustes', label: 'Tu cuenta', title: 'Ajustes', subtitle: 'Perfil, notificaciones, privacidad', icon: 'settings-outline', route: '/menu/ajustes', query: 'minimal desk workspace', fallback: '#334155' },
   { key: 'comunidad', label: 'Comunidad', title: 'Comunidad', subtitle: 'Publicaciones y conexiones', icon: 'people-outline', route: '/comunidad', query: 'friends community people', fallback: '#7c3aed' },
-  { key: 'seminarios', label: 'Aprende', title: 'Seminarios', subtitle: 'Clases y constancias', icon: 'school-outline', route: '/seminarios', query: 'study graduation books', fallback: '#0f766e' },
+  { key: 'chat', label: 'Chat', title: 'Chat', subtitle: 'Tus conversaciones', icon: 'chatbubble-ellipses-outline', route: '/(tabs)/chats', query: 'chat messaging phone', fallback: '#0ea5e9' },
+  { key: 'biblia', label: 'Biblia', title: 'Biblia', subtitle: 'Leer la Palabra', icon: 'book-outline', route: '/(tabs)/bible', query: 'open bible pages', fallback: '#1d4ed8' },
   { key: 'materiales', label: 'Recursos', title: 'Materiales', subtitle: 'Estudios y libros', icon: 'library-outline', route: '/menu/materiales', query: 'library books reading', fallback: '#b45309' },
-  { key: 'informacion', label: 'Ayuda', title: 'Información', subtitle: 'Reglamentos, FAQ, contacto', icon: 'information-circle-outline', route: '/menu/informacion', query: 'open book candle', fallback: '#1d4ed8' },
+  { key: 'seminario', label: 'Aprende', title: 'Seminario', subtitle: 'Clases y constancias', icon: 'school-outline', route: '/seminarios', query: 'study graduation books', fallback: '#0f766e' },
+  { key: 'actividades', label: 'Actividades', title: 'Actividades', subtitle: 'Ayunos, vigilias y oración', icon: 'flame-outline', route: '/(tabs)/actividades', query: 'prayer candle faith', fallback: '#ea580c' },
+  { key: 'ofrendas', label: 'Ofrendas', title: 'Ofrendas', subtitle: 'Dar una ofrenda', icon: 'heart-outline', route: '/(tabs)/ofrendas', query: 'heart giving love', fallback: '#dc2626' },
+  { key: 'donaciones', label: 'Donaciones', title: 'Donaciones', subtitle: 'Apoyar el ministerio', icon: 'gift-outline', route: '/(tabs)/ofrendas', query: 'gift donation support', fallback: '#16a34a' },
+  { key: 'ajustes', label: 'Tu cuenta', title: 'Ajustes', subtitle: 'Perfil, notificaciones, privacidad', icon: 'settings-outline', route: '/menu/ajustes', query: 'minimal desk workspace', fallback: '#334155' },
 ];
 
 export default function MenuScreen() {

@@ -3,5 +3,5 @@ import { useAuthStore } from '../src/store/useAuthStore';
 
 export default function Index() {
   const { isSignedIn } = useAuthStore();
-  return <Redirect href={isSignedIn ? '/(tabs)/chats' : '/(auth)/sign-in'} />;
+  return <Redirect href={isSignedIn ? '/(tabs)/menu' : '/(auth)/sign-in'} />;
 }

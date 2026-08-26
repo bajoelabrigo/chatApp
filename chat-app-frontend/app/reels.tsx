@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert,
+  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
@@ -39,22 +38,23 @@ function ReelVideo({ reel, active }: { reel: Reel; active: boolean }) {
 }
 
 function ReelYouTube({ reel }: { reel: Reel }) {
+  // En el WebView de Android el embed de YouTube da error 153. Más fiable:
+  // miniatura + botón de play que abre el video en la app/navegador de YouTube.
   return (
-    <WebView
-      source={{
-        uri: `https://www.youtube-nocookie.com/embed/${reel.youtubeVideoId}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1&controls=0`,
-      }}
-      style={{ flex: 1, backgroundColor: '#000' }}
-      allowsFullscreenVideo
-      javaScriptEnabled
-      domStorageEnabled
-      mediaPlaybackRequiresUserAction={false}
-      allowsInlineMediaPlayback
-      thirdPartyCookiesEnabled
-      allowsProtectedMedia
-      userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-      originWhitelist={['*']}
-    />
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${reel.youtubeVideoId}`).catch(() => {})}
+      style={{ flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}
+    >
+      {reel.thumbUrl ? (
+        <Image source={{ uri: reel.thumbUrl }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+      ) : (
+        <Text style={{ color: '#fff', fontWeight: '700', paddingHorizontal: 20, textAlign: 'center' }}>{reel.youtubeTitle}</Text>
+      )}
+      <View style={{ position: 'absolute', width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name="play" size={32} color="#fff" />
+      </View>
+    </TouchableOpacity>
   );
 }
 
