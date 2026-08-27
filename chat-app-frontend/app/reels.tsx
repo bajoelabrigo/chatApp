@@ -260,7 +260,7 @@ export default function ReelsScreen() {
             <Text style={{ color: '#fff', fontSize: 22, fontWeight: '800' }}>Reels</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={() => router.push('/reel-create' as any)}
+            onPress={() => router.push({ pathname: '/reel-create', params: { kind: 'reel' } } as any)}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.accent, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}
           >
             <Ionicons name="add" size={20} color="#fff" />

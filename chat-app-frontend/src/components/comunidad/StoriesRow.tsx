@@ -27,7 +27,7 @@ export function StoriesRow() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 12 }}>
         {/* Crear historia */}
         <TouchableOpacity
-          onPress={() => router.push('/reel-create' as any)}
+          onPress={() => router.push({ pathname: '/reel-create', params: { kind: 'story' } } as any)}
           activeOpacity={0.85}
           style={{ width: 100, aspectRatio: 9 / 16, borderRadius: 14, borderWidth: 2, borderStyle: 'dashed', borderColor: '#3b82f6', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: 'rgba(59,130,246,0.08)' }}
         >

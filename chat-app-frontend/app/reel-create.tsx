@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, TextInput, ActivityIndicator, Alert, ScrollView, StyleSheet, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -25,8 +25,13 @@ export default function ReelCreateScreen() {
   const { token, user } = useAuthStore();
   const upsertReel = useReelsStore((s) => s.upsertReel);
 
+  // El tipo lo decide de dónde se venga: "Crear" en la fila de HISTORIAS crea
+  // una historia. Estaba fijo en 'reel', así que todo lo publicado desde ahí
+  // nacía como reel y el carrusel de historias se quedaba vacío pasara lo que
+  // pasara (0 historias en la base a 2026-08-26, con reels publicados).
+  const { kind: kindParam } = useLocalSearchParams<{ kind?: string }>();
   const [tab, setTab] = useState<Tab>('camera');
-  const [kind, setKind] = useState<ReelKind>('reel');
+  const [kind, setKind] = useState<ReelKind>(kindParam === 'story' ? 'story' : 'reel');
   const [caption, setCaption] = useState('');
   const [publishing, setPublishing] = useState(false);
 

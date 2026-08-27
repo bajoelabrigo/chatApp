@@ -17,6 +17,7 @@ interface RawItem {
   text?: unknown;
   color?: unknown;
   note?: unknown;
+  group?: unknown;
   tags?: unknown;
   updatedAt?: unknown;
 }
@@ -97,6 +98,9 @@ function normAnnotation(raw: RawItem) {
     chapter: str(raw.chapter),
     verse: str(raw.verse),
     note,
+    // Nota de pasaje: varios versículos comparten texto y `group`. Vacío = nota
+    // suelta (todas las de antes de 2026-08-26).
+    group: str(raw.group, 64),
     updatedAt: toDate(raw.updatedAt),
   };
 }

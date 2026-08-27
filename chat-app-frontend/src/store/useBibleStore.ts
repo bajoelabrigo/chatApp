@@ -50,8 +50,18 @@ export interface BibleAnnotation {
   chapter: string;
   verse: string;
   note: string;
+  // Nota de PASAJE: al anotar "Juan 3:16-18" se guarda el mismo texto en los
+  // tres versículos (así aparece junto a cualquiera de ellos y el resaltado
+  // sigue siendo de cada uno) con este `group` común. Editar o borrar desde
+  // cualquiera de ellos afecta al grupo entero, y la lista de notas lo enseña
+  // una sola vez. Sin `group` = nota suelta (todas las anteriores).
+  group?: string;
   updatedAt: string;
 }
+
+/** Id de grupo para una nota de pasaje. */
+export const newNoteGroup = () =>
+  `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 const FAV_KEY        = 'bible_favorites';
 const HIGHLIGHT_KEY  = 'bible_highlights';
@@ -123,6 +133,16 @@ interface BibleStoreState {
   saveAnnotation: (a: Omit<BibleAnnotation, 'updatedAt'> & { note: string }) => Promise<void>;
   deleteAnnotation: (id: string) => Promise<void>;
   getAnnotation: (id: string) => BibleAnnotation | undefined;
+  /** Guarda UNA nota en todos los versículos del pasaje (mismo `group`). */
+  savePassageAnnotation: (
+    verses: { book: string; chapter: string; verse: string }[],
+    note: string,
+    group?: string
+  ) => Promise<void>;
+  /** Borra la nota del pasaje entero. */
+  deleteAnnotationGroup: (group: string) => Promise<void>;
+  /** Los versículos que comparten una nota de pasaje, en orden. */
+  getAnnotationsByGroup: (group: string) => BibleAnnotation[];
 
   loadFontSize: () => Promise<void>;
   setFontSize: (n: number) => Promise<void>;
@@ -312,6 +332,72 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
   },
 
   getAnnotation: (id) => get().annotations.find((a) => a.id === id),
+
+  // Nota de PASAJE: el mismo texto en cada versículo seleccionado, unidos por
+  // `group`. Se escribe de una vez (un solo AsyncStorage.setItem) en lugar de
+  // llamar N veces a `saveAnnotation`: cada llamada lee el estado anterior y con
+  // varias seguidas se pisarían entre ellas.
+  //
+  // `group` se pasa al EDITAR (conserva el del pasaje) y se omite al crear.
+  savePassageAnnotation: async (verses, note, group) => {
+    const text = note.trim();
+    if (!verses.length || !text) return;
+    const g = group || newNoteGroup();
+    const now = new Date().toISOString();
+    const entries: BibleAnnotation[] = verses.map((v) => ({
+      id: `${v.book}:${v.chapter}:${v.verse}`,
+      book: v.book,
+      chapter: v.chapter,
+      verse: v.verse,
+      note: text,
+      group: g,
+      updatedAt: now,
+    }));
+    const ids = new Set(entries.map((e) => e.id));
+    // Al editar, un versículo que se haya quitado de la selección deja de tener
+    // la nota: fuera también los del grupo que ya no estén.
+    const updated = [
+      ...entries,
+      ...get().annotations.filter((a) => !ids.has(a.id) && (!g || a.group !== g)),
+    ];
+    const dropped = group
+      ? get().annotations.filter((a) => a.group === g && !ids.has(a.id))
+      : [];
+
+    set({ annotations: updated });
+    await AsyncStorage.setItem(ANNOTATION_KEY, JSON.stringify(updated));
+    for (const e of entries) await clearDeletion('annotation', e.id);
+    for (const d of dropped) await recordDeletion('annotation', d.id);
+
+    const t = get().authToken;
+    if (t) {
+      for (const e of entries) pushAnnotation(t, e).catch(() => {});
+      for (const d of dropped) deleteAnnotationRemote(t, d.id).catch(() => {});
+    }
+  },
+
+  deleteAnnotationGroup: async (group) => {
+    if (!group) return;
+    const gone = get().annotations.filter((a) => a.group === group);
+    if (!gone.length) return;
+    const updated = get().annotations.filter((a) => a.group !== group);
+    set({ annotations: updated });
+    await AsyncStorage.setItem(ANNOTATION_KEY, JSON.stringify(updated));
+    for (const a of gone) await recordDeletion('annotation', a.id);
+    const t = get().authToken;
+    if (t) for (const a of gone) deleteAnnotationRemote(t, a.id).catch(() => {});
+  },
+
+  // Ordenados por capítulo y versículo: es como se nombra el pasaje
+  // ("Juan 3:16-18") y como se listan sus versículos.
+  getAnnotationsByGroup: (group) =>
+    group
+      ? get()
+          .annotations.filter((a) => a.group === group)
+          .sort(
+            (a, b) => Number(a.chapter) - Number(b.chapter) || Number(a.verse) - Number(b.verse)
+          )
+      : [],
 
   // ── Font size ──────────────────────────────────────────
 

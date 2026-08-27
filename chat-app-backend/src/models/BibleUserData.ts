@@ -29,12 +29,19 @@ export interface IBibleHighlight {
   updatedAt: Date;
 }
 
+// `group` es lo que convierte varias notas en UNA nota de pasaje: al anotar
+// "Juan 3:16-18" se guarda la MISMA nota en los tres versículos (así el texto
+// sale al lado de cualquiera de ellos y el resaltado sigue siendo por versículo)
+// con un `group` común. Los clientes editan y borran el grupo entero, y en la
+// lista de notas lo enseñan una sola vez. Las notas de antes no lo traen: un
+// grupo vacío es una nota suelta de un solo versículo.
 export interface IBibleAnnotation {
   id: string;
   book: string;
   chapter: string;
   verse: string;
   note: string;
+  group: string;
   updatedAt: Date;
 }
 
@@ -125,6 +132,7 @@ const AnnotationSchema = new Schema<IBibleAnnotation>(
     chapter: { type: String, default: '' },
     verse: { type: String, default: '' },
     note: { type: String, default: '' },
+    group: { type: String, default: '' },
     updatedAt: { type: Date, default: Date.now },
   },
   { _id: false }

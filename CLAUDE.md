@@ -143,6 +143,20 @@ Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed ve
 - **Backend**: modelo `Reel` (`src/models/Reel.ts`, `expiresAt` con TTL para stories) + `reelController.ts` + rutas `/reels` (todas con auth): `GET /` (feed paginado), `GET /stories` (activas ≤24 h), `POST /` (crear con `videoUrl`/`cloudinaryPublicId` o `youtubeUrl`), `POST /:id/like` (toggle), `POST /:id/view` (una por usuario, `$ne` atómico), `GET /:id/views` (solo autor), `DELETE /:id`, `GET /youtube-meta?url=` (preview del formulario).
 - **Móvil**: rutas `app/reels.tsx` (feed vertical, autoplay con `expo-video`, like, paginación), `app/stories.tsx` (visor a pantalla completa con barras de progreso vía `useEvent(player,'timeUpdate')`, tocar lados para avanzar, sheet de viewers para las propias), `app/reel-create.tsx` (grabar con `expo-camera` ≤60 s / galería `expo-image-picker` / pegar enlace YouTube + caption + tipo). Carrusel `StoriesRow` como header de Comunidad + botón Reels.
 - **Web (`holy_app`)**: `src/lib/reelService.js` (usa `chatApi`, que ya adjunta el token) + `src/components/reels/` (`StoriesRow` en el feed de Home con `useQuery(["reelStories"])` refrescada cada minuto, `StoryViewer` overlay con `<video>` muted (autoplay exige muted en navegador) o iframe de YouTube, `ReelCreateModal` con file input (duración ≤60 s medida con `video.onloadedmetadata`) o enlace YouTube) + `src/pages/ReelsPage.jsx` (ruta `/reels`, un video a la vez con like y navegación ↑/↓). El visor y el modal viven en `Home.jsx`. (2026-08-24) En el feed de Home hay ahora **carruseles de previo de video**: `VideoPreviewCard` (hover reproduce el video silenciado; miniatura + iframe para YouTube, `<video preload="metadata">` para los subidos) en `StoriesRow` (tarjetas pequeñas `w-28 aspect-[9/16]` bajo el editor) y `ReelsStrip` (tarjetas grandes `w-40 aspect-[9/16]`) intercalado **tras cada 2 publicaciones** (`(i+1)%2===0` en `Home.jsx`); `SuggestedPeopleStrip` rediseñado.
+- **El tipo (`kind`) lo decide DE DÓNDE se pulse "Crear"** (arreglado 2026-08-26).
+  Los dos clientes abrían el formulario con `kind: 'reel'` fijo, también al
+  pulsar "Crear" dentro de la fila de HISTORIAS: todo lo publicado desde ahí
+  nacía como reel y el carrusel de historias se quedaba vacío pasara lo que
+  pasara (medido en producción: 4 reels, **0 historias**, y el usuario reportó
+  "no se muestran las historias"). Web: `Home.jsx` pasa
+  `defaultKind={mediaTab === "stories" ? "story" : "reel"}` **y monta el modal
+  solo al abrirlo** — `defaultKind` es el valor inicial de un `useState`, así que
+  con el modal siempre montado se quedaba con el tipo de la primera vez (y con el
+  borrador anterior dentro). Móvil: `reel-create` lee `kind` de los params y
+  `StoriesRow`/`reels.tsx` lo pasan.
+- **El feed y la página /reels usan claves de caché DISTINTAS** (`["reelFeed"]` y
+  `["reels"]`): al publicar hay que invalidar las dos, o el reel recién creado no
+  aparece en el feed hasta recargar.
 - **⚠️ Módulos nativos nuevos** (`expo-video`, `expo-camera`, `react-native-webview`): estos reels NO funcionan en Expo Go ni en el APK anterior — requieren `eas build` y reinstalar. Las pantallas se importan perezosamente (expo-router), así que la app vieja arranca bien; solo esas rutas fallarían.
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
 - **Navegación estilo Facebook en la web (2026-08-26)**: `frontend/src/lib/useSwipeNav.js` (teclado, rueda y deslizar con el dedo) lo usan `StoryViewer` (eje x) y `ReelsPage` (eje y). El gesto exige que el **eje dominante** coincida —si no, un deslizamiento en diagonal salta de historia— y bloquea la rueda 500 ms, porque un solo gesto de trackpad emite decenas de eventos; se desactiva con un modal abierto (comentarios, "quién la vio") o las flechas del teclado navegarían mientras se escribe. **Las flechas visibles son `md:` solamente**: en el móvil se desliza y unos botones ahí taparían el video. Los carruseles usan `components/reels/CarouselRow.jsx`, que mide con `ResizeObserver` (el contenido llega por consulta, no basta medir al montar) y solo enciende la flecha del lado que tiene recorrido. En `StoriesRow`, **"Crear" y "Reels" van FUERA del contenedor que se desplaza**: son accesos, y con unas cuantas historias se perdían de vista.
@@ -637,6 +651,51 @@ Hasta 2026-07-14 el feed de alguien con sesión se limitaba a `[él + sus amigos
 - **Desplegar el backend ANTES que la web** (misma trampa que los tipos de mensaje nuevos): con el `createPost` viejo, `linked.verses` se ignora, `linked.book` es `undefined` → no se arma la tarjeta y un post que solo lleve el pasaje se rechaza con 400 "post vacío".
 - **La tarjeta es un solo componente**: `components/bible/BibleLinkedCard.jsx` — feed (`Posts.jsx`), detalle (`PostDetailModal.jsx`) y la previa del editor (`PostCreation.jsx`). Antes el diseño estaba copiado en los dos primeros y la previa era un tercero distinto: lo que veías al escribir no era lo que se publicaba.
 - El toggle "Tarjeta" de `BibleVerseModal` nace **apagado** (insertar texto es lo que espera quien abre la Biblia mientras escribe). Solo nace encendido desde "Añadir otro versículo", que ya presupone la tarjeta.
+
+## Elegir VARIOS versículos — resaltado en bloque y nota de pasaje (2026-08-26)
+
+Hasta esta fecha ninguno de los dos clientes dejaba marcar un pasaje: la web solo
+tenía `selectedVerse` (uno), y el móvil tenía `selectedVerses` (un Map) pero **sin
+forma de llegar a él** — la hoja de acciones era un `Modal` a pantalla completa,
+así que tocar un segundo versículo era imposible y cualquier toque fuera vaciaba
+la selección. Resaltar tres versículos era abrir el menú de cada uno y repetir el
+color a mano.
+
+- **La hoja/barra de acciones NO puede tapar el texto ni interceptar los toques.**
+  Móvil: `VerseActionsSheet` tiene modo **`inline`** (posición absoluta abajo, sin
+  fondo) que se usa **solo en la lectura**; en las listas (Buscar, Favoritos,
+  Temas) sigue siendo `Modal`, que allí no estorba. Web: `PassageActionsBar`
+  (`fixed bottom-0`, `z-[92]` — por encima del banner de materiales, que es
+  `z-[90]`). Las dos avisan "Toca más versículos para añadirlos al pasaje": sin
+  esa línea nadie descubre que se pueden encadenar.
+- **La lista necesita hueco abajo** (`paddingBottom` en el móvil, `pb-40` en la
+  web) o los últimos versículos quedan debajo de la barra y no hay forma de
+  tocarlos.
+- **Una NOTA DE PASAJE se guarda repetida en cada versículo que abarca**, con un
+  campo nuevo `group` común (`BibleUserData.annotations[].group`, string vacío =
+  nota suelta). Repetirla es lo que hace que salga al tocar *cualquiera* de sus
+  versículos y que el resaltado siga siendo de cada uno; `group` es lo que
+  permite editarla y borrarla como una sola cosa. Fuente: `savePassageAnnotation`
+  / `deleteAnnotationGroup` / `getAnnotationsByGroup`, **espejadas** en
+  `chat-app-frontend/src/store/useBibleStore.ts` y
+  `holy_app/frontend/src/components/bibleService.js`.
+- **Se escribe de UNA vez, no llamando N veces a `saveAnnotation`**: cada llamada
+  relee el estado anterior (AsyncStorage/localStorage) y varias seguidas se
+  pisarían entre ellas.
+- **Al editar desde un solo versículo hay que recuperar el pasaje entero**
+  (`getAnnotationsByGroup`), o al guardar la nota se queda reducida a ese
+  versículo. Lo guardado es la referencia, no el texto: el texto se busca en el
+  capítulo abierto (`getVerseText` en el hook de la web).
+- **En la lista "Mis notas" una nota de pasaje sale UNA vez** (se agrupa por
+  `group` y manda su primer versículo), y en la lectura del móvil la vista previa
+  se pinta solo en el primer versículo del grupo (`noteAnchors`) — si no, el
+  mismo texto aparecía repetido bajo cada versículo. El contador de la pestaña
+  cuenta notas, no versículos anotados.
+- **Orden de despliegue: BACKEND PRIMERO** (campo nuevo en un documento
+  existente). Mongoose descarta en silencio lo que no está en el esquema: con el
+  backend viejo, `group` se pierde al sincronizar y la nota de pasaje se degrada
+  a notas sueltas idénticas.
+- Cubierto por `holy_app/frontend/scripts/passageSelection.test.mjs`.
 
 ## Acciones de un versículo — `useVerseActions`
 

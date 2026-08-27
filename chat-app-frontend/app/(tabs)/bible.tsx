@@ -25,7 +25,7 @@ import { getPrayerFeed as getPrayerFeedApi } from '../../src/services/dailyPopup
 import type { PrayerFeed } from '../../src/services/dailyPopupService';
 import { uploadFile } from '../../src/services/uploadService';
 import { useBibleStore } from '../../src/store/useBibleStore';
-import type { BibleFavorite } from '../../src/store/useBibleStore';
+import type { BibleFavorite, BibleAnnotation } from '../../src/store/useBibleStore';
 import {
   fetchVersions,
   fetchBooks,
@@ -142,6 +142,7 @@ export default function BibleScreen() {
     addFavorite, removeFavorite, isFavorite,
     setHighlight, removeHighlight, getHighlight,
     saveAnnotation, deleteAnnotation, getAnnotation,
+    savePassageAnnotation, deleteAnnotationGroup, getAnnotationsByGroup,
     setFontSize, setSelectedVersion, syncWithServer,
     lastRead, loadLastRead, setLastRead, clearLastRead,
     setVerseTags, getVerseTags,
@@ -181,7 +182,11 @@ export default function BibleScreen() {
   const [comparePickerOpen, setComparePickerOpen] = useState(false);
 
   // Annotation modal state
-  const [annotationTarget, setAnnotationTarget] = useState<VerseItem | null>(null);
+  // Los versículos que abarca la nota que se está escribiendo (una sola nota
+  // para todo el pasaje) y el grupo al que pertenece si se está EDITANDO una ya
+  // guardada. Lista vacía = modal cerrado.
+  const [annotationTargets, setAnnotationTargets] = useState<VerseItem[]>([]);
+  const [annotationGroup, setAnnotationGroup] = useState<string | null>(null);
   const [annotationText, setAnnotationText] = useState('');
 
   // Dots menu
@@ -754,10 +759,35 @@ export default function BibleScreen() {
     }
     const q = fold(noteQuery.trim());
     const list = q ? annotations.filter((a) => fold(a.note ?? '').includes(q)) : annotations;
-    return [...list].sort(
+
+    // Una nota de PASAJE está guardada en cada versículo que abarca (para que
+    // salga al tocar cualquiera de ellos), así que aquí tiene que aparecer UNA
+    // sola vez. Se agrupa por `group` y manda el primer versículo; las notas
+    // sueltas (sin grupo) se agrupan consigo mismas y no cambian.
+    const byGroup = new Map<string, BibleAnnotation[]>();
+    for (const a of list) {
+      const g = a.group || a.id;
+      const arr = byGroup.get(g);
+      if (arr) arr.push(a);
+      else byGroup.set(g, [a]);
+    }
+    const grouped = [...byGroup.values()].map((arr) => {
+      const sorted = [...arr].sort(
+        (x, y) => Number(x.chapter) - Number(y.chapter) || Number(x.verse) - Number(y.verse)
+      );
+      return { ...sorted[0], groupVerses: sorted };
+    });
+    return grouped.sort(
       (a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime()
     );
   }, [notesTab, highlights, annotations, colorFilter, noteQuery]);
+
+  // Cuántas NOTAS hay (no cuántos versículos anotados): una nota de pasaje
+  // cuenta una sola vez, igual que se lista.
+  const noteCount = useMemo(
+    () => new Set(annotations.map((a) => a.group || a.id)).size,
+    [annotations]
+  );
 
   useEffect(() => {
     if (view !== 'notes' || !token || notesItems.length === 0) return;
@@ -1227,7 +1257,7 @@ export default function BibleScreen() {
   };
 
   const handleShare = async () => {
-    const list = Array.from(selectedVerses.values());
+    const list = selectedList; // en orden bíblico, no en el que se fueron tocando
     if (!list.length) return;
     const vName = VERSION_META[selectedVersion]?.name ?? selectedVersion;
     await Share.share({ message: formatForShare(list, vName, selectedVersion) });
@@ -1262,9 +1292,7 @@ export default function BibleScreen() {
   };
 
   const handleSendToChat = () => {
-    const list = Array.from(selectedVerses.values())
-      .slice()
-      .sort((a, b) => Number(a.chapter) - Number(b.chapter) || Number(a.verse) - Number(b.verse));
+    const list = selectedList;
     if (!list.length) return;
     const first = list[0];
     setSendChatPassage({
@@ -1301,32 +1329,77 @@ export default function BibleScreen() {
     Alert.alert('Enviado', `Pasaje enviado a ${conv.isGroup ? conv.groupName ?? 'el grupo' : 'el chat'}.`);
   };
 
-  const openAnnotation = (v: VerseItem) => {
-    const id = `${v.book}:${v.chapter}:${v.verse}`;
-    const existing = getAnnotation(id);
+  const sortVerses = (list: VerseItem[]) =>
+    [...list].sort(
+      (a, b) => Number(a.chapter) - Number(b.chapter) || Number(a.verse) - Number(b.verse)
+    );
+
+  // Abre la nota de uno o de varios versículos. Si alguno de ellos YA tiene
+  // nota, se edita esa (con todos los versículos que abarque) en vez de escribir
+  // otra encima: una nota de pasaje se guarda repetida en cada versículo, así
+  // que tocar cualquiera de ellos tiene que llevar a la misma.
+  const openAnnotation = (input: VerseItem | VerseItem[]) => {
+    const list = sortVerses(Array.isArray(input) ? input : [input]);
+    if (!list.length) return;
+
+    const existing = list
+      .map((v) => getAnnotation(`${v.book}:${v.chapter}:${v.verse}`))
+      .find(Boolean);
+    const group = existing?.group ?? null;
+
+    // Editando una nota de pasaje desde un solo versículo: se recupera el pasaje
+    // entero. El texto de cada versículo se busca en el capítulo abierto (la
+    // nota guardada no lo lleva); si no está, se muestra solo la referencia.
+    let targets = list;
+    if (group && list.length === 1) {
+      const groupVerses = getAnnotationsByGroup(group);
+      if (groupVerses.length > 1) {
+        targets = groupVerses.map((a) => ({
+          book: a.book,
+          chapter: a.chapter,
+          verse: a.verse,
+          text:
+            a.book === selectedBook && a.chapter === selectedChapter
+              ? verses.find((x) => x.verse === a.verse)?.text ?? ''
+              : '',
+        }));
+      }
+    }
+
     setAnnotationText(existing?.note ?? '');
-    setAnnotationTarget(v);
+    setAnnotationGroup(group);
+    setAnnotationTargets(targets);
+  };
+
+  const closeAnnotation = () => {
+    setAnnotationTargets([]);
+    setAnnotationGroup(null);
+    setAnnotationText('');
   };
 
   const handleSaveAnnotation = async () => {
-    if (!annotationTarget) return;
-    const id = `${annotationTarget.book}:${annotationTarget.chapter}:${annotationTarget.verse}`;
-    if (annotationText.trim()) {
-      await saveAnnotation({ id, ...annotationTarget, note: annotationText.trim() });
+    const targets = annotationTargets; // capturar ANTES de los setters (nueva arch)
+    const group = annotationGroup;
+    if (!targets.length) return;
+    const text = annotationText.trim();
+    if (text) {
+      await savePassageAnnotation(targets, text, group ?? undefined);
+    } else if (group) {
+      await deleteAnnotationGroup(group);
     } else {
-      await deleteAnnotation(id);
+      for (const v of targets) await deleteAnnotation(`${v.book}:${v.chapter}:${v.verse}`);
     }
-    setAnnotationTarget(null);
-    setAnnotationText('');
+    closeAnnotation();
     setSelectedVerses(new Map());
   };
 
   const handleDeleteAnnotation = async () => {
-    if (!annotationTarget) return;
-    const id = `${annotationTarget.book}:${annotationTarget.chapter}:${annotationTarget.verse}`;
-    await deleteAnnotation(id);
-    setAnnotationTarget(null);
-    setAnnotationText('');
+    const targets = annotationTargets;
+    const group = annotationGroup;
+    if (!targets.length) return;
+    if (group) await deleteAnnotationGroup(group);
+    else for (const v of targets) await deleteAnnotation(`${v.book}:${v.chapter}:${v.verse}`);
+    closeAnnotation();
     setSelectedVerses(new Map());
   };
 
@@ -1395,6 +1468,28 @@ export default function BibleScreen() {
   const chapterIdx = selectedChapter ? chapters.indexOf(selectedChapter) : -1;
   const selectedCount = selectedVerses.size;
   const selectedKeys = Array.from(selectedVerses.keys());
+  // El Map guarda el orden en que se fueron TOCANDO; el pasaje se nombra y se
+  // comparte en orden bíblico, así que se ordena aquí de una vez.
+  const selectedList = sortVerses(Array.from(selectedVerses.values()));
+
+  // Qué versículos del capítulo enseñan su nota debajo. Una nota de pasaje está
+  // guardada en TODOS los versículos que abarca (así sale al tocar cualquiera),
+  // de modo que sin esto el mismo texto aparecería repetido tres o cuatro veces
+  // seguidas. La enseña el primero del grupo que salga en el capítulo.
+  const noteAnchors = useMemo(() => {
+    const seen = new Set<string>();
+    const anchors = new Set<string>();
+    for (const v of verses) {
+      const id = `${selectedBook}:${selectedChapter}:${v.verse}`;
+      const a = annotations.find((x) => x.id === id);
+      if (!a) continue;
+      const g = a.group || id; // sin grupo = nota suelta, siempre se pinta
+      if (seen.has(g)) continue;
+      seen.add(g);
+      anchors.add(id);
+    }
+    return anchors;
+  }, [verses, annotations, selectedBook, selectedChapter]);
   const allFav = selectedCount > 0 && selectedKeys.every((k) => isFavorite(k));
   const anyHighlighted = selectedCount > 0 && selectedKeys.some((k) => !!getHighlight(k));
   const firstSelected = selectedCount === 1 ? Array.from(selectedVerses.values())[0] : null;
@@ -1598,6 +1693,11 @@ export default function BibleScreen() {
     const id = firstSelected
       ? `${firstSelected.book}:${firstSelected.chapter}:${firstSelected.verse}`
       : '';
+    // En la LECTURA la hoja va pegada abajo y sin fondo, para poder seguir
+    // tocando versículos y armar el pasaje. En las listas (Buscar, Favoritos,
+    // Temas) sigue siendo un Modal: allí cada fila es de un libro distinto y no
+    // hay pasaje que componer.
+    const inline = view === 'reading';
 
     // Las acciones que abren OTRO modal (nota, imagen, etiquetas, referencias,
     // oración) cierran antes esta hoja: en Android apilar dos Modals acaba con el
@@ -1613,12 +1713,15 @@ export default function BibleScreen() {
       <VerseActionsSheet
         count={selectedCount}
         verse={firstSelected}
+        verses={selectedList}
+        reference={buildBibleReference(selectedList)}
+        inline={inline}
         colors={colors}
         bottomInset={insets.bottom}
         highlightColors={HIGHLIGHT_COLORS}
         allFav={allFav}
         anyHighlighted={anyHighlighted}
-        hasNote={!!firstSelected && !!getAnnotation(id)}
+        hasNote={selectedList.some((v) => !!getAnnotation(`${v.book}:${v.chapter}:${v.verse}`))}
         hasTags={!!firstSelected && getVerseTags(id).length > 0}
         isMemorized={!!firstSelected && memorizeList.some((m) => m.id === id)}
         onClose={() => setSelectedVerses(new Map())}
@@ -1630,7 +1733,10 @@ export default function BibleScreen() {
         onShare={handleShare}
         onSendToChat={handleSendToChat}
         onMemorize={handleMemorizeAdd} // muestra un Alert, no un Modal: puede quedarse abierta
-        onNote={thenOpen(openAnnotation)}
+        onNote={(list) => {
+          setSelectedVerses(new Map());
+          openAnnotation(list);
+        }}
         onImage={thenOpen(setImageVerse)}
         onTags={thenOpen(openTagsModal)}
         onXrefs={thenOpen(setXrefVerse)}
@@ -1815,7 +1921,9 @@ export default function BibleScreen() {
       <FlatList
         data={compareRows}
         keyExtractor={(r) => r.verse}
-        contentContainerStyle={{ paddingBottom: 8 }}
+        // Hueco para la hoja de acciones, que va pegada abajo mientras hay
+        // versículos elegidos.
+        contentContainerStyle={{ paddingBottom: selectedCount > 0 ? 340 : 8 }}
         stickyHeaderIndices={[0]}
         ListHeaderComponent={
           <View style={{
@@ -1886,7 +1994,13 @@ export default function BibleScreen() {
         // Tema de lectura: en sepia el fondo del panel de texto cambia (el resto
         // de la pantalla mantiene el tema de la app).
         style={{ backgroundColor: readBg }}
-        contentContainerStyle={{ paddingVertical: 8, backgroundColor: readBg }}
+        // Con la hoja de acciones abierta (que va pegada abajo, sin fondo) los
+        // últimos versículos quedarían debajo de ella y sin forma de tocarlos.
+        contentContainerStyle={{
+          paddingVertical: 8,
+          paddingBottom: selectedCount > 0 ? 340 : 8,
+          backgroundColor: readBg,
+        }}
         // El salto a una referencia puede pedir un versículo que aún no se ha
         // medido; sin esto scrollToIndex lanzaría.
         onScrollToIndexFailed={({ index }) => {
@@ -1899,7 +2013,9 @@ export default function BibleScreen() {
           const key = `${selectedBook}:${selectedChapter}:${item.verse}`;
           const isSelected = selectedVerses.has(key);
           const hl = getHighlight(key);
-          const annotation = getAnnotation(key);
+          // La nota se pinta UNA sola vez por pasaje: una nota de "Juan 3:16-18"
+          // está guardada en los tres versículos y saldría repetida bajo cada uno.
+          const annotation = noteAnchors.has(key) ? getAnnotation(key) : undefined;
           // El versículo que está sonando (#6) se resalta para poder seguir la
           // lectura con la vista.
           const isSpeaking = speech.currentId === item.verse;
@@ -1916,11 +2032,23 @@ export default function BibleScreen() {
             <TouchableOpacity
               onPress={() => toggleVerse({ book: selectedBook!, chapter: selectedChapter!, verse: item.verse, text: item.text })}
               onLongPress={() => setHighlightTarget({ book: selectedBook!, chapter: selectedChapter!, verse: item.verse, text: item.text })}
-              style={{ flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 8, backgroundColor: bg }}
+              style={{
+                flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 8, backgroundColor: bg,
+                // Franja lateral: con el capítulo lleno de resaltados, el tinte
+                // del fondo no basta para ver qué está elegido ahora mismo.
+                borderLeftWidth: 3,
+                borderLeftColor: isSelected ? colors.accent : 'transparent',
+              }}
             >
-              <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12, width: 28, marginTop: 4 }}>
-                {item.verse}
-              </Text>
+              <View style={{ width: 28, marginTop: 4 }}>
+                {isSelected ? (
+                  <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
+                ) : (
+                  <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                    {item.verse}
+                  </Text>
+                )}
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={{
                   color: hl ? '#1f2937' : readText,
@@ -2227,7 +2355,7 @@ export default function BibleScreen() {
           <View style={{ padding: 12, gap: 12 }}>
             {/* Resaltados | Notas */}
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              {([['highlights', `Resaltados (${highlights.length})`], ['notes', `Notas (${annotations.length})`]] as const).map(
+              {([['highlights', `Resaltados (${highlights.length})`], ['notes', `Notas (${noteCount})`]] as const).map(
                 ([id, label]) => (
                   <TouchableOpacity
                     key={id}
@@ -2301,7 +2429,12 @@ export default function BibleScreen() {
         }
         renderItem={({ item }) => {
           const key = `${item.book}:${item.chapter}:${item.verse}`;
-          const text = verseTexts[key];
+          // Con una nota de pasaje se enseña el pasaje entero, no solo su primer
+          // versículo (`verseTexts` trae el capítulo completo, así que ya están).
+          const text = (item.groupVerses ?? [item])
+            .map((v: any) => verseTexts[`${v.book}:${v.chapter}:${v.verse}`])
+            .filter(Boolean)
+            .join(' ');
           const note = notesTab === 'notes' ? item.note : getAnnotation(item.id)?.note;
           const tags = getVerseTags(item.id);
           const stripe = notesTab === 'highlights' ? item.color : colors.accent;
@@ -2317,7 +2450,9 @@ export default function BibleScreen() {
             >
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', flex: 1 }}>
-                  {item.book} {item.chapter}:{item.verse}
+                  {item.groupVerses?.length > 1
+                    ? buildBibleReference(item.groupVerses)
+                    : `${item.book} ${item.chapter}:${item.verse}`}
                   {notesTab === 'highlights' && meaningOf(item.color) ? (
                     <Text style={{ color: colors.textMuted, fontWeight: '400' }}>
                       {'  '}{meaningOf(item.color)}
@@ -2325,9 +2460,14 @@ export default function BibleScreen() {
                   ) : null}
                 </Text>
                 <TouchableOpacity
-                  onPress={() =>
-                    notesTab === 'highlights' ? removeHighlight(item.id) : deleteAnnotation(item.id)
-                  }
+                  onPress={() => {
+                    if (notesTab === 'highlights') return removeHighlight(item.id);
+                    // Borrar una nota de pasaje se lleva la de todos sus
+                    // versículos: son la misma nota.
+                    return item.group
+                      ? deleteAnnotationGroup(item.group)
+                      : deleteAnnotation(item.id);
+                  }}
                   hitSlop={10}
                   style={{ padding: 4 }}
                 >
@@ -2338,7 +2478,7 @@ export default function BibleScreen() {
               {/* El texto del versículo se trae aparte: no se guarda con el
                   resaltado ni con la nota. */}
               <Text style={{ color: colors.textPrimary, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6, marginTop: 6 }}>
-                {text ?? '…'}
+                {text || '…'}
               </Text>
 
               {note ? (
@@ -2593,12 +2733,10 @@ export default function BibleScreen() {
               {/* Annotation shortcut from long-press */}
               <TouchableOpacity
                 onPress={() => {
-                  if (!highlightTarget) return;
-                  const id = `${highlightTarget.book}:${highlightTarget.chapter}:${highlightTarget.verse}`;
-                  const existing = getAnnotation(id);
-                  setAnnotationText(existing?.note ?? '');
-                  setAnnotationTarget(highlightTarget);
+                  const v = highlightTarget; // capturar ANTES del setter (nueva arch)
+                  if (!v) return;
                   setHighlightTarget(null);
+                  openAnnotation(v);
                 }}
                 style={{ marginHorizontal: 20, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.bgTertiary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 8 }}
               >
@@ -2635,17 +2773,19 @@ export default function BibleScreen() {
   // ─── Annotation modal ──────────────────────────────────────
 
   const renderAnnotationModal = () => {
-    if (!annotationTarget) return null;
-    const id = `${annotationTarget.book}:${annotationTarget.chapter}:${annotationTarget.verse}`;
-    const existing = getAnnotation(id);
+    if (!annotationTargets.length) return null;
+    const first = annotationTargets[0];
+    // "Ya existe" = cualquiera de los versículos tiene nota; solo entonces se
+    // ofrece eliminarla.
+    const existing = annotationTargets.some((v) => !!getAnnotation(`${v.book}:${v.chapter}:${v.verse}`));
 
     return (
-      <Modal visible transparent animationType="slide" onRequestClose={() => { setAnnotationTarget(null); setAnnotationText(''); }}>
+      <Modal visible transparent animationType="slide" onRequestClose={closeAnnotation}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
         >
-          <Pressable style={{ flex: 1 }} onPress={() => { setAnnotationTarget(null); setAnnotationText(''); }} />
+          <Pressable style={{ flex: 1 }} onPress={closeAnnotation} />
           <View style={{
             backgroundColor: colors.bgSecondary,
             borderTopLeftRadius: 20, borderTopRightRadius: 20,
@@ -2658,22 +2798,25 @@ export default function BibleScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
               <Ionicons name="create-outline" size={18} color={colors.accent} style={{ marginRight: 8 }} />
               <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700', flex: 1 }}>
-                Anotación
+                {annotationTargets.length > 1 ? 'Nota del pasaje' : 'Anotación'}
               </Text>
-              <TouchableOpacity onPress={() => { setAnnotationTarget(null); setAnnotationText(''); }}>
+              <TouchableOpacity onPress={closeAnnotation}>
                 <Ionicons name="close" size={22} color={colors.textMuted} />
               </TouchableOpacity>
             </View>
 
-            {/* Verse reference */}
+            {/* Referencia del pasaje: con varios versículos, "Juan 3:16-18" */}
             <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '600', marginBottom: 12 }}>
-              {annotationTarget.book} {annotationTarget.chapter}:{annotationTarget.verse}
+              {buildBibleReference(annotationTargets)}
+              {annotationTargets.length > 1 ? `  ·  ${annotationTargets.length} versículos` : ''}
             </Text>
 
-            {/* Verse text preview */}
-            <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic', marginBottom: 16 }} numberOfLines={3}>
-              {annotationTarget.text}
-            </Text>
+            {/* Texto (el del primero: la nota es una sola para todo el pasaje) */}
+            {!!first.text && (
+              <Text style={{ color: colors.textSecondary, fontSize: 13, fontStyle: 'italic', marginBottom: 16 }} numberOfLines={3}>
+                {first.text}
+              </Text>
+            )}
 
             {/* Note input */}
             <View style={{
@@ -2706,12 +2849,14 @@ export default function BibleScreen() {
                 onPress={handleDeleteAnnotation}
                 style={{ paddingVertical: 14, borderRadius: 14, backgroundColor: colors.bgTertiary, alignItems: 'center', marginBottom: 8 }}
               >
-                <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 15 }}>Eliminar anotación</Text>
+                <Text style={{ color: colors.danger, fontWeight: '600', fontSize: 15 }}>
+                  {annotationTargets.length > 1 ? 'Eliminar la nota del pasaje' : 'Eliminar anotación'}
+                </Text>
               </TouchableOpacity>
             )}
 
             <TouchableOpacity
-              onPress={() => { setAnnotationTarget(null); setAnnotationText(''); }}
+              onPress={closeAnnotation}
               style={{ paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
             >
               <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>Cancelar</Text>
