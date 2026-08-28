@@ -12,6 +12,7 @@ import { getUserProfile, type ContactProfile } from '../../src/services/conversa
 import { getPostsByUser } from '../../src/services/postService';
 import { PostCard } from '../../src/components/comunidad/PostCard';
 import { FriendButton } from '../../src/components/comunidad/FriendButton';
+import { UserReelsGrid } from '../../src/components/comunidad/UserReelsGrid';
 
 // Perfil de Comunidad de otro usuario — distinto de app/contact/[id].tsx, que
 // es el panel de un contacto de chat (requiere conversationId, muestra
@@ -25,6 +26,7 @@ export default function CommunityProfileScreen() {
 
   const [profile, setProfile] = useState<ContactProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pestana, setPestana] = useState<'posts' | 'reels'>('posts');
 
   const posts = userPosts[userId] ?? [];
   const isSelf = userId === user?.id;
@@ -69,7 +71,9 @@ export default function CommunityProfileScreen() {
       </View>
 
       <FlatList
-        data={posts}
+        // En la pestaña de reels la lista va vacía: la rejilla se pinta dentro
+        // de la cabecera, que es lo que permite que TODO se desplace junto.
+        data={pestana === 'posts' ? posts : []}
         keyExtractor={(p) => p._id}
         contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
         renderItem={({ item }) => <PostCard post={item} onChange={upsertPost} onRemove={removePost} />}
@@ -99,10 +103,38 @@ export default function CommunityProfileScreen() {
                 <FriendButton userId={userId} />
               </View>
             )}
+
+            {/* Publicaciones / Reels. Un reel es contenido permanente y hasta
+                ahora no tenía ningún sitio propio: se perdía en cuanto salía
+                del feed. */}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 20, width: '100%', paddingHorizontal: 16 }}>
+              {([['posts', 'Publicaciones'], ['reels', 'Reels']] as const).map(([k, etiqueta]) => (
+                <TouchableOpacity
+                  key={k}
+                  onPress={() => setPestana(k)}
+                  style={{
+                    flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center',
+                    backgroundColor: pestana === k ? colors.accent : colors.bgTertiary,
+                  }}
+                >
+                  <Text style={{ color: pestana === k ? '#fff' : colors.textPrimary, fontWeight: '700', fontSize: 13 }}>
+                    {etiqueta}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {pestana === 'reels' && token && (
+              <View style={{ width: '100%', marginTop: 12 }}>
+                <UserReelsGrid token={token} userId={userId} colors={colors} />
+              </View>
+            )}
           </View>
         }
         ListEmptyComponent={
-          <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 24 }}>Sin publicaciones todavía.</Text>
+          pestana === 'posts' ? (
+            <Text style={{ color: colors.textMuted, textAlign: 'center', marginTop: 24 }}>Sin publicaciones todavía.</Text>
+          ) : null
         }
       />
     </SafeAreaView>

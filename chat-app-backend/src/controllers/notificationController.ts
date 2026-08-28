@@ -8,6 +8,7 @@ import { PrayerRequest } from '../models/PrayerRequest';
 import { GroupActivity } from '../models/GroupActivity';
 import { ActivityCommitment } from '../models/ActivityCommitment';
 import { PersonalCommitment } from '../models/PersonalCommitment';
+import { Reel } from '../models/Reel';
 import { Material } from '../models/Material';
 import { MaterialView } from '../models/MaterialView';
 import { logger } from '../services/logger';
@@ -18,6 +19,8 @@ type NotificationKind =
   | 'prayer'
   | 'prayer_pray'
   | 'poll_vote'
+  | 'reel_like'
+  | 'reel_comment'
   | 'activity'
   | 'reminder'
   | 'material'
@@ -34,7 +37,7 @@ interface NotificationItem {
   avatar?: string;
   emoji?: string;
   // hacia dónde navega el tap en el frontend
-  nav: { screen: 'chat' | 'prayer' | 'activities' | 'activities-tab' | 'material'; id: string };
+  nav: { screen: 'chat' | 'prayer' | 'activities' | 'activities-tab' | 'material' | 'reel'; id: string };
   data?: { unreadCount?: number; callType?: 'audio' | 'video'; prayingCount?: number };
 }
 
@@ -195,6 +198,16 @@ export async function getNotifications(req: Request, res: Response) {
       .populate('conversationId', 'groupName isGroup')
       .lean();
 
+    // Me gusta y comentarios en MIS reels e historias. Igual que las encuestas:
+    // no hay coleccion de avisos, se calcula del sello de hora que deja cada
+    // accion (`likedAt[].at` y `comments[].at`).
+    const q_myReels = Reel.find({
+      authorId: userObjId,
+      $or: [{ 'likedAt.0': { $exists: true } }, { 'comments.0': { $exists: true } }],
+    })
+      .select('kind caption likedAt comments')
+      .lean();
+
     const q_myCommitments = ActivityCommitment.find({ userId, isActive: true })
       .select('activityId')
       .lean();
@@ -228,6 +241,7 @@ export async function getNotifications(req: Request, res: Response) {
       prayers,
       myPrayers,
       myPolls,
+      myReels,
       myCommitments,
       tzDoc,
       groupCommitments,
@@ -239,6 +253,8 @@ export async function getNotifications(req: Request, res: Response) {
       cron('prayers', hayGrupos ? q_prayers : Promise.resolve([] as any[])),
       cron('myPrayers', hayGrupos ? q_myPrayers : Promise.resolve([] as any[])),
       cron('myPolls', hayGrupos ? q_myPolls : Promise.resolve([] as any[])),
+      // Los reels NO dependen de tener grupos: cualquiera publica uno.
+      cron('myReels', q_myReels),
       cron('myCommitments', hayGrupos ? q_myCommitments : Promise.resolve([] as any[])),
       cron('tzDoc', q_tzDoc),
       cron('groupCommitments', q_groupCommitments),
@@ -333,6 +349,15 @@ export async function getNotifications(req: Request, res: Response) {
     }
 
     // ── 3. Peticiones de oración de mis grupos (no mías, sin responder) ──────
+    // Avisos que necesitan el NOMBRE de quien actuó (votos de encuestas, me
+    // gusta y comentarios de reels). Se juntan aquí y se hidratan TODOS con UNA
+    // sola consulta al final: cada viaje a Atlas cuesta ~205 ms desde el VPS y
+    // hay un test que vigila que este endpoint no encadene más de cinco.
+    const pollItems: NotificationItem[] = [];
+    const reelItems: NotificationItem[] = [];
+    const actorIds = new Set<string>();
+    const voterIds = actorIds; // la sección de encuestas lo llama así
+
     if (groupIds.length > 0) {
 
       for (const p of prayers) {
@@ -387,8 +412,6 @@ export async function getNotifications(req: Request, res: Response) {
       // Las encuestas anteriores a ese campo no salen aquí (no hay forma de saber
       // cuándo se votaron), pero se siguen votando y viendo con normalidad.
 
-      const pollItems: NotificationItem[] = [];
-      const voterIds = new Set<string>();
       for (const m of myPolls as any[]) {
         for (const opt of m.poll?.options ?? []) {
           for (const st of opt.votedAt ?? []) {
@@ -408,28 +431,6 @@ export async function getNotifications(req: Request, res: Response) {
           }
         }
       }
-      if (pollItems.length) {
-        // Los nombres se piden UNA vez para todos los votantes: un populate por
-        // voto sería una consulta por cara.
-        const voters = await cron('voters', User.find({ _id: { $in: [...voterIds] } })
-          .select('name avatar')
-          .lean());
-        const byId = new Map(voters.map((u: any) => [u._id.toString(), u]));
-        pollItems
-          .map((it) => {
-            const uid = it.id.split(':')[2];
-            const u = byId.get(uid);
-            return {
-              ...it,
-              title: `📊 ${u?.name || 'Alguien'} votó tu encuesta`,
-              avatar: u?.avatar,
-            };
-          })
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, 30)
-          .forEach((it) => items.push(it));
-      }
-
       // ── 4. Actividades que creé o a las que me comprometí ────────────────
       const committedIds = myCommitments.map((c) => c.activityId);
 
@@ -461,6 +462,81 @@ export async function getNotifications(req: Request, res: Response) {
           nav: { screen: 'activities', id: group?._id?.toString() || group?.toString() },
         });
       }
+    }
+
+    // ── 4b. Me gusta y comentarios en MIS reels e historias ─────────────────
+    //
+    // FUERA del `if (groupIds.length > 0)` a propósito: un reel no tiene nada
+    // que ver con pertenecer a un grupo, y dentro solo le llegarían avisos a
+    // quien además estuviera en alguno.
+    //
+    // Mismo mecanismo que las encuestas: no hay colección de avisos, se lee el
+    // sello de hora que deja cada acción. Publicar un reel no producía NINGUNA
+    // consecuencia visible hasta ahora, y sin esa vuelta la gente publica una
+    // vez y no vuelve.
+    for (const r of myReels as any[]) {
+      const que = r.kind === 'story' ? 'tu historia' : 'tu reel';
+      const pie = (r.caption ?? '').slice(0, 50);
+      for (const lk of r.likedAt ?? []) {
+        const uid = lk?.userId?.toString();
+        if (!uid || uid === userId) continue; // mi propio me gusta no es novedad
+        if (!lk.at || new Date(lk.at) < windowStart) continue;
+        actorIds.add(uid);
+        reelItems.push({
+          id: `reellike:${r._id}:${uid}`,
+          kind: 'reel_like',
+          title: '',
+          body: `le gustó ${que}${pie ? ` · ${pie}` : ''}`,
+          timestamp: lk.at,
+          isNew: new Date(lk.at).getTime() > lastSeen.getTime(),
+          nav: { screen: 'reel', id: r._id.toString() },
+        });
+      }
+      for (const c of r.comments ?? []) {
+        const uid = c?.userId?.toString();
+        if (!uid || uid === userId) continue;
+        if (!c.at || new Date(c.at) < windowStart) continue;
+        actorIds.add(uid);
+        reelItems.push({
+          id: `reelcomment:${r._id}:${uid}:${new Date(c.at).getTime()}`,
+          kind: 'reel_comment',
+          title: '',
+          body: `comentó ${que}: ${(c.text ?? '').slice(0, 60)}`,
+          timestamp: c.at,
+          isNew: new Date(c.at).getTime() > lastSeen.getTime(),
+          nav: { screen: 'reel', id: r._id.toString() },
+        });
+      }
+    }
+    // ── Hidratación común: UNA consulta para todos los nombres ────────────
+    //
+    // Antes cada sección pedía los suyos por separado; juntarlas ahorra un viaje
+    // entero a Atlas (~205 ms) en cada carga de la campana.
+    if (pollItems.length || reelItems.length) {
+      const actors = await cron('actors', User.find({ _id: { $in: [...actorIds] } })
+        .select('name avatar')
+        .lean());
+      const byId = new Map(actors.map((u: any) => [u._id.toString(), u]));
+      // El id del actor es el 3er campo del id sintético del aviso.
+      const quien = (it: NotificationItem): any => byId.get(it.id.split(':')[2]);
+
+      pollItems
+        .map((it) => {
+          const u = quien(it);
+          return { ...it, title: `📊 ${u?.name || 'Alguien'} votó tu encuesta`, avatar: u?.avatar };
+        })
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 30)
+        .forEach((it) => items.push(it));
+
+      reelItems
+        .map((it) => {
+          const u = quien(it);
+          return { ...it, title: u?.name ?? 'Alguien', avatar: u?.avatar };
+        })
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 30)
+        .forEach((it) => items.push(it));
     }
 
     // ── 5. Recordatorios de actividades de HOY (grupales + personales) ──────
@@ -573,15 +649,25 @@ export async function getNotifications(req: Request, res: Response) {
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
 
-    const unreadCount = visible.reduce((acc, it) => {
+    // Sin ids repetidos. El `id` es sintético (`pollvote:<msg>:<user>:<opción>`,
+    // `reellike:<reel>:<user>`…) y dos eventos pueden acabar generando el mismo:
+    // en producción salían DOS avisos con la clave
+    // `pollvote:…:Son demonios`, y React avisa de que con claves repetidas las
+    // filas se duplican u omiten. Se queda el más reciente, que es el que la
+    // persona quiere ver.
+    const porId = new Map<string, NotificationItem>();
+    for (const it of visible) if (!porId.has(it.id)) porId.set(it.id, it);
+    const unicos = [...porId.values()];
+
+    const unreadCount = unicos.reduce((acc, it) => {
       if (it.isRead) return acc; // leídos no cuentan
       if (it.kind === 'reminder') return acc; // recordatorios: informativos, no cuentan
       if (it.kind === 'chat') return acc + (it.data?.unreadCount ?? 1);
       return acc + (it.isNew ? 1 : 0);
     }, 0);
 
-    log.debug(`total ${Date.now() - tTotal} ms · ${visible.length} items`);
-    res.json({ items: visible, unreadCount });
+    log.debug(`total ${Date.now() - tTotal} ms · ${unicos.length} items`);
+    res.json({ items: unicos, unreadCount });
   } catch (err) {
     console.error('[notifications] error', err);
     res.status(500).json({ error: 'Error obteniendo notificaciones' });

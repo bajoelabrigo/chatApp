@@ -46,6 +46,19 @@ export async function getReels(token: string, page = 1, limit = 10): Promise<Ree
   return data;
 }
 
+/** Reels e historias vivas de UNA persona, para su perfil. */
+export async function getUserReels(
+  token: string,
+  userId: string,
+  limit = 30
+): Promise<{ reels: Reel[]; stories: Reel[] }> {
+  const { data } = await api.get<{ reels: Reel[]; stories: Reel[] }>(`/reels/user/${userId}`, {
+    ...auth(token),
+    params: { limit },
+  });
+  return data;
+}
+
 /** Historias activas (≤24 h), con el estado de vista del usuario actual. */
 export async function getStories(token: string): Promise<Reel[]> {
   const { data } = await api.get<Reel[]>('/reels/stories', auth(token));
@@ -88,6 +101,26 @@ export interface ReelViewer {
 export async function getReelViewers(token: string, id: string): Promise<ReelViewer[]> {
   const { data } = await api.get<ReelViewer[]>(`/reels/${id}/views`, auth(token));
   return data;
+}
+
+/** Denunciar un reel/historia. Idempotente: denunciar dos veces no suma. */
+export async function reportReel(token: string, id: string, reason = ''): Promise<void> {
+  await api.post(`/reels/${id}/report`, { reason }, auth(token));
+}
+
+/** Enlace a UN reel concreto, el que se ve. */
+export function reelUrl(id: string): string {
+  return `https://holyholyholy.es/reels?reel=${id}`;
+}
+
+/**
+ * Enlace para COMPARTIR. Es el endpoint de Open Graph, no la ruta de la SPA:
+ * los scrapers de WhatsApp y Facebook no ejecutan JS, así que del `/reels?reel=`
+ * solo verían el index.html genérico (el logo y "Holy App"). Este le devuelve la
+ * miniatura y el título al bot, y redirige a las personas a la SPA.
+ */
+export function reelShareUrl(id: string): string {
+  return `https://holyholyholy.es/api/share/reel/${id}`;
 }
 
 export async function deleteReel(token: string, id: string): Promise<void> {

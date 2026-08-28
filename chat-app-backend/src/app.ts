@@ -90,7 +90,14 @@ setupSocketHandlers(io);
 
 connectDB()
   .then(() => {
-    startCronJobs();
+    // Los crons mandan push y correos DE VERDAD, y una copia local se conecta a
+    // la MISMA base que el VPS: sin este interruptor, levantar el backend para
+    // probar algo le duplica los recordatorios a toda la comunidad.
+    if (process.env.DISABLE_CRON === '1') {
+      log.warn('DISABLE_CRON=1: los trabajos programados NO se inician');
+    } else {
+      startCronJobs();
+    }
     server.listen(PORT, () => {
       log.info(`Servidor escuchando en http://localhost:${PORT}`);
     });

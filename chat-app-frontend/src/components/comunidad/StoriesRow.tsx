@@ -42,6 +42,7 @@ export function StoriesRow() {
             key={story.id}
             reel={story}
             size="sm"
+            ring
             onPress={() => router.push({ pathname: '/stories', params: { index: String(stories.indexOf(story)) } } as any)}
           />
         ))}

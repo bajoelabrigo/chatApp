@@ -6,6 +6,8 @@ export type NotificationKind =
   | 'prayer'
   | 'prayer_pray'
   | 'poll_vote'
+  | 'reel_like'
+  | 'reel_comment'
   | 'activity'
   | 'reminder'
   | 'material'

@@ -167,6 +167,77 @@ Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed ve
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
 - **Navegación estilo Facebook en la web (2026-08-26)**: `frontend/src/lib/useSwipeNav.js` (teclado, rueda y deslizar con el dedo) lo usan `StoryViewer` (eje x) y `ReelsPage` (eje y). El gesto exige que el **eje dominante** coincida —si no, un deslizamiento en diagonal salta de historia— y bloquea la rueda 500 ms, porque un solo gesto de trackpad emite decenas de eventos; se desactiva con un modal abierto (comentarios, "quién la vio") o las flechas del teclado navegarían mientras se escribe. **Las flechas visibles son `md:` solamente**: en el móvil se desliza y unos botones ahí taparían el video. Los carruseles usan `components/reels/CarouselRow.jsx`, que mide con `ResizeObserver` (el contenido llega por consulta, no basta medir al montar) y solo enciende la flecha del lado que tiene recorrido. En `StoriesRow`, **"Crear" y "Reels" van FUERA del contenedor que se desplaza**: son accesos, y con unas cuantas historias se perdían de vista.
 
+## Reels e historias — lo social (2026-08-28)
+
+La función estaba entera por dentro y vacía por fuera: **5 reels y 0 historias
+con 615 usuarios**. Publicar no producía ninguna consecuencia, y eso es lo que
+se arregló aquí.
+
+**Bloqueos.** `getHiddenUserIds` vivía DENTRO de `postController`, así que el feed
+de publicaciones respetaba los bloqueos y el de reels no: bloqueabas a alguien,
+desaparecía de tu muro y lo seguías viendo en los reels. Está en
+`services/blocking.ts` para que cualquier feed nuevo lo tenga a mano.
+- **Los bloqueos se piden EN PARALELO con los reels y se filtran en memoria**, no
+  con un `$nin`. Meterlos en la consulta obliga a esperarlos primero, y eso es un
+  viaje más a Atlas (~205 ms) en un endpoint que el carrusel pide **cada minuto
+  por persona**: medido, `/reels/stories` pasó de 620 ms a 340 ms al cambiarlo.
+  A cambio una página puede devolver menos de `limit` elementos; con un bloqueo
+  en toda la base, no se nota.
+
+**Moderación.** `deleteReel` filtraba por `{_id, authorId}`: solo podía borrar
+quien había subido el video, o sea nadie. Ahora también un admin general, y hay
+`POST /reels/:id/report` que reutiliza el modelo `Report` de grupos y usuarios
+(`targetType: 'reel'`, upsert para que denunciar dos veces no infle el recuento).
+**El botón de eliminar de un admin solo está en la WEB**: el `AuthUser` del móvil
+no guarda el rol, y todos los paneles de admin ya viven ahí.
+
+**Avisos de me gusta y comentario.** `Reel.likedAt` guarda la hora de cada me
+gusta — arreglo APARTE de `likes` por lo mismo que las encuestas: `$addToSet`
+sobre un escalar deduplica, con objetos dentro no. Se mueve en el MISMO update.
+Los me gusta anteriores no tienen hora y por eso no salen en la campana.
+- Push por Expo **y** Web Push (`services/reelNotifier.ts`), nunca a uno mismo,
+  con `tag` estable por reel para que varios me gusta actualicen un solo aviso.
+- La sección de la campana va **FUERA del `if (groupIds.length > 0)`**: un reel no
+  tiene nada que ver con estar en un grupo.
+- **La hidratación de nombres es COMÚN con la de las encuestas.** Cada sección
+  pedía los suyos y `notificationsPerf.test.mjs` saltó al llegar al 6º `await`;
+  juntarlas ahorra un viaje entero por carga de campana.
+- **Ids únicos**: el `id` de un aviso es sintético y en producción había dos
+  `pollvote:…:Son demonios` iguales — React avisa de que con claves repetidas
+  las filas se duplican u omiten. `getNotifications` descarta repetidos.
+
+**Compartir de verdad.** El enlace era `holyholyholy.es/reels` a secas: quien lo
+abría veía el primero de la lista. Ahora `/api/share/reel/:id` (Open Graph, en
+`holy_app`) con la miniatura del **primer fotograma** (`so_1`) o la portada de
+YouTube, y 302 a las personas. Compartir manda ESA url, no la de la SPA: el
+scraper no ejecuta JS y del `/reels?reel=` solo vería el index.html genérico.
+
+**Anillo de "sin ver".** El backend mandaba `viewed` en cada historia desde el
+principio y ningún cliente lo pintaba. Ahora sí, en los dos.
+
+**Responder a una historia por chat.** Abre (o crea) el chat 1:1 con el autor y
+manda el mensaje. Va como **texto con el enlace de la historia**, NO como un
+`type` nuevo: el chat ya pinta previas de enlace, así que la miniatura sale sola
+desde la ruta de Open Graph, y estrenar un tipo de mensaje obliga a desplegar los
+tres sitios en un orden concreto para nada. La barra va con `z-index` por encima
+de las zonas táctiles de avanzar, o el toque se lo come el "siguiente".
+
+**Reels en el perfil.** `GET /reels/user/:userId` devuelve sus reels y sus
+historias vivas por separado. En la rejilla se pinta la MINIATURA, nunca un
+reproductor por celda: una cuadrícula de reproductores agota los
+descodificadores del teléfono (misma razón por la que en el feed solo suena el
+reel activo).
+
+**`addView` devolvía 404 cuando ya lo habías visto** (el filtro lleva
+`views.userId: {$ne: yo}`, así que el update no encontraba nada). Los clientes se
+lo tragaban, pero era mentir en el evento más frecuente de todos.
+
+**Arnés de pruebas** (`holy_app/frontend/scripts/jsx-loader.mjs`): ahora compila
+`.jsx` de `context/` y `hooks/` (no solo `src/`) y sustituye `socket.io-client`
+por un doble — en Node carga su build de CommonJS y revienta con un `require`
+que no existe en ESM. Sin eso no se puede montar en SSR nada que use el chat.
+`reelsUi` y `extraLinks` **existían pero no estaban en el `npm test`**.
+
 ## Un video que "no se ve" — casi siempre es un `<video>` SIN PÓSTER (2026-08-28)
 
 "Subo un video y solo recibo pantalla negra" fue **la web**, no la app. Un

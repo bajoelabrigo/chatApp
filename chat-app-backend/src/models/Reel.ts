@@ -24,6 +24,8 @@ export interface IReel extends Document {
   youtubeTitle?: string;
   thumbUrl?: string;
   likes: Types.ObjectId[];
+  /** Cuándo dio me gusta cada uno. Ver la nota del esquema. */
+  likedAt: { userId: Types.ObjectId; at: Date }[];
   views: { userId: Types.ObjectId; at: Date }[];
   comments: { userId: Types.ObjectId; text: string; at: Date }[];
   expiresAt?: Date;
@@ -43,6 +45,19 @@ const ReelSchema = new Schema<IReel>(
     youtubeTitle: { type: String, maxlength: 200 },
     thumbUrl: { type: String },
     likes: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    // La hora del me gusta va en un arreglo APARTE de `likes`, igual que en las
+    // encuestas: `likes` se manipula con `$addToSet`/`$pull` sobre un valor
+    // escalar, y metiendo objetos dentro `$addToSet` dejaría de deduplicar (dos
+    // toques seguidos contarían dos veces). Se mueve en el MISMO update.
+    // Los reels anteriores no lo tienen: se siguen viendo, solo que sus me gusta
+    // no salen en la campana porque no hay forma de saber cuándo fueron.
+    likedAt: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
     views: [
       {
         userId: { type: Schema.Types.ObjectId, ref: 'User' },

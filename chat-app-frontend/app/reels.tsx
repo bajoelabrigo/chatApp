@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, type Reel, type ReelComment } from '../src/services/reelService';
+import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, reportReel, reelShareUrl, type Reel, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { timeAgo } from '../src/utils/timeAgo';
@@ -220,8 +220,28 @@ export default function ReelsScreen() {
   const onShare = async (reel: Reel) => {
     const text = reel.caption || reel.youtubeTitle || 'Mira este reel en HolyChat';
     try {
-      await Share.share({ message: `${text}\nhttps://holyholyholy.es/reels` });
+      // El enlace lleva AL REEL, no a la lista: antes quien lo abría veía el
+      // primero del feed y no el que le habían mandado.
+      await Share.share({ message: `${text}\n${reelShareUrl(reel.id)}` });
     } catch { /* best-effort */ }
+  };
+
+  const onReport = (reel: Reel) => {
+    Alert.alert('Denunciar', '¿Enviar este reel para que lo revise un administrador?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Denunciar', style: 'destructive',
+        onPress: async () => {
+          if (!token) return;
+          try {
+            await reportReel(token, reel.id);
+            Alert.alert('Gracias', 'Lo revisaremos pronto.');
+          } catch {
+            Alert.alert('Error', 'No se pudo enviar la denuncia');
+          }
+        },
+      },
+    ]);
   };
 
   const onDelete = (reel: Reel) => {
@@ -279,6 +299,12 @@ export default function ReelsScreen() {
             <Ionicons name="share-social-outline" size={28} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
           </Pressable>
+          {!isMine && (
+            <Pressable onPress={() => onReport(item)} style={{ alignItems: 'center', gap: 3 }}>
+              <Ionicons name="flag-outline" size={26} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Denunciar</Text>
+            </Pressable>
+          )}
           {isMine && (
             <Pressable onPress={() => onDelete(item)} style={{ alignItems: 'center', gap: 3 }}>
               <Ionicons name="trash-outline" size={28} color="#ff2d55" />

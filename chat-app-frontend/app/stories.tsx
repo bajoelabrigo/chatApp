@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image, TextInput, Share, Alert, Linking,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -16,8 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
+import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, reportReel, reelShareUrl, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
+import { createOrGetConversation } from '../src/services/conversationService';
+import { getSocket } from '../src/services/socketService';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
@@ -42,6 +45,9 @@ function StoryItem({
   const [ytFailed, setYtFailed] = useState<number | null>(null);
   const [ytMuted, setYtMuted] = useState(true);
   const [ytProgress, setYtProgress] = useState(0);
+  const [respuesta, setRespuesta] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const socket = getSocket();
 
   // `null` cuando la historia es de YouTube: crear un reproductor con una
   // fuente vacía es lo que dejaba la pantalla en blanco al cerrar.
@@ -93,7 +99,57 @@ function StoryItem({
 
   const onShare = async () => {
     const text = story.caption || story.youtubeTitle || 'Mira esta historia en HolyChat';
-    try { await Share.share({ message: `${text}\nhttps://holyholyholy.es/reels` }); } catch { /* best-effort */ }
+    try { await Share.share({ message: `${text}\n${reelShareUrl(story.id)}` }); } catch { /* best-effort */ }
+  };
+
+  /**
+   * Responder a una historia abre (o crea) el chat 1:1 con su autor y manda el
+   * mensaje. Es el gesto con el que una historia se convierte en conversación,
+   * que es lo que hace que la gente publique otra.
+   *
+   * Va como mensaje de TEXTO con el enlace de la historia, no como un tipo de
+   * mensaje nuevo: el chat ya pinta la vista previa de los enlaces, así que la
+   * miniatura sale sola desde la ruta de Open Graph. Estrenar un `type` obliga a
+   * tocar los dos clientes y el backend en un orden concreto, y aquí no hace
+   * ninguna falta.
+   */
+  const responder = async () => {
+    const texto = respuesta.trim();
+    if (!texto || enviando || !token) return;
+    if (!socket) { Alert.alert('Sin conexión', 'Abre el chat e inténtalo de nuevo.'); return; }
+    setEnviando(true);
+    try {
+      const conv = await createOrGetConversation(token, story.author.id);
+      socket.emit('message:send', {
+        conversationId: conv._id,
+        content: `${texto}\n${reelShareUrl(story.id)}`,
+        type: 'text',
+      });
+      setRespuesta('');
+      Alert.alert('Enviado', `Tu respuesta llegó a ${story.author.name}`);
+    } catch {
+      Alert.alert('Error', 'No se pudo enviar la respuesta');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  const onReport = () => {
+    Alert.alert('Denunciar', '¿Enviar esta historia para que la revise un administrador?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Denunciar', style: 'destructive',
+        onPress: async () => {
+          if (!token) return;
+          try {
+            await reportReel(token, story.id);
+            Alert.alert('Gracias', 'Lo revisaremos pronto.');
+          } catch {
+            Alert.alert('Error', 'No se pudo enviar la denuncia');
+          }
+        },
+      },
+    ]);
   };
 
   const onDelete = () => {
@@ -251,6 +307,12 @@ function StoryItem({
           <Ionicons name="share-social-outline" size={26} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
         </Pressable>
+        {!isMine && (
+          <Pressable onPress={onReport} style={{ alignItems: 'center', gap: 3 }}>
+            <Ionicons name="flag-outline" size={24} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Denunciar</Text>
+          </Pressable>
+        )}
         {isMine && (
           <Pressable onPress={onDelete} style={{ alignItems: 'center', gap: 3 }}>
             <Ionicons name="trash-outline" size={26} color="#ff2d55" />
@@ -264,6 +326,41 @@ function StoryItem({
         <View style={{ position: 'absolute', bottom: 40, left: 16, right: 70 }}>
           <Text style={{ color: '#fff', fontSize: 15, lineHeight: 20 }} numberOfLines={3}>{story.caption}</Text>
         </View>
+      )}
+
+      {/* Responder por chat. `zIndex` por encima de las zonas táctiles (10): si
+          no, tocar el campo se lo come el "siguiente". En la propia no se
+          ofrece: no tiene sentido escribirse a uno mismo. */}
+      {!isMine && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ position: 'absolute', left: 12, right: 12, bottom: 16, zIndex: 20, flexDirection: 'row', gap: 8 }}
+        >
+          <TextInput
+            value={respuesta}
+            onChangeText={setRespuesta}
+            placeholder={`Responder a ${story.author.name}…`}
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            style={{
+              flex: 1, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10,
+              color: '#fff', fontSize: 14,
+              backgroundColor: 'rgba(0,0,0,0.45)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)',
+            }}
+            onSubmitEditing={responder}
+            returnKeyType="send"
+          />
+          <TouchableOpacity
+            onPress={responder}
+            disabled={!respuesta.trim() || enviando}
+            style={{
+              backgroundColor: colors.accent, borderRadius: 22, paddingHorizontal: 16,
+              alignItems: 'center', justifyContent: 'center',
+              opacity: !respuesta.trim() || enviando ? 0.45 : 1,
+            }}
+          >
+            {enviando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={18} color="#fff" />}
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
       )}
 
       {/* Zonas táctiles */}

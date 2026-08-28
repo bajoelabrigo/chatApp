@@ -7,6 +7,9 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import { isGlobalAdmin } from '../services/adminService';
 import { deleteCloudinaryUrls } from '../services/cloudinaryService';
 import { deleteAssetIfUnused } from '../services/mediaCleanup';
+// Bloqueos bidireccionales: viven en un servicio para que TODOS los feeds los
+// respeten (el de reels no lo hacía).
+import { getHiddenUserIds } from '../services/blocking';
 import { hasVisibleText } from '../utils/postContent';
 
 const AUTHOR_POPULATE = 'name avatar bio role isSocio';
@@ -98,17 +101,6 @@ function passageReference(verses: IPostVerse[]): string {
 
 function passageText(verses: IPostVerse[]): string {
   return verses.map((v) => v.text).join(' ');
-}
-
-// ── Bloqueos bidireccionales (los míos + quien me bloqueó a mí) ──────────────
-async function getHiddenUserIds(viewerId: string): Promise<Set<string>> {
-  const [me, blockedMe] = await Promise.all([
-    User.findById(viewerId).select('blockedUsers').lean(),
-    User.find({ blockedUsers: viewerId }).select('_id').lean(),
-  ]);
-  const set = new Set<string>((me?.blockedUsers ?? []).map((id: any) => id.toString()));
-  blockedMe.forEach((u: any) => set.add(u._id.toString()));
-  return set;
 }
 
 // ── Relación del viewer con cada autor de la página (una sola consulta) ──────
