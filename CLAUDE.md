@@ -546,7 +546,7 @@ subida **nunca** se rompe por esto.
   todo y no había forma de saber si ffmpeg seguía instalado en el VPS. Ahora
   escribe una línea por subida: `video comprimido 28.0 MB -> 1.1 MB (-96%)`, o
   `ffmpeg NO está instalado` (ENOENT) con el comando para arreglarlo.
-  Comprobación directa: `ssh root@145.223.27.84 "ffmpeg -version | head -1"`.
+  Comprobación directa: `ssh holyvps "ffmpeg -version | head -1"`.
 
 ## Barra de progreso al subir — el 100% no es el final
 
@@ -739,6 +739,29 @@ If it displays images or avatars, use expo-image with proper sizing and standard
 Provide the fully written React Native component using functional syntax: export function ComponentName() {}.
 Do not use generic placeholders or empty // TODO comments. Write the mockup state inline if backend data isn't fully ready yet so the visual result matches the screenshot immediately on render.
 
+## Acceso al VPS: clave SSH, nunca contraseña en un archivo (2026-08-28)
+
+La contraseña de root estuvo un rato en `chat-app-backend/.env` como
+`clave_hostinger=`. **Ya no está**: el acceso va por clave SSH.
+
+- Clave **exclusiva de este servidor**: `~/.ssh/id_ed25519_holy` (ed25519). No se
+  reutiliza para GitHub ni para nada más, así que revocarla no arrastra ningún
+  otro acceso: basta con borrar su línea de `~/.ssh/authorized_keys` en el VPS.
+- `~/.ssh/config` define el alias **`holyvps`**, así que en los comandos de
+  despliegue basta `ssh holyvps` y `scp … holyvps:/ruta` — sin `root@ip`, sin
+  contraseña y sin `-i`.
+- **Sin frase de paso**, a propósito: con una, cada despliegue exigiría
+  desbloquear el agente a mano y no se podría automatizar. Lo que protege el
+  archivo es la cuenta de Windows; por eso la clave es de un solo servidor.
+- Comprobar que va por clave y no por contraseña: `ssh -o BatchMode=yes holyvps
+  "hostname"`. `BatchMode` PROHÍBE pedir contraseña, así que si responde, es la
+  clave.
+- La contraseña sigue funcionando en el servidor (no se desactivó el acceso por
+  contraseña). Si alguna vez se desactiva (`PasswordAuthentication no` en
+  `/etc/ssh/sshd_config`), **antes hay que confirmar que la consola web de
+  Hostinger sigue siendo una vía de entrada**: perder la clave sin esa red de
+  seguridad deja el servidor inaccesible.
+
 ## Deploy workflow
 
 ### Backend → VPS
@@ -748,11 +771,11 @@ Do not use generic placeholders or empty // TODO comments. Write the mockup stat
 cd chat-app-backend && npm run build
 
 # 2. Subir al VPS (SIEMPRE incluir src/lib/ — los JSONs de la Biblia no los copia tsc)
-scp -r dist/ package.json package-lock.json root@145.223.27.84:/var/www/chat-backend/
-scp -r src/lib root@145.223.27.84:/var/www/chat-backend/dist/
+scp -r dist/ package.json package-lock.json holyvps:/var/www/chat-backend/
+scp -r src/lib holyvps:/var/www/chat-backend/dist/
 
 # 3. En el VPS: instalar deps nuevas si las hay y reiniciar
-ssh root@145.223.27.84 "cd /var/www/chat-backend && npm install --production && pm2 restart chat-backend"
+ssh holyvps "cd /var/www/chat-backend && npm install --production && pm2 restart chat-backend"
 ```
 
 VPS: `145.223.27.84` · PM2: `chat-backend` (puerto 3000) · URL: `https://api.holyholyholy.es`
@@ -791,14 +814,14 @@ Repo aparte (`holy_app`). Backend PM2 `holy-backend` en `/var/www/holy-app/backe
 
 **Backend web** (no requiere build; reiniciar PM2): subir por `scp` los archivos cambiados a su ruta espejo bajo `/var/www/holy-app/backend/` y luego:
 ```bash
-ssh root@145.223.27.84 "pm2 restart holy-backend"
+ssh holyvps "pm2 restart holy-backend"
 ```
 
 **Frontend web** (requiere build: `npm run build` en `holy_app/frontend` → `dist/`). Subir el dist completo (incluye `sw.js`/`registerSW.js` del PWA) — **estas son las líneas exactas que usa el usuario**:
 ```bash
 cd holy_app/frontend
-scp -r dist/* root@145.223.27.84:/var/www/holy-app/frontend/dist/
-ssh root@145.223.27.84 "chmod -R a+rX /var/www/holy-app/frontend/dist"
+scp -r dist/* holyvps:/var/www/holy-app/frontend/dist/
+ssh holyvps "chmod -R a+rX /var/www/holy-app/frontend/dist"
 ```
 PWA con Service Worker: tras subir puede requerir recarga forzada (Ctrl+Shift+R) para ver el cambio.
 
