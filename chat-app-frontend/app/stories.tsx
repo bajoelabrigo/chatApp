@@ -17,7 +17,7 @@ import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
-import { videoPlayUrl } from '../src/lib/cldImage';
+import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
@@ -45,28 +45,35 @@ function StoryItem({
 
   // `null` cuando la historia es de YouTube: crear un reproductor con una
   // fuente vacía es lo que dejaba la pantalla en blanco al cerrar.
-  const player = useVideoPlayer(story.videoUrl ? videoPlayUrl(story.videoUrl) : null, (p) => { p.loop = false; });
+  //
+  // Y `null` TAMBIÉN cuando la historia no es la que se está viendo: Android
+  // solo tiene unos pocos descodificadores de video y los sobrantes se quedan
+  // EN NEGRO sin dar ningún error. Mientras tanto se pinta el primer fotograma.
+  const player = useVideoPlayer(active && story.videoUrl ? videoPlayUrl(story.videoUrl) : null, (p) => { p.loop = false; });
   const event = useEvent(player, 'timeUpdate', {
     currentTime: 0, currentLiveTimestamp: null, currentOffsetFromLive: null, bufferedPosition: 0,
   });
+  const statusEvent = useEvent(player, 'statusChange', { status: player.status });
+  const status = statusEvent?.status ?? 'idle';
   const currentTime = event?.currentTime ?? 0;
   const duration = player.duration;
   const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+  const poster = story.videoUrl?.includes('/video/upload/') ? videoThumbUrl(story.videoUrl, 640) : null;
 
   // Ver la nota de `reels.tsx`: nada de tocar el reproductor en la limpieza.
   useEffect(() => {
-    if (!story.videoUrl) return;
+    if (!story.videoUrl || !active) return;
     try {
-      if (active && !paused) player.play();
+      if (!paused) player.play();
       else player.pause();
     } catch { /* liberado */ }
   }, [active, paused, player, story.videoUrl]);
 
   useEffect(() => {
-    if (!story.videoUrl) return;
+    if (!story.videoUrl || !active) return;
     const sub = player.addListener('playToEnd', () => onNext());
     return () => { try { sub.remove(); } catch { /* liberado */ } };
-  }, [player, onNext, story.videoUrl]);
+  }, [player, onNext, story.videoUrl, active]);
 
   // Respaldo de YouTube (sin reproductor): barra indeterminada.
   const pulse = useRef(new Animated.Value(0)).current;
@@ -129,6 +136,12 @@ function StoryItem({
               Ver en YouTube (no se pudo incrustar · {ytFailed})
             </Text>
           </TouchableOpacity>
+        ) : !active ? (
+          // El WebView de YouTube solo se monta en la historia que se está
+          // viendo: cada uno se queda un descodificador y los demás salen negros.
+          !!story.thumbUrl && (
+            <Image source={{ uri: story.thumbUrl }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
+          )
         ) : (
           <>
             <YouTubeEmbed
@@ -148,7 +161,41 @@ function StoryItem({
           </>
         )
       ) : (
-        <VideoView player={player} style={{ flex: 1 }} contentFit="contain" nativeControls={false} />
+        <View style={{ flex: 1 }}>
+          {/* Póster mientras carga: una historia recién subida tardaba unos
+              segundos y ese hueco era indistinguible de "no se ve nada". */}
+          {poster && (status !== 'readyToPlay' || !active) && (
+            <Image source={{ uri: poster }} style={StyleSheet.absoluteFillObject} resizeMode="contain" />
+          )}
+          {active && (
+            <VideoView
+              player={player}
+              style={{ flex: 1, backgroundColor: 'transparent' }}
+              contentFit="contain"
+              nativeControls={false}
+              // Ver la nota de `reels.tsx`: con el SurfaceView por defecto, un
+              // video dentro de una lista que pagina sale en negro.
+              surfaceType="textureView"
+            />
+          )}
+          {active && status === 'loading' && (
+            <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]}>
+              <ActivityIndicator color="#fff" />
+            </View>
+          )}
+          {active && status === 'error' && (
+            <Pressable
+              onPress={() => Linking.openURL(story.videoUrl).catch(() => {})}
+              style={[StyleSheet.absoluteFillObject, { zIndex: 30, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.7)' }]}
+            >
+              <Ionicons name="alert-circle-outline" size={40} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 14, textAlign: 'center', paddingHorizontal: 30 }}>
+                No se pudo reproducir esta historia
+              </Text>
+              <Text style={{ color: '#fff', fontWeight: '700', marginTop: 4 }}>Abrir fuera de la app</Text>
+            </Pressable>
+          )}
+        </View>
       )}
 
       {/* Barra de progreso */}

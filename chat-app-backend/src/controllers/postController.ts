@@ -6,6 +6,7 @@ import { ConnectionRequest } from '../models/ConnectionRequest';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { isGlobalAdmin } from '../services/adminService';
 import { deleteCloudinaryUrls } from '../services/cloudinaryService';
+import { deleteAssetIfUnused } from '../services/mediaCleanup';
 import { hasVisibleText } from '../utils/postContent';
 
 const AUTHOR_POPULATE = 'name avatar bio role isSocio';
@@ -439,16 +440,23 @@ export async function deletePost(req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const mediaUrls: (string | undefined)[] = [post.image];
+    // Las imágenes de los comentarios se suben por comentario y no las comparte
+    // nadie: se borran sin más.
+    const commentUrls: (string | undefined)[] = [];
     for (const c of post.comments) {
-      mediaUrls.push(c.image);
-      for (const r of c.replies) mediaUrls.push(r.image);
+      commentUrls.push(c.image);
+      for (const r of c.replies) commentUrls.push(r.image);
     }
+    const attachment = post.image;
 
     await Post.findByIdAndDelete(post._id);
     res.json({ ok: true });
 
-    deleteCloudinaryUrls(mediaUrls).catch(() => {});
+    deleteCloudinaryUrls(commentUrls).catch(() => {});
+    // El adjunto del post SÍ puede estar compartido: el editor permite mandar un
+    // video a publicación, reel e historia a la vez, y los tres apuntan al mismo
+    // archivo (se sube una sola vez). Borrarlo a secas dejaba el reel sin video.
+    if (attachment) deleteAssetIfUnused({ url: attachment }).catch(() => {});
   } catch (err) {
     console.error('deletePost:', err);
     res.status(500).json({ error: 'Error eliminando la publicación' });

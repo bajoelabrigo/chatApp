@@ -11,6 +11,11 @@ import { sendWeeklySummary, WeeklyCommitmentSummary } from './emailService';
 import { User } from '../models/User';
 import { localDateKey } from '../lib/dailyVerses';
 import { dailyVerseFor } from '../controllers/bibleController';
+import { Reel } from '../models/Reel';
+import { deleteAssetIfUnused } from './mediaCleanup';
+import { logger } from './logger';
+
+const log = logger('cron');
 
 // Hora local a la que sale el versículo del día (#8).
 const DAILY_VERSE_HOUR = 8;
@@ -237,6 +242,41 @@ export function startCronJobs(): void {
       }
     } catch (err) {
       console.error('[cronService] hourly job error:', err);
+    }
+  });
+
+  // Job C — cada 10 min: barrer las historias caducadas Y SU VIDEO.
+  //
+  // El índice TTL de Mongo borra el documento, pero **Cloudinary no se entera**:
+  // el video de cada historia se quedaba ahí para siempre, y una historia es
+  // justo lo que más se publica y menos dura. Aquí se hace el borrado completo,
+  // y el TTL queda de red de seguridad con un margen de días por detrás (ver
+  // `scripts/reelsTtlGrace.mjs`) para que le dé tiempo a correr a esto.
+  //
+  // Los clientes no notan nada: las lecturas ya filtran por `expiresAt > ahora`,
+  // así que una historia caducada es invisible desde el segundo en que vence,
+  // corra este barrido cuando corra.
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const expired = await Reel.find(
+        { kind: 'story', expiresAt: { $lte: new Date() } },
+        { _id: 1, cloudinaryPublicId: 1, videoUrl: 1 }
+      ).limit(200);
+      if (expired.length === 0) return;
+
+      for (const story of expired) {
+        await Reel.deleteOne({ _id: story._id });
+        // El recuento de referencias se hace con el documento YA borrado: si el
+        // mismo video se publicó también como reel o en el muro, se respeta.
+        await deleteAssetIfUnused({
+          publicId: story.cloudinaryPublicId,
+          url: story.videoUrl,
+          exceptReelId: story._id as any,
+        });
+      }
+      log.info(`historias caducadas barridas: ${expired.length}`);
+    } catch (err) {
+      log.error('fallo barriendo historias caducadas', err);
     }
   });
 

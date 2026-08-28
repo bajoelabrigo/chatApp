@@ -94,5 +94,8 @@ export function videoThumbUrl(url: string | null | undefined, width = 320): stri
   if (!url || typeof url !== 'string') return url as string;
   const marker = '/video/upload/';
   if (!url.includes(marker)) return url;
-  return url.replace(marker, `${marker}so_1,w_${width}/`).replace(/\.[^/.]+$/, '.jpg');
+  const withFrame = url.replace(marker, `${marker}so_1,w_${width}/`);
+  // Sin extensión no se puede sustituir: hay que añadirla o Cloudinary sirve
+  // el video en vez de la imagen.
+  return /\.[^/.]+$/.test(withFrame) ? withFrame.replace(/\.[^/.]+$/, '.jpg') : `${withFrame}.jpg`;
 }

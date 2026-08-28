@@ -36,8 +36,12 @@ export function publicIdFromUrl(
   url?: string | null
 ): { publicId: string; resourceType: ResourceType } | null {
   if (!url || !url.includes('res.cloudinary.com')) return null;
+  // Fuera el fragmento y la query ANTES de nada: el adjunto de una publicación
+  // guarda el nombre original ahí (`…mp4#name=video.mp4`) y sin quitarlo el
+  // public_id sale con basura pegada y no coincide con el de Cloudinary.
+  const clean = url.split('#')[0].split('?')[0];
   // .../<resource_type>/upload/(<transformaciones>/)?v<version>/<public_id>.<ext>
-  const m = url.match(/\/(image|video|raw)\/upload\/(?:.*?\/)?v\d+\/(.+)$/);
+  const m = clean.match(/\/(image|video|raw)\/upload\/(?:.*?\/)?v\d+\/(.+)$/);
   if (!m) return null;
   const resourceType = m[1] as ResourceType;
   let publicId = m[2];

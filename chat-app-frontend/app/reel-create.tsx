@@ -14,6 +14,7 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { createReel, getYouTubeMeta, type ReelKind } from '../src/services/reelService';
 import { uploadFile } from '../src/services/uploadService';
+import { UploadBar } from '../src/components/UploadBar';
 
 const MAX_SECONDS = 60;
 
@@ -34,6 +35,7 @@ export default function ReelCreateScreen() {
   const [kind, setKind] = useState<ReelKind>(kindParam === 'story' ? 'story' : 'reel');
   const [caption, setCaption] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   // Cámara
   const camRef = useRef<CameraView>(null);
@@ -52,8 +54,9 @@ export default function ReelCreateScreen() {
   const [ytLoading, setYtLoading] = useState(false);
 
   useEffect(() => {
-    if (picked?.uri) previewPlayer.play();
-    return () => previewPlayer.pause();
+    // Nada de `pause()` en la limpieza: al salir de la pantalla expo-video ya
+    // liberó el objeto nativo y llamar un método sobre él revienta el render.
+    if (picked?.uri) { try { previewPlayer.play(); } catch { /* liberado */ } }
   }, [picked?.uri, previewPlayer]);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
@@ -87,11 +90,16 @@ export default function ReelCreateScreen() {
       });
       const asset = res.assets?.[0];
       if (!asset) return;
-      if (asset.duration && asset.duration > MAX_SECONDS + 1) {
-        Alert.alert('Video muy largo', `Máximo ${MAX_SECONDS} segundos (este dura ${Math.round(asset.duration)}s)`);
+      // `asset.duration` viene en MILISEGUNDOS. Comparado tal cual contra 60,
+      // CUALQUIER video de la galería pasaba de 60 (un clip de 2 s son 2000) y
+      // se rechazaba con «este dura 2000s»; y el que se colaba se guardaba con
+      // una duración mil veces mayor.
+      const seconds = asset.duration != null ? asset.duration / 1000 : undefined;
+      if (seconds != null && seconds > MAX_SECONDS + 1) {
+        Alert.alert('Video muy largo', `Máximo ${MAX_SECONDS} segundos (este dura ${Math.round(seconds)}s)`);
         return;
       }
-      setPicked({ uri: asset.uri, duration: asset.duration ?? undefined });
+      setPicked({ uri: asset.uri, duration: seconds != null ? Math.round(seconds) : undefined });
     } catch { /* cancelado */ }
   };
 
@@ -116,12 +124,13 @@ export default function ReelCreateScreen() {
       tab === 'youtube' ? !!ytMeta : !!picked?.uri;
     if (!ready) { Alert.alert('Falta el video', 'Graba, elige o pega un video antes de publicar'); return; }
     setPublishing(true);
+    setProgress(0);
     try {
       let reel;
       if (tab === 'youtube' && ytMeta) {
         reel = await createReel(token, { kind, caption: caption.trim(), youtubeUrl: ytUrl.trim() });
       } else if (picked) {
-        const up = await uploadFile(token, picked.uri, 'video/mp4', `reel-${Date.now()}.mp4`);
+        const up = await uploadFile(token, picked.uri, 'video/mp4', `reel-${Date.now()}.mp4`, setProgress);
         reel = await createReel(token, {
           kind,
           caption: caption.trim(),
@@ -194,7 +203,7 @@ export default function ReelCreateScreen() {
                     </TouchableOpacity>
                   </View>
                 ) : picked ? (
-                  <VideoView player={previewPlayer} style={{ flex: 1 }} contentFit="cover" nativeControls />
+                  <VideoView player={previewPlayer} style={{ flex: 1 }} contentFit="cover" nativeControls surfaceType="textureView" />
                 ) : (
                   <CameraView ref={camRef} style={{ flex: 1 }} mode="video" facing="back" />
                 )}
@@ -241,7 +250,7 @@ export default function ReelCreateScreen() {
               </Text>
               {picked && (
                 <View style={{ width: '70%', aspectRatio: 9 / 16, borderRadius: 14, overflow: 'hidden', backgroundColor: '#000' }}>
-                  <VideoView player={previewPlayer} style={{ flex: 1 }} contentFit="cover" nativeControls />
+                  <VideoView player={previewPlayer} style={{ flex: 1 }} contentFit="cover" nativeControls surfaceType="textureView" />
                 </View>
               )}
               <TouchableOpacity
@@ -291,6 +300,12 @@ export default function ReelCreateScreen() {
                   </TouchableOpacity>
                 </>
               )}
+            </View>
+          )}
+
+          {publishing && !!picked && (
+            <View style={{ marginTop: 16, alignItems: 'center', backgroundColor: '#000', borderRadius: 12, padding: 14 }}>
+              <UploadBar percent={progress} colors={colors} />
             </View>
           )}
 

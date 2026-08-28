@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { Reel, IReel } from '../models/Reel';
-import { deleteCloudinaryAsset } from '../services/cloudinaryService';
+import { deleteAssetIfUnused } from '../services/mediaCleanup';
 import { getYouTubeMeta, isYouTubeUrl } from '../lib/youtube';
 
 // Reels e Historias (cortos verticales ≤60 s).
@@ -269,18 +269,22 @@ export async function getComments(req: Request, res: Response) {
   }
 }
 
-// ── Eliminar (solo el autor; borra el archivo de Cloudinary si lo hay) ───────
+// ── Eliminar (solo el autor; borra el archivo de Cloudinary si no lo usa nadie más)
 export async function deleteReel(req: Request, res: Response) {
   const userId = (req as any).userId as string;
   const { id } = req.params;
   try {
     const reel = await Reel.findOne({ _id: id, authorId: userId });
     if (!reel) { res.status(404).json({ error: 'Reel no encontrado' }); return; }
-    if (reel.cloudinaryPublicId) {
-      deleteCloudinaryAsset(reel.cloudinaryPublicId, 'video').catch(() => {});
-    }
+    const asset = { publicId: reel.cloudinaryPublicId, url: reel.videoUrl, exceptReelId: reel._id as any };
     await reel.deleteOne();
     res.json({ ok: true });
+
+    // La limpieza va DESPUÉS de borrar el documento y fuera de la respuesta.
+    // Y comprueba antes que no quede otro documento usando el mismo archivo: el
+    // editor de publicaciones permite mandar un video a reel, historia y muro a
+    // la vez, y los tres comparten el `cloudinaryPublicId` (se sube una sola vez).
+    deleteAssetIfUnused(asset).catch(() => {});
   } catch {
     res.status(500).json({ error: 'Error eliminando el reel' });
   }

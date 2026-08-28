@@ -6,6 +6,9 @@ import os from 'os';
 import path from 'path';
 import cloudinary from '../config/cloudinary';
 import { normalizeMime } from '../middleware/upload';
+import { logger } from '../services/logger';
+
+const log = logger('upload');
 
 function getResourceType(mimetype: string): 'image' | 'video' | 'raw' {
   if (mimetype.startsWith('image/')) return 'image';
@@ -36,15 +39,35 @@ function sanitizeFileName(name: string): string {
 
 const execFileAsync = promisify(execFile);
 
+const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
 // Videos por encima de este peso se comprimen con ffmpeg antes de subirlos.
-// Los videos son lo que más almacenamiento consume en Cloudinary; re-codificar
-// a 720p H.264 recorta típicamente el 70-90% del peso del archivo.
+// El video es lo que más ancho de banda consume por reproducción (medido en la
+// cuenta real: el 85% del gasto de Cloudinary es TRÁFICO, no almacenamiento), y
+// re-codificar a 720p H.264 recorta típicamente el 70-90% del peso.
 const COMPRESS_VIDEO_MIN_MB = 10;
 
-// Comprime un video a H.264 720p (máx. 1280px en el lado largo) con CRF 30.
-// Devuelve el buffer comprimido SOLO si quedó más pequeño que el original; si
-// ffmpeg falla (no instalado, transcode inválido, timeout) o no reduce, devuelve
-// null y el caller sube el original intacto — la subida nunca se rompe por esto.
+// Calidad. CRF 26 es el punto en el que un video de móvil visto a pantalla
+// completa se sigue viendo limpio; el 30 de antes emborronaba las escenas con
+// movimiento, que es justo lo que se graba en un reel. Cada +6 de CRF ≈ la mitad
+// de peso, así que bajar de 30 a 26 sube el archivo ~60% y sigue siendo una
+// fracción del original.
+const VIDEO_CRF = '26';
+
+/**
+ * Comprime un video a H.264 720p (máx. 1280 px en el lado largo).
+ *
+ * Devuelve el buffer comprimido SOLO si quedó más pequeño que el original; si
+ * ffmpeg falla (no instalado, transcode inválido, timeout) o no reduce, devuelve
+ * null y el llamador sube el original intacto — la subida nunca se rompe por
+ * esto. Lo que SÍ hace ahora es DECIRLO en el log: antes se tragaba el fallo en
+ * silencio y no había forma de saber si ffmpeg seguía instalado en el VPS.
+ *
+ * `-pix_fmt yuv420p` + `profile high` no son adorno: un iPhone graba en HEVC de
+ * 10 bits y libx264 heredaría ese formato produciendo un High 10 que **la
+ * mayoría de navegadores y teléfonos no reproducen** — el video quedaría en
+ * negro justo después de "comprimirlo bien".
+ */
 async function compressVideo(buffer: Buffer, originalName: string): Promise<Buffer | null> {
   if (buffer.length < COMPRESS_VIDEO_MIN_MB * 1024 * 1024) return null;
 
@@ -52,6 +75,7 @@ async function compressVideo(buffer: Buffer, originalName: string): Promise<Buff
   const ext = originalName.includes('.') ? '.' + originalName.split('.').pop()!.toLowerCase() : '';
   const input = path.join(dir, `input${ext}`);
   const output = path.join(dir, 'output.mp4');
+  const startedAt = Date.now();
   try {
     await fs.writeFile(input, buffer);
     await execFileAsync(
@@ -63,17 +87,38 @@ async function compressVideo(buffer: Buffer, originalName: string): Promise<Buff
         '-vf', 'scale=1280:1280:force_original_aspect_ratio=decrease:force_divisible_by=2',
         '-c:v', 'libx264',
         '-preset', 'veryfast',
-        '-crf', '30',
+        '-crf', VIDEO_CRF,
+        // Compatibilidad universal: 8 bits, 4:2:0, perfil High.
+        '-pix_fmt', 'yuv420p',
+        '-profile:v', 'high',
+        '-level', '4.0',
         '-c:a', 'aac',
-        '-b:a', '96k',
+        '-b:a', '128k',
+        // Metadatos fuera (incluida la geolocalización que graba el teléfono),
+        // igual que en las imágenes.
+        '-map_metadata', '-1',
         '-movflags', '+faststart',
         output,
       ],
       { timeout: 180_000, maxBuffer: 4 * 1024 * 1024 }
     );
     const out = await fs.readFile(output);
-    return out.length < buffer.length ? out : null;
-  } catch {
+    const pct = Math.round((1 - out.length / buffer.length) * 100);
+    if (out.length >= buffer.length) {
+      log.info(`video ya optimizado (${mb(buffer.length)}), se sube el original`);
+      return null;
+    }
+    log.info(`video comprimido ${mb(buffer.length)} -> ${mb(out.length)} (-${pct}%) en ${Date.now() - startedAt} ms`);
+    return out;
+  } catch (err: any) {
+    // ENOENT = ffmpeg no está instalado en la máquina. Es el único caso que hay
+    // que arreglar a mano (`apt-get install -y ffmpeg`), y sin este aviso no se
+    // distingue de un video que simplemente no se dejó comprimir.
+    if (err?.code === 'ENOENT') {
+      log.error(`ffmpeg NO está instalado: el video se sube sin comprimir (${mb(buffer.length)}). Instalar con: apt-get install -y ffmpeg`);
+    } else {
+      log.warn(`no se pudo comprimir el video (${mb(buffer.length)}), se sube el original`, err);
+    }
     return null;
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});

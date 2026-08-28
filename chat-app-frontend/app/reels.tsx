@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert, Linking,
+  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert, Linking, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 const goBack = () => { if (router.canGoBack()) router.back(); else router.replace('/comunidad' as any); };
 import { StatusBar } from 'expo-status-bar';
+import { useEvent } from 'expo';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, type Reel, type ReelComment } from '../src/services/reelService';
-import { videoPlayUrl } from '../src/lib/cldImage';
+import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { timeAgo } from '../src/utils/timeAgo';
 
@@ -22,25 +23,72 @@ import { timeAgo } from '../src/utils/timeAgo';
 const PAGE = 10;
 
 function ReelVideo({ reel, active }: { reel: Reel; active: boolean }) {
-  const player = useVideoPlayer(videoPlayUrl(reel.videoUrl), (p) => {
+  // El reproductor SOLO existe mientras el reel está en pantalla. Dos motivos,
+  // y los dos daban PANTALLA NEGRA:
+  //  1. Android limita los descodificadores de video (2-4 según el equipo). Con
+  //     `windowSize` de la lista había varios `VideoView` vivos a la vez —más
+  //     los WebView de los reels de YouTube— y a los que sobraban no les tocaba
+  //     descodificador: negro, sin error.
+  //  2. Pasar `null` como fuente libera el descodificador de verdad
+  //     (`useVideoPlayer` crea un reproductor nuevo al cambiar la fuente).
+  // Mientras no hay reproductor se pinta el primer fotograma que sirve
+  // Cloudinary, así que la tarjeta nunca está en negro.
+  const poster = reel.videoUrl.includes('/video/upload/') ? videoThumbUrl(reel.videoUrl, 640) : null;
+  const player = useVideoPlayer(active ? videoPlayUrl(reel.videoUrl) : null, (p) => {
     p.loop = true;
   });
+  const { status, error } = useEvent(player, 'statusChange', { status: player.status }) ?? { status: 'idle' as const, error: undefined };
+
   // Sin limpieza que toque el reproductor: al salir de la pantalla expo-video
   // ya lo libera, y llamar `pause()` sobre un objeto liberado revienta el
   // render (pantalla en blanco).
   useEffect(() => {
-    try {
-      if (active) player.play();
-      else player.pause();
-    } catch { /* liberado */ }
+    if (!active) return;
+    try { player.play(); } catch { /* liberado */ }
   }, [active, player]);
+
   return (
-    <VideoView
-      player={player}
-      style={{ flex: 1, backgroundColor: '#000' }}
-      contentFit="cover"
-      nativeControls={false}
-    />
+    <View style={{ flex: 1, backgroundColor: '#000' }}>
+      {/* Póster: se ve antes de que el video cargue y en los reels que aún no
+          tocan (sin él, la lista es un rectángulo negro mientras se desplaza). */}
+      {poster && (status !== 'readyToPlay' || !active) && (
+        <Image source={{ uri: poster }} style={{ ...StyleSheet.absoluteFillObject }} resizeMode="cover" />
+      )}
+      {active && (
+        <VideoView
+          player={player}
+          style={{ flex: 1, backgroundColor: 'transparent' }}
+          contentFit="cover"
+          nativeControls={false}
+          // TextureView en vez del SurfaceView por defecto: el SurfaceView es
+          // una ventana aparte del árbol de vistas y dentro de una lista que
+          // pagina se queda EN NEGRO o pinta el fotograma del vecino.
+          surfaceType="textureView"
+        />
+      )}
+      {active && status === 'loading' && (
+        <View style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      )}
+      {active && status === 'error' && (
+        <Pressable
+          onPress={() => Linking.openURL(reel.videoUrl).catch(() => {})}
+          style={{ ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.7)' }}
+        >
+          <Ionicons name="alert-circle-outline" size={40} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 14, paddingHorizontal: 30, textAlign: 'center' }}>
+            No se pudo reproducir este video
+          </Text>
+          {!!error?.message && (
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, paddingHorizontal: 30, textAlign: 'center' }}>
+              {error.message}
+            </Text>
+          )}
+          <Text style={{ color: '#fff', fontWeight: '700', marginTop: 4 }}>Abrir fuera de la app</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -69,6 +117,18 @@ function ReelYouTube({ reel, active }: { reel: Reel; active: boolean }) {
           Ver en YouTube (no se pudo incrustar · {failed})
         </Text>
       </TouchableOpacity>
+    );
+  }
+
+  // El WebView solo se monta en el reel activo: cada uno se queda un
+  // descodificador de video y con varios a la vez los de abajo salen en negro.
+  if (!active) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        {!!reel.thumbUrl && (
+          <Image source={{ uri: reel.thumbUrl }} style={{ ...StyleSheet.absoluteFillObject }} resizeMode="cover" />
+        )}
+      </View>
     );
   }
 
@@ -189,8 +249,13 @@ export default function ReelsScreen() {
     } catch { /* best-effort */ }
   };
 
-  const renderItem = ({ item }: { item: Reel }) => {
-    const isActive = item.id === activeId;
+  // El reel por el que se abre la lista (una tarjeta del carrusel, o el primero).
+  const initialIndex = Math.max(0, reels.findIndex((r) => r.id === openId));
+
+  const renderItem = ({ item, index }: { item: Reel; index: number }) => {
+    // Hasta que la lista informa de qué hay a la vista, el activo es aquel por
+    // el que se abrió: si no, el primer reel se quedaría quieto en su póster.
+    const isActive = activeId ? item.id === activeId : index === initialIndex;
     const isMine = item.author.id === user?.id;
     return (
       <View style={{ height, backgroundColor: '#000' }}>
@@ -276,7 +341,7 @@ export default function ReelsScreen() {
       ) : (
         <FlatList
           data={reels}
-          initialScrollIndex={Math.max(0, reels.findIndex((r) => r.id === openId))}
+          initialScrollIndex={initialIndex}
           onScrollToIndexFailed={() => { /* getItemLayout lo evita; nunca romper la pantalla */ }}
           keyExtractor={(r) => r.id}
           renderItem={renderItem}

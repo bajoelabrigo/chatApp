@@ -15,7 +15,9 @@ import { ReactionsBar, QuickReactionRow, emojiPickerTheme } from './reactions';
 import { ImageViewerModal } from './ImageViewerModal';
 import { PostOptionsSheet } from './PostOptionsSheet';
 import { PostLinkPreview } from './PostLinkPreview';
+import { PostVideo } from './PostVideo';
 import { extractLinks } from '../../lib/linkMeta';
+import { cleanUrl, isVideoUrl } from '../../lib/postMedia';
 
 const LINKED_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   activity: 'flame', plan: 'book', prayer: 'hand-left', answered: 'checkmark-circle',
@@ -157,18 +159,23 @@ export function PostCard({
 
   const isOwner = post.author._id === user?.id;
 
+  // `post.image` guarda CUALQUIER adjunto, no solo fotos: un video iba a un
+  // `<Image>` y dejaba un hueco vacío (en la web, un enlace que descargaba).
+  const attachment = cleanUrl(post.image);
+  const attachmentIsVideo = isVideoUrl(post.image);
+
   // Alto de la imagen según su relación de aspecto real — antes se recortaba
   // siempre a 220dp de alto con resizeMode="cover".
   useEffect(() => {
-    if (!post.image) { setImgAspect(null); return; }
+    if (!attachment || attachmentIsVideo) { setImgAspect(null); return; }
     let cancelled = false;
     Image.getSize(
-      post.image,
+      attachment,
       (w, h) => { if (!cancelled && w > 0 && h > 0) setImgAspect(w / h); },
       () => {}
     );
     return () => { cancelled = true; };
-  }, [post.image]);
+  }, [attachment, attachmentIsVideo]);
 
   const applyReactionResult = (result: { likes: any[]; reactions: PostReaction[] }) => {
     const uid = user?.id ?? '';
@@ -275,8 +282,11 @@ export function PostCard({
         </View>
       )}
 
+      {/* Video adjunto — se reproduce aquí mismo, como en Facebook */}
+      {attachmentIsVideo && <PostVideo url={attachment} colors={colors} />}
+
       {/* Imagen — alto según su relación de aspecto real, para no recortarla */}
-      {!!post.image && (
+      {!!attachment && !attachmentIsVideo && (
         <TouchableOpacity
           activeOpacity={0.9}
           onPress={() => setImageViewerOpen(true)}
@@ -284,7 +294,7 @@ export function PostCard({
           style={{ marginTop: 10 }}
         >
           <Image
-            source={{ uri: cld(post.image, Math.round(imgContainerWidth) || 360) }}
+            source={{ uri: cld(attachment, Math.round(imgContainerWidth) || 360) }}
             style={{
               width: '100%',
               height: imgAspect && imgContainerWidth
@@ -368,7 +378,7 @@ export function PostCard({
         categoryPosition="top"
       />
 
-      <ImageViewerModal visible={imageViewerOpen} url={post.image} onClose={() => setImageViewerOpen(false)} />
+      <ImageViewerModal visible={imageViewerOpen} url={attachment} onClose={() => setImageViewerOpen(false)} />
 
       <PostOptionsSheet
         visible={optionsOpen}

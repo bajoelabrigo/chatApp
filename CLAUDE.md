@@ -167,6 +167,242 @@ Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed ve
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
 - **Navegación estilo Facebook en la web (2026-08-26)**: `frontend/src/lib/useSwipeNav.js` (teclado, rueda y deslizar con el dedo) lo usan `StoryViewer` (eje x) y `ReelsPage` (eje y). El gesto exige que el **eje dominante** coincida —si no, un deslizamiento en diagonal salta de historia— y bloquea la rueda 500 ms, porque un solo gesto de trackpad emite decenas de eventos; se desactiva con un modal abierto (comentarios, "quién la vio") o las flechas del teclado navegarían mientras se escribe. **Las flechas visibles son `md:` solamente**: en el móvil se desliza y unos botones ahí taparían el video. Los carruseles usan `components/reels/CarouselRow.jsx`, que mide con `ResizeObserver` (el contenido llega por consulta, no basta medir al montar) y solo enciende la flecha del lado que tiene recorrido. En `StoriesRow`, **"Crear" y "Reels" van FUERA del contenedor que se desplaza**: son accesos, y con unas cuantas historias se perdían de vista.
 
+## Un video que "no se ve" — casi siempre es un `<video>` SIN PÓSTER (2026-08-28)
+
+"Subo un video y solo recibo pantalla negra" fue **la web**, no la app. Un
+`<video>` sin `poster` es un rectángulo NEGRO hasta que el navegador descarga y
+decodifica el primer fotograma — y en **iOS `preload` se ignora**, así que eso
+no pasa nunca hasta que alguien le da al play. En las tarjetas de los carruseles
+(`VideoPreviewCard`) el previo se dispara con el **hover**, que en un teléfono no
+existe: el resultado era una tira de rectángulos negros.
+
+- **Regla: todo `<video>` de la web lleva `poster={videoThumbUrl(url)}`.**
+  `videoThumbUrl` (`frontend/src/lib/cldImage.js`, espejo del móvil) pide a
+  Cloudinary el fotograma `so_1` como `.jpg`. Si la URL no trae extensión hay que
+  AÑADIR `.jpg`, no sustituirla, o Cloudinary devuelve el video.
+- **`muted` en React no basta para el autoplay**: React lo aplica como PROPIEDAD
+  del elemento y la política del navegador mira el elemento al empezar a cargar,
+  así que `play()` se rechaza y no pasa nada visible. Hay que fijar `v.muted` a
+  mano en un efecto ANTES de llamar a `play()`, y enseñar un botón de play si el
+  `play()` se rechaza igual (ahorro de datos, bajo consumo de iOS). Todo eso vive
+  en **`components/reels/ReelVideo.jsx`**, que usan `/reels` y `StoryViewer`.
+- **En el móvil el equivalente es `surfaceType="textureView"`** en el `VideoView`
+  de expo-video. El `surfaceView` por defecto de Android es una ventana aparte
+  del árbol de vistas: dentro de una lista que pagina se queda en negro o pinta
+  el fotograma del vecino. Y **el reproductor solo se crea para el elemento
+  activo** (`useVideoPlayer(active ? url : null)`): Android permite 2-4
+  descodificadores a la vez y a los sobrantes —más los WebView de los reels de
+  YouTube— no les toca ninguno, otra vez negro y sin ningún error. Mientras no
+  hay reproductor se pinta el póster.
+- Los dos clientes muestran ahora **cargando / error con "abrir fuera de la app"**
+  en vez de un negro mudo: un video que falla tenía exactamente el mismo aspecto
+  que uno que aún no había cargado.
+
+## Borrar un documento tiene que borrar su archivo de Cloudinary (2026-08-28)
+
+Dos agujeros distintos, y el segundo lo abrió el propio editor multidestino:
+
+**1. Las historias caducaban y su video se quedaba.** El índice TTL de Mongo
+borraba el documento en cuanto vencía, con el `cloudinaryPublicId` dentro, y
+**nadie podía limpiar el video después porque ya no quedaba rastro de cuál era**.
+Una historia es justo lo que más se publica y menos dura.
+- El borrado real lo hace ahora un barrido en `cronService` (**cada 10 min**):
+  borra el documento Y el archivo.
+- El TTL pasa a ser red de seguridad con **3 días de margen**
+  (`scripts/reelsTtlGrace.mjs`, un `collMod`). **Mongoose NUNCA cambia las
+  opciones de un índice que ya existe**: ponerlo en el esquema no habría hecho
+  nada, en silencio. Sin ese script el barrido no llega a tiempo y el agujero
+  sigue abierto.
+- Los clientes no notan nada: las lecturas ya filtran `expiresAt > ahora`, así
+  que una historia vencida es invisible desde el segundo en que vence.
+
+**2. Un mismo archivo puede tener VARIOS dueños.** Desde que el editor permite
+marcar publicación + reel + historia a la vez, el video se sube UNA sola vez y
+los tres documentos comparten `cloudinaryPublicId`. Borrar uno destruía el video
+de los otros: el reel se ve, la historia no, y nadie entiende por qué.
+- **Nada se destruye sin recuento de referencias**:
+  `chat-app-backend/src/services/mediaCleanup.ts` (`deleteAssetIfUnused`)
+  y su espejo `holy_app/backend/utils/cloudinaryDelete.js`
+  (`destroyCloudinaryUrlsIfUnused`) — al tocar las reglas, editar las dos.
+- **La clave de búsqueda es el `publicId`, NUNCA la URL entera.** El mismo
+  archivo se guarda con URLs distintas según quién las escribiera: con prefijo de
+  versión o sin él, con transformaciones por delante (`/f_mp4/`, `/so_1,w_640/`)
+  y en los posts con el nombre original en el fragmento (`…mp4#name=video.mp4`).
+  Comparar cadenas completas da un "no está referenciado" falso — y ese es el
+  fallo caro, porque es un borrado de más. Los puntos del publicId se escapan en
+  el regex o `chat-app/x.mp4` casaría también `xXmp4`.
+- **Ante cualquier duda NO se borra**: si la comprobación falla, el archivo se
+  queda. Uno que sobra cuesta céntimos; uno borrado de más rompe un reel vivo.
+- `messages` **no** se consulta a propósito: los adjuntos del chat se suben por
+  mensaje y jamás comparten archivo, y un regex ahí es un barrido completo contra
+  el M0 de París (~205 ms por viaje) cada vez que caduca una historia.
+- **Hay DOS `deletePost`**, uno por backend, y los dos limpiaban sin comprobar:
+  `chat-app-backend/src/controllers/postController.ts` (el que usa la app) y
+  `holy_app/backend/controllers/media/postController.js` (el de la web). La
+  colección `posts` es la MISMA para los dos.
+- Cubierto por `chat-app-backend/scripts/mediaCleanup.test.mjs`, que cazó de
+  entrada que `publicIdFromUrl` no quitaba el fragmento `#name=` y devolvía un
+  publicId con basura pegada.
+
+## Qué gasta la cuenta de Cloudinary — medido, no supuesto (2026-08-28)
+
+Con la API de administración (`cloudinary.api.usage()`), cuenta real `drojpkloa`:
+
+| | valor | créditos | % del gasto |
+|---|---|---|---|
+| Plan | **Small PAYG**, 34,74 de 60 créditos (**57,9%**) | | |
+| **Ancho de banda** | 34,4 GB | **29,51** | **85%** |
+| Transformaciones | 3.443 | 3,44 | 10% |
+| Almacenamiento | 1,92 GB | 1,79 | 5% |
+| Videos (53 archivos) | **147 MB en total** | — | 7,7% del almacenamiento |
+
+**Lo que se lleva la cuenta es el TRÁFICO, no el almacenamiento**, y los videos
+son una parte diminuta de lo guardado. Consecuencias al optimizar aquí:
+
+- **Comprimir antes de subir sigue siendo la palanca correcta para los videos**,
+  pero por el tráfico de CADA reproducción, no por el disco: un video de 13 MB
+  visto 100 veces son 1,3 GB de tráfico.
+- **NO tocar `videoPlayUrl` para ahorrar el derivado `f_mp4`.** Es tentador (cada
+  derivado duplica el archivo), pero duplicar los 147 MB de video entero cuesta
+  ~0,14 créditos de 60. No compensa el riesgo de servir un `.mp4` con HEVC a un
+  navegador que no lo descodifica.
+- La palanca de verdad para el tráfico ya está puesta y es `cld()` en las
+  imágenes (ver el apartado del principio).
+
+**Cómo repetir la medida** (no hay panel que lo desglose así): un script suelto
+en `chat-app-backend/` con `cloudinary.api.usage()` y `cloudinary.api.resources({resource_type:'video'})`. El `.env` del backend ya tiene las credenciales.
+
+## Compresión de video en `/upload` — y cómo saber si ffmpeg sigue vivo
+
+`compressVideo` (`uploadController.ts`) recodifica con ffmpeg todo video > 10 MB
+antes de subirlo a Cloudinary. Si ffmpeg falta o falla, se sube el original: la
+subida **nunca** se rompe por esto.
+
+- **`-pix_fmt yuv420p` + `-profile:v high -level 4.0` no son adorno.** Un iPhone
+  graba en HEVC de **10 bits**, y libx264 hereda ese formato produciendo un
+  **High 10** que la mayoría de navegadores y teléfonos NO reproducen: el video
+  quedaría en negro justo después de "comprimirlo bien".
+- **CRF 26, no 30.** Cada +6 de CRF ≈ la mitad de peso; el 30 que había
+  emborronaba las escenas con movimiento, que es justo lo que se graba en un
+  reel. Con 26 el archivo sube ~60% respecto al 30 y sigue siendo una fracción
+  del original. Audio a 128k.
+- **`-map_metadata -1`**: fuera EXIF y geolocalización, igual que en las
+  imágenes (`sharp`).
+- **El fallo ya no es silencioso.** Antes `catch { return null }` se tragaba
+  todo y no había forma de saber si ffmpeg seguía instalado en el VPS. Ahora
+  escribe una línea por subida: `video comprimido 28.0 MB -> 1.1 MB (-96%)`, o
+  `ffmpeg NO está instalado` (ENOENT) con el comando para arreglarlo.
+  Comprobación directa: `ssh root@145.223.27.84 "ffmpeg -version | head -1"`.
+
+## Barra de progreso al subir — el 100% no es el final
+
+`UploadBar` está espejado en `holy_app/frontend/src/components/UploadBar.jsx` y
+`chat-app-frontend/src/components/UploadBar.tsx`; el % sale de `onUploadProgress`
+de axios (`uploadReelVideo` en la web, `uploadFile` en el móvil, los dos con un
+parámetro `onProgress` opcional).
+
+- **Al llegar a 100 la barra dice "procesando en el servidor…"**, no se queda
+  quieta: los bytes ya viajaron pero el backend aún recomprime con ffmpeg antes
+  de mandarlo a Cloudinary, y en un video largo eso son varios segundos. Una
+  barra clavada en 100 se lee como "se colgó" y la gente vuelve a pulsar publicar.
+- Sitios donde va: el editor de publicaciones (los dos clientes) y la pantalla /
+  modal de crear reel. El chat tiene la suya propia desde antes
+  (`zustand/useUploads.js` + `chat/UploadProgress.jsx`).
+
+## El Service Worker NO puede cachear video ni audio (iPhone, 2026-08-28)
+
+El `runtimeCaching` de `vite.config.js` cogía **todo** `res.cloudinary.com` con
+`CacheFirst`. **WebKit —Safari y también Chrome en iPhone, que es WebKit— pide
+todo medio con cabecera `Range` y exige un 206**; Workbox le devolvía el 200
+entero que tenía guardado y el elemento abortaba con un error de medio.
+
+Síntoma exacto, y es lo que lo identifica: **el video va bien en el escritorio,
+en el iPhone sale la portada y "no se pudo reproducir", y abrir ESA MISMA URL en
+otra pestaña sí funciona** — esa navegación va a `res.cloudinary.com`, fuera del
+ámbito del SW, así que no lo intercepta. Chrome de escritorio se conforma con un
+200 para una petición con `Range`; WebKit no.
+
+- **La regla del `urlPattern` excluye ahora `request.destination` video/audio y
+  las extensiones de medio.** Sin regla que las capture, la petición va a la red
+  tal cual, que es lo correcto: Workbox tiene `workbox-range-requests` para
+  servirlas desde caché, pero un solo video se come el hueco de cientos de
+  avatares en un caché de 500 entradas.
+- **Las miniaturas de video SÍ se siguen cacheando**: son `.jpg` (`so_1`) y su
+  `destination` es `image`. Por eso el filtro mira el destino y la extensión, no
+  la carpeta `/video/upload/` (donde también viven los pósteres).
+- `public/push-sw.js` borra en su `activate` lo que la versión anterior del SW ya
+  había guardado: esas entradas ya no se sirven, pero seguían ocupando cuota — y
+  en iOS la cuota es escasa y su desalojo se lleva por delante lo demás.
+- `ReelVideo` reintenta UNA vez con la URL original (sin `f_mp4`) antes de darse
+  por vencido, y el aviso enseña el código de `MediaError`: sin él, "no se pudo
+  reproducir" no distingue red, códec ni formato, y sin un iPhone delante no hay
+  forma de saberlo (misma idea que el código de error de `YouTubeEmbed`).
+
+## `/reels` en la web: scroll nativo con encaje, no un contador (2026-08-28)
+
+La página era un carrusel de UN elemento con estado `index`: el contenido no
+subía, no se podía arrastrar y el contenedor llevaba **`touch-none`**, que además
+mataba el gesto en el móvil. Ahora es un contenedor `snap-y snap-mandatory` con
+`overflow-y-auto` y cada reel `h-full snap-start`: la inercia y el encaje los
+pone el sistema operativo, que es lo que hace que en el iPhone parezca la app.
+
+- **Cuál está activo lo decide un `IntersectionObserver`** con `root` en el
+  contenedor (la página no se desplaza) y `threshold: 0.6`, no un contador.
+- **Solo el reel activo monta reproductor** (`<video>` o el iframe de YouTube);
+  los demás son su póster. En el iPhone varios a la vez agotan los
+  descodificadores y los sobrantes salen en negro.
+- **El `src` del iframe de YouTube no puede depender del activo**: cambiarlo
+  recarga el iframe en cada desplazamiento. Se monta o no se monta, y el `src`
+  lleva siempre `autoplay=1`.
+- **Nada de `useSwipeNav` aquí**: interceptar la rueda o el dedo pelea con el
+  encaje nativo. Solo queda el teclado (↑/↓) para escritorio.
+- El visor de historias sí lo sigue usando, ahora con `axis: "both"` — se avanza
+  deslizando de lado (Instagram) y también hacia arriba (TikTok).
+- Cubierto por `frontend/scripts/reelsUi.test.mjs`.
+
+## Un video en una PUBLICACIÓN — `post.image` no es solo una foto (2026-08-28)
+
+`post.image` guarda **cualquier** adjunto. Un video de iPhone llega como `.mov` y
+ninguna de las listas de extensiones lo contemplaba: en la web caía en el
+"cajón de sastre" y salía como **un enlace que al pulsarlo DESCARGABA el
+archivo**; en el móvil iba a un `<Image>` y dejaba un hueco vacío; y el
+`PostDetailModal` pintaba un `<img>` roto.
+
+- **Un solo componente por cliente**: `frontend/src/components/PostAttachment.jsx`
+  (feed + detalle) y `chat-app-frontend/src/components/comunidad/PostVideo.tsx`.
+  Nada de repetir la cadena de `if (extension === ...)` en cada vista.
+- **El tipo se decide con `isVideoUrl`** (`frontend/src/lib/fileName.js` ↔
+  `chat-app-frontend/src/lib/postMedia.ts`, espejados): extensiones conocidas
+  **y** `/video/upload/`. Ojo: Cloudinary guarda el audio con
+  `resource_type: 'video'`, así que las extensiones de audio se descartan ANTES.
+- **`cleanUrl` siempre**: la web guarda el nombre original en el fragmento
+  (`…/a.mov#name=IMG_1.MOV`); sin quitarlo, la extensión leída es `MOV"` y el
+  `src` se lleva el fragmento.
+- En el móvil el reproductor **solo se monta al tocar** (póster + botón de play):
+  un `VideoView` por publicación agota los descodificadores del teléfono.
+- Cubierto por `frontend/scripts/reelsUi.test.mjs`.
+
+## Subir un video: un minuto, y puede ir a VARIOS sitios (2026-08-28)
+
+Al adjuntar un video en el editor de publicaciones (los dos clientes) se pregunta
+**a dónde va, con casillas y no con botones**: publicación, reel y/o historia —
+se puede marcar más de uno.
+
+- **El archivo se sube UNA sola vez**, al elegirlo, y la misma URL alimenta los
+  tres destinos (`createReel` por cada tipo marcado + `createPost`). Subirlo por
+  destino sería el doble de espera y de datos.
+- Sin "Publicación" marcada NO se crea post; el texto del editor pasa a ser la
+  descripción del reel/historia (en la web hay que convertir el HTML de Quill a
+  texto plano con `plainText`).
+- **Límite de 1 minuto**, el mismo que un reel, y 64 MB (el tope de video de
+  `/upload`). En Android **un `Alert` solo enseña tres botones**, por eso el
+  selector del móvil es un `Modal` propio.
+- **⚠ `asset.duration` de expo-image-picker viene en MILISEGUNDOS.** Comparado
+  tal cual contra 60, cualquier video de la galería "duraba" miles de segundos:
+  `reel-create.tsx` los rechazaba TODOS con «este dura 2000s» y el que se colaba
+  se guardaba con una duración mil veces mayor. `videoMaxDuration` además solo
+  limita la GRABACIÓN, no lo que se elige de la galería.
+
 ## YouTube en el móvil — el embed NUNCA como URL del WebView (2026-08-25)
 
 `source={{ uri: 'https://www.youtube.com/embed/<id>' }}` es lo que produce el **error 153**: así el WebView es el marco superior y el reproductor llega **sin referer**, o sea un embed en un sitio no autorizado. Añadir `mute=1`, `domStorageEnabled` u `originWhitelist` no toca la causa. Lo correcto es servir un **HTML propio con el iframe dentro** y declarar `baseUrl` (el documento pasa a tener ese origen) — es lo que hace `react-native-youtube-iframe`, replicado sin dependencia en `src/components/comunidad/YouTubeEmbed.tsx`.

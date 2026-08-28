@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Modal, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import EmojiPicker, { type EmojiType } from 'rn-emoji-keyboard';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -11,11 +12,19 @@ import { usePostsStore } from '../../src/store/usePostsStore';
 import { cld } from '../../src/lib/cldImage';
 import { uploadFile } from '../../src/services/uploadService';
 import { createPost } from '../../src/services/postService';
+import { createReel } from '../../src/services/reelService';
 import { PostLinkPreview } from '../../src/components/comunidad/PostLinkPreview';
 import { extractLinks } from '../../src/lib/linkMeta';
 import { emojiPickerTheme } from '../../src/components/comunidad/reactions';
 import BibleModal from '../../src/components/chat/BibleModal';
+import { UploadBar } from '../../src/components/UploadBar';
 import type { SharedBible } from '../../src/services/conversationService';
+
+// Un video en una publicación se rige por las mismas reglas que un reel: como
+// mucho un minuto. Más largo no se sube — y antes de adjuntarlo se pregunta si
+// el autor prefiere publicarlo como reel o como historia, que es donde los
+// videos cortos se ven de verdad.
+const MAX_VIDEO_SECONDS = 60;
 
 export default function CreatePostScreen() {
   const { colors } = useTheme();
@@ -34,6 +43,20 @@ export default function CreatePostScreen() {
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  // Video adjunto: la previa es el archivo local y lo que se publica es la URL
+  // que devolvió Cloudinary (el mismo campo `image` del post: guarda cualquier
+  // adjunto, no solo fotos).
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoPublicId, setVideoPublicId] = useState<string | null>(null);
+  const [videoSeconds, setVideoSeconds] = useState<number | undefined>(undefined);
+  // A DÓNDE va el video. Se puede marcar más de uno: el archivo se sube UNA vez
+  // y la misma URL alimenta la publicación, el reel y la historia.
+  const [targets, setTargets] = useState({ post: true, reel: false, story: false });
+  const [targetsOpen, setTargetsOpen] = useState(false);
+  const videoPlayer = useVideoPlayer(videoUri, (p) => { p.loop = true; });
   const [posting, setPosting] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [bibleOpen, setBibleOpen] = useState(false);
@@ -80,6 +103,72 @@ export default function CreatePostScreen() {
     setImageUrl(null);
   };
 
+  const pickVideo = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permiso denegado', 'Activa el acceso a la galería en Ajustes.'); return; }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['videos'],
+      videoMaxDuration: MAX_VIDEO_SECONDS,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    // `asset.duration` viene en MILISEGUNDOS. Y `videoMaxDuration` solo limita
+    // la GRABACIÓN: un video largo elegido de la galería llega entero, así que
+    // el tope de un minuto hay que aplicarlo aquí.
+    const seconds = asset.duration != null ? asset.duration / 1000 : undefined;
+    if (seconds != null && seconds > MAX_VIDEO_SECONDS + 1) {
+      Alert.alert(
+        'Video muy largo',
+        `Este dura ${Math.round(seconds)} segundos y el máximo es de ${MAX_VIDEO_SECONDS}. Recórtalo antes de subirlo.`
+      );
+      return;
+    }
+
+    // Un post lleva un solo adjunto: el video reemplaza foto y versículo.
+    setImageUri(null);
+    setImageUrl(null);
+    setBibleAttachment(null);
+    setVideoUri(asset.uri);
+    setVideoUrl(null);
+    setVideoPublicId(null);
+    setVideoSeconds(seconds != null ? Math.round(seconds) : undefined);
+    setTargetsOpen(true);
+
+    if (!token) return;
+    setUploadingVideo(true);
+    setVideoProgress(0);
+    try {
+      const uploaded = await uploadFile(token, asset.uri, 'video/mp4', `video-${Date.now()}.mp4`, setVideoProgress);
+      setVideoUrl(uploaded.url);
+      setVideoPublicId(uploaded.publicId);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo subir el video');
+      setVideoUri(null);
+      setTargetsOpen(false);
+    } finally {
+      setUploadingVideo(false);
+    }
+  };
+
+  const removeVideo = () => {
+    setVideoUri(null);
+    setVideoUrl(null);
+    setVideoPublicId(null);
+    setVideoSeconds(undefined);
+    setTargets({ post: true, reel: false, story: false });
+  };
+
+  const toggleTarget = (key: 'post' | 'reel' | 'story') =>
+    setTargets((t) => ({ ...t, [key]: !t[key] }));
+
+  const targetLabel = [
+    targets.post && 'Publicación',
+    targets.reel && 'Reel',
+    targets.story && 'Historia',
+  ].filter(Boolean).join(' · ');
+
   const handleEmojiSelected = (e: EmojiType) => setText((prev) => prev + e.emoji);
 
   const handleBibleSelected = (passage: SharedBible) => {
@@ -88,26 +177,51 @@ export default function CreatePostScreen() {
     // cualquier foto ya elegida, para no mezclar dos tarjetas en un mismo post.
     setImageUri(null);
     setImageUrl(null);
+    removeVideo();
     setBibleAttachment(passage);
   };
 
-  const canPost = (text.trim().length > 0 || !!imageUrl || !!bibleAttachment) && !uploadingImage && !posting;
+  // Con un video hay que haber marcado al menos un destino; si no, no hay nada
+  // que publicar por mucho que el archivo esté subido.
+  const anyTarget = targets.post || targets.reel || targets.story;
+  const canPost =
+    (text.trim().length > 0 || !!imageUrl || !!bibleAttachment || (!!videoUrl && anyTarget)) &&
+    !uploadingImage && !uploadingVideo && !posting;
 
   const handlePost = async () => {
     if (!token || !canPost) return;
     setPosting(true);
     try {
-      const created = await createPost(token, {
-        content: text.trim() || undefined,
-        image: imageUrl ?? undefined,
-        linked: bibleAttachment
-          ? { type: 'bible', verses: bibleAttachment.verses, version: bibleAttachment.version }
-          : undefined,
-      });
-      setFeed('discover', [created, ...discoverFeed]);
-      // El backend siempre te incluye a ti mismo en el scope "friends", así que
-      // tu propio post nuevo también debe verse ahí sin esperar a un refetch.
-      setFeed('friends', [created, ...friendsFeed]);
+      // El video puede ir a varios sitios a la vez. El archivo ya está subido
+      // (una sola vez, al elegirlo): aquí solo se crean los documentos que
+      // apuntan a esa misma URL.
+      if (videoUrl) {
+        for (const kind of ['reel', 'story'] as const) {
+          if (!targets[kind]) continue;
+          await createReel(token, {
+            kind,
+            caption: text.trim(),
+            videoUrl,
+            cloudinaryPublicId: videoPublicId ?? undefined,
+            durationSeconds: videoSeconds,
+          });
+        }
+      }
+
+      // Sin video se publica siempre; con video, solo si marcó "Publicación".
+      if (!videoUrl || targets.post) {
+        const created = await createPost(token, {
+          content: text.trim() || undefined,
+          image: imageUrl ?? videoUrl ?? undefined,
+          linked: bibleAttachment
+            ? { type: 'bible', verses: bibleAttachment.verses, version: bibleAttachment.version }
+            : undefined,
+        });
+        setFeed('discover', [created, ...discoverFeed]);
+        // El backend siempre te incluye a ti mismo en el scope "friends", así que
+        // tu propio post nuevo también debe verse ahí sin esperar a un refetch.
+        setFeed('friends', [created, ...friendsFeed]);
+      }
       router.back();
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo publicar');
@@ -184,6 +298,43 @@ export default function CreatePostScreen() {
             </View>
           )}
 
+          {videoUri && (
+            <View style={{ marginTop: 16 }}>
+              <View style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', backgroundColor: '#000', aspectRatio: 9 / 16, maxHeight: 340 }}>
+                <VideoView
+                  player={videoPlayer}
+                  style={{ flex: 1 }}
+                  contentFit="contain"
+                  nativeControls
+                  surfaceType="textureView"
+                />
+                {uploadingVideo && (
+                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.55)', gap: 12, paddingHorizontal: 20 }}>
+                    <ActivityIndicator color="#fff" />
+                    <UploadBar percent={videoProgress} colors={colors} />
+                  </View>
+                )}
+                <TouchableOpacity
+                  onPress={removeVideo}
+                  style={{ position: 'absolute', top: 8, right: 8, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Ionicons name="close" size={18} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setTargetsOpen(true)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border }}
+              >
+                <Ionicons name="albums-outline" size={18} color={colors.accent} />
+                <Text style={{ flex: 1, color: colors.textPrimary, fontSize: 13 }}>
+                  Se publicará en: <Text style={{ fontWeight: '700' }}>{targetLabel || 'nada seleccionado'}</Text>
+                </Text>
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>Cambiar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {bibleAttachment && (
             <View style={{ marginTop: 16, borderRadius: 14, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.accent, padding: 14 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -202,11 +353,15 @@ export default function CreatePostScreen() {
         </ScrollView>
 
         <View style={{ flexDirection: 'row', gap: 24, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
-          <TouchableOpacity onPress={pickImage} disabled={!!imageUri || !!bibleAttachment} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: imageUri || bibleAttachment ? 0.4 : 1 }}>
+          <TouchableOpacity onPress={pickImage} disabled={!!imageUri || !!bibleAttachment || !!videoUri} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: imageUri || bibleAttachment || videoUri ? 0.4 : 1 }}>
             <Ionicons name="image-outline" size={22} color={colors.accent} />
             <Text style={{ color: colors.accent, fontWeight: '600' }}>Foto</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setBibleOpen(true)} disabled={!!bibleAttachment || !!imageUri} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: bibleAttachment || imageUri ? 0.4 : 1 }}>
+          <TouchableOpacity onPress={pickVideo} disabled={!!imageUri || !!bibleAttachment || !!videoUri} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: imageUri || bibleAttachment || videoUri ? 0.4 : 1 }}>
+            <Ionicons name="videocam-outline" size={22} color={colors.accent} />
+            <Text style={{ color: colors.accent, fontWeight: '600' }}>Video</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setBibleOpen(true)} disabled={!!bibleAttachment || !!imageUri || !!videoUri} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, opacity: bibleAttachment || imageUri || videoUri ? 0.4 : 1 }}>
             <Ionicons name="bookmark-outline" size={22} color={colors.accent} />
             <Text style={{ color: colors.accent, fontWeight: '600' }}>Versículo</Text>
           </TouchableOpacity>
@@ -226,6 +381,68 @@ export default function CreatePostScreen() {
         enableRecentlyUsed
         categoryPosition="top"
       />
+
+      {/* A dónde va el video. Se puede marcar MÁS DE UNO: el mismo archivo se
+          publica como reel, como historia y/o como publicación del feed, y se
+          sube UNA sola vez. Es un modal propio y no un `Alert` porque en Android
+          un Alert solo enseña tres botones, y aquí hacen falta casillas. */}
+      <Modal visible={targetsOpen} transparent animationType="slide" onRequestClose={() => setTargetsOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setTargetsOpen(false)}>
+          <Pressable
+            onPress={() => {}}
+            style={{ backgroundColor: colors.actionSheetBg ?? colors.bgSecondary, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 34 }}
+          >
+            <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', textAlign: 'center' }}>
+              ¿Dónde quieres publicar el video?
+            </Text>
+            <Text style={{ color: colors.textMuted, fontSize: 13, textAlign: 'center', marginTop: 4 }}>
+              Puedes marcar más de una opción.
+            </Text>
+
+            {([
+              { key: 'reel', icon: 'play-circle-outline', title: 'Reel', desc: 'Permanente, en el feed vertical de reels' },
+              { key: 'story', icon: 'time-outline', title: 'Historia', desc: 'Desaparece a las 24 horas' },
+              { key: 'post', icon: 'newspaper-outline', title: 'Publicación', desc: 'En el muro de la comunidad, con comentarios' },
+            ] as const).map((opt) => {
+              const on = targets[opt.key];
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  onPress={() => toggleTarget(opt.key)}
+                  activeOpacity={0.8}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12,
+                    padding: 14, borderRadius: 14,
+                    borderWidth: 1.5, borderColor: on ? colors.accent : colors.border,
+                    backgroundColor: on ? colors.accent + '14' : 'transparent',
+                  }}
+                >
+                  <Ionicons name={opt.icon} size={24} color={on ? colors.accent : colors.textSecondary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 15 }}>{opt.title}</Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>{opt.desc}</Text>
+                  </View>
+                  <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? colors.accent : colors.textMuted} />
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              onPress={() => setTargetsOpen(false)}
+              disabled={!anyTarget}
+              style={{
+                marginTop: 18, paddingVertical: 14, borderRadius: 24,
+                backgroundColor: colors.accent, alignItems: 'center', opacity: anyTarget ? 1 : 0.5,
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Listo</Text>
+            </TouchableOpacity>
+            <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 10 }}>
+              El texto que escribas será la descripción en todas las opciones.
+            </Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <BibleModal visible={bibleOpen} onClose={() => setBibleOpen(false)} onSendBible={handleBibleSelected} />
     </SafeAreaView>
