@@ -327,18 +327,29 @@ function StoryItem({
         </View>
       )}
 
-      {/* Responder por chat. `zIndex` por encima de las zonas táctiles (10): si
-          no, tocar el campo se lo come el "siguiente". En la propia no se
-          ofrece: no tiene sentido escribirse a uno mismo. */}
+      {/* Mensaje PRIVADO al autor, que no es lo mismo que comentar. Las dos
+          cosas conviven en esta pantalla y antes solo se distinguían por el
+          texto gris de dentro de la caja: poquísima señal para dos acciones con
+          consecuencias opuestas — una la lee toda la comunidad y la otra solo el
+          autor. De ahí el icono de sobre y la línea de aviso.
+
+          `zIndex` por encima de las zonas táctiles (10): si no, tocar el campo se
+          lo come el "siguiente". En la propia no se ofrece: no tiene sentido
+          escribirse a uno mismo. */}
       {!isMine && (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ position: 'absolute', left: 12, right: 12, bottom: 16, zIndex: 20, flexDirection: 'row', gap: 8 }}
+          style={{ position: 'absolute', left: 12, right: 12, bottom: 16, zIndex: 20 }}
         >
+          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '600', marginBottom: 4, marginLeft: 14 }}>
+            Mensaje privado · solo lo verá {story.author.name}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Ionicons name="mail-outline" size={18} color="rgba(255,255,255,0.75)" style={{ alignSelf: 'center' }} />
           <TextInput
             value={respuesta}
             onChangeText={setRespuesta}
-            placeholder={`Responder a ${story.author.name}…`}
+            placeholder={`Mensaje para ${story.author.name}…`}
             placeholderTextColor="rgba(255,255,255,0.6)"
             style={{
               flex: 1, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10,
@@ -359,6 +370,7 @@ function StoryItem({
           >
             {enviando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={18} color="#fff" />}
           </TouchableOpacity>
+          </View>
         </KeyboardAvoidingView>
       )}
 

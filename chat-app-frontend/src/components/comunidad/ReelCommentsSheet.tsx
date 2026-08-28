@@ -81,9 +81,16 @@ export function ReelCommentsSheet({
             onPress={() => {}}
             style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30, maxHeight: '75%' }}
           >
-            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center', paddingVertical: 14 }}>
-              Comentarios ({comments.length})
-            </Text>
+            <View style={{ paddingTop: 14, paddingBottom: 10 }}>
+              <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center' }}>
+                Comentarios ({comments.length})
+              </Text>
+              {/* La contraparte del aviso de la barra de mensaje privado: sin
+                  decirlo, las dos cajas parecen la misma cosa. */}
+              <Text style={{ color: colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 2 }}>
+                Los verá todo el que abra esto
+              </Text>
+            </View>
 
             <FlatList
               data={comments}
