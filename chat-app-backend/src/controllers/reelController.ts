@@ -424,11 +424,45 @@ export async function addComment(req: Request, res: Response) {
   const userId = (req as any).userId as string;
   const { id } = req.params;
   const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 1000) : '';
+  // `parentId`: responder a un comentario concreto en vez de al reel.
+  const parentId = typeof req.body?.parentId === 'string' ? req.body.parentId : '';
   if (!text) { res.status(400).json({ error: 'El comentario está vacío' }); return; }
   try {
+    const uid = new Types.ObjectId(userId);
+
+    if (parentId) {
+      if (!Types.ObjectId.isValid(parentId)) {
+        res.status(400).json({ error: 'Comentario no válido' });
+        return;
+      }
+      // Update atómico sobre el comentario padre. `arrayFilters` NO castea por
+      // esquema, así que el id va convertido a mano (misma trampa que el
+      // progreso del seminario en la web).
+      const conRespuesta = await Reel.findOneAndUpdate(
+        { _id: id, 'comments._id': new Types.ObjectId(parentId) },
+        { $push: { 'comments.$[c].replies': { userId: uid, text, at: new Date() } } },
+        { new: true, arrayFilters: [{ 'c._id': new Types.ObjectId(parentId) }] }
+      ).lean();
+      if (!conRespuesta) { res.status(404).json({ error: 'Comentario no encontrado' }); return; }
+      res.json({ ok: true, commentCount: (conRespuesta.comments ?? []).length });
+
+      // Avisa a quien escribió el comentario, no al autor del reel: la respuesta
+      // es para él. Si es el mismo, `notifyReelAuthor` ya no se avisa a sí mismo.
+      const padre = (conRespuesta.comments ?? []).find((c: any) => c._id?.toString() === parentId);
+      if (padre?.userId) {
+        notifyReelAuthor(
+          { ...(conRespuesta as any), authorId: padre.userId },
+          userId,
+          'comment',
+          text
+        ).catch(() => {});
+      }
+      return;
+    }
+
     const reel = await Reel.findByIdAndUpdate(
       id,
-      { $push: { comments: { userId: new Types.ObjectId(userId), text, at: new Date() } } },
+      { $push: { comments: { userId: uid, text, at: new Date() } } },
       { new: true }
     ).lean();
     if (!reel) { res.status(404).json({ error: 'Reel no encontrado' }); return; }
@@ -453,14 +487,49 @@ export async function getComments(req: Request, res: Response) {
         $lookup: { from: 'users', localField: 'comments.userId', foreignField: '_id', as: 'user' },
       },
       { $unwind: '$user' },
+      // Las caras de quienes respondieron, en UNA sola búsqueda para todo el
+      // hilo: un `$lookup` por respuesta sería una consulta por cara.
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'comments.replies.userId',
+          foreignField: '_id',
+          as: 'replyUsers',
+          pipeline: [{ $project: { name: 1, avatar: 1 } }],
+        },
+      },
       {
         $project: {
           _id: 0,
+          id: '$comments._id',
           userId: '$user._id',
           name: '$user.name',
           avatar: '$user.avatar',
           text: '$comments.text',
           at: '$comments.at',
+          replies: {
+            $map: {
+              input: { $ifNull: ['$comments.replies', []] },
+              as: 'r',
+              in: {
+                userId: '$$r.userId',
+                text: '$$r.text',
+                at: '$$r.at',
+                name: {
+                  $let: {
+                    vars: { u: { $first: { $filter: { input: '$replyUsers', cond: { $eq: ['$$this._id', '$$r.userId'] } } } } },
+                    in: { $ifNull: ['$$u.name', 'Usuario'] },
+                  },
+                },
+                avatar: {
+                  $let: {
+                    vars: { u: { $first: { $filter: { input: '$replyUsers', cond: { $eq: ['$$this._id', '$$r.userId'] } } } } },
+                    in: { $ifNull: ['$$u.avatar', ''] },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     ]);

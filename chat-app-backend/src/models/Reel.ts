@@ -27,7 +27,13 @@ export interface IReel extends Document {
   /** Cuándo dio me gusta cada uno. Ver la nota del esquema. */
   likedAt: { userId: Types.ObjectId; at: Date }[];
   views: { userId: Types.ObjectId; at: Date }[];
-  comments: { userId: Types.ObjectId; text: string; at: Date }[];
+  comments: {
+    _id: Types.ObjectId;
+    userId: Types.ObjectId;
+    text: string;
+    at: Date;
+    replies: { userId: Types.ObjectId; text: string; at: Date }[];
+  }[];
   expiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -67,10 +73,24 @@ const ReelSchema = new Schema<IReel>(
     ],
     comments: [
       {
+        // CON `_id` (los otros arreglos de este modelo no lo llevan): es lo que
+        // permite responder a UN comentario concreto con un update atómico
+        // (`arrayFilters` sobre `comments._id`). Los comentarios anteriores al
+        // cambio no lo tienen; `scripts/reelCommentIds.mjs` se lo pone.
         userId: { type: Schema.Types.ObjectId, ref: 'User' },
         text: { type: String, maxlength: 1000, trim: true },
         at: { type: Date, default: Date.now },
-        _id: false,
+        // Un solo nivel de respuestas, como Instagram: responder a una respuesta
+        // sigue colgando del comentario de arriba. Anidar más hace ilegible un
+        // hilo en una pantalla de teléfono.
+        replies: [
+          {
+            userId: { type: Schema.Types.ObjectId, ref: 'User' },
+            text: { type: String, maxlength: 1000, trim: true },
+            at: { type: Date, default: Date.now },
+            _id: false,
+          },
+        ],
       },
     ],
     // Historias: caducan 24 h después de publicarse (TTL). Los reels no lo

@@ -3,7 +3,6 @@ import {
   View, Text, FlatList, TouchableOpacity, Pressable, Modal, ActivityIndicator, useWindowDimensions, StyleSheet, Image, TextInput, Share, Alert, Linking,
   KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 
 // Volver: si esta pantalla se abrió por enlace directo no hay historial y
@@ -17,16 +16,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { addReelView, getReelViewers, toggleReelLike, deleteReel, addReelComment, getReelComments, reportReel, reelShareUrl, type Reel, type ReelViewer, type ReelComment } from '../src/services/reelService';
+import { addReelView, getReelViewers, toggleReelLike, deleteReel, reportReel, reelShareUrl, type Reel, type ReelViewer } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { createOrGetConversation } from '../src/services/conversationService';
 import { getSocket } from '../src/services/socketService';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
+import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
 // avanzar/retroceder, barra de acción (me gusta / comentar / compartir /
 // eliminar) y (para las propias) quién la vio.
-const TAP_GAP = 90; // franja central: pausar/reanudar
 
 function StoryItem({
   story, index, total, active, paused, onNext, onPrev, onTogglePause, onOpenViewers, onOpenComments,
@@ -389,8 +388,6 @@ export default function StoriesScreen() {
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewers, setViewers] = useState<ReelViewer[]>([]);
   const [commentStory, setCommentStory] = useState<Reel | null>(null);
-  const [comments, setComments] = useState<ReelComment[]>([]);
-  const [commentText, setCommentText] = useState('');
   const viewedRef = useRef<Set<string>>(new Set());
   const { width } = useWindowDimensions();
   _width = width;
@@ -425,21 +422,7 @@ export default function StoriesScreen() {
     try { setViewers(await getReelViewers(token, story.id)); } catch { /* sin viewers */ }
   };
 
-  const openComments = (story: Reel) => {
-    setCommentStory(story);
-    setComments([]);
-    setCommentText('');
-    if (token) getReelComments(token, story.id).then(setComments).catch(() => {});
-  };
-
-  const sendComment = async () => {
-    if (!token || !commentStory || !commentText.trim()) return;
-    try {
-      await addReelComment(token, commentStory.id, commentText.trim());
-      setCommentText('');
-      setComments(await getReelComments(token, commentStory.id));
-    } catch { /* best-effort */ }
-  };
+  const openComments = (story: Reel) => setCommentStory(story);
 
   if (stories.length === 0) {
     return (
@@ -516,48 +499,12 @@ export default function StoriesScreen() {
         </Pressable>
       </Modal>
 
-      {/* Hoja de comentarios */}
-      <Modal visible={!!commentStory} transparent animationType="slide" onRequestClose={() => setCommentStory(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setCommentStory(null)}>
-          <Pressable style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30, maxHeight: '65%' }} onPress={() => {}}>
-            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center', paddingVertical: 14 }}>
-              Comentarios ({comments.length})
-            </Text>
-            <FlatList
-              data={comments}
-              keyExtractor={(c) => `${c.userId}-${c.at}`}
-              style={{ flexGrow: 0 }}
-              renderItem={({ item }) => (
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 20, paddingVertical: 8 }}>
-                  {item.avatar ? (
-                    <Image source={{ uri: item.avatar }} style={{ width: 32, height: 32, borderRadius: 16 }} />
-                  ) : (
-                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ color: '#fff', fontWeight: '700' }}>{item.name[0]?.toUpperCase()}</Text>
-                    </View>
-                  )}
-                  <View style={{ flex: 1, backgroundColor: colors.bgPrimary, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
-                    <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>{item.name}</Text>
-                    <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{item.text}</Text>
-                  </View>
-                </View>
-              )}
-            />
-            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 10 }}>
-              <TextInput
-                value={commentText}
-                onChangeText={setCommentText}
-                placeholder="Escribe un comentario…"
-                placeholderTextColor={colors.textSecondary}
-                style={{ flex: 1, backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 }}
-              />
-              <TouchableOpacity onPress={sendComment} style={{ backgroundColor: colors.accent, width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="send" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <ReelCommentsSheet
+        reel={commentStory}
+        token={token}
+        colors={colors}
+        onClose={() => setCommentStory(null)}
+      />
     </View>
   );
 }

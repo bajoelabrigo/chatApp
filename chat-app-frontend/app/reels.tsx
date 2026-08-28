@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Modal, TextInput, Share, Alert, Linking, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, ActivityIndicator, Pressable, useWindowDimensions, Image, Share, Alert, Linking, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -13,9 +13,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { getReels, toggleReelLike, addReelView, deleteReel, addReelComment, getReelComments, reportReel, reelShareUrl, type Reel, type ReelComment } from '../src/services/reelService';
+import { getReels, toggleReelLike, addReelView, deleteReel, reportReel, reelShareUrl, type Reel } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
+import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
 import { timeAgo } from '../src/utils/timeAgo';
 
 // Feed vertical de Reels (cortos permanentes, estilo Instagram) con barra de
@@ -163,8 +164,6 @@ export default function ReelsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [commentReel, setCommentReel] = useState<Reel | null>(null);
-  const [comments, setComments] = useState<ReelComment[]>([]);
-  const [commentText, setCommentText] = useState('');
   const viewedRef = useRef<Set<string>>(new Set());
   const { height } = useWindowDimensions();
 
@@ -210,12 +209,7 @@ export default function ReelsScreen() {
     } catch { /* best-effort */ }
   };
 
-  const onComment = (reel: Reel) => {
-    setCommentReel(reel);
-    setComments([]);
-    setCommentText('');
-    if (token) getReelComments(token, reel.id).then(setComments).catch(() => {});
-  };
+  const onComment = (reel: Reel) => setCommentReel(reel);
 
   const onShare = async (reel: Reel) => {
     const text = reel.caption || reel.youtubeTitle || 'Mira este reel en HolyChat';
@@ -258,15 +252,6 @@ export default function ReelsScreen() {
         },
       },
     ]);
-  };
-
-  const sendComment = async () => {
-    if (!token || !commentReel || !commentText.trim()) return;
-    try {
-      await addReelComment(token, commentReel.id, commentText.trim());
-      setCommentText('');
-      setComments(await getReelComments(token, commentReel.id));
-    } catch { /* best-effort */ }
   };
 
   // El reel por el que se abre la lista (una tarjeta del carrusel, o el primero).
@@ -394,48 +379,15 @@ export default function ReelsScreen() {
         />
       )}
 
-      {/* Hoja de comentarios */}
-      <Modal visible={!!commentReel} transparent animationType="slide" onRequestClose={() => setCommentReel(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={() => setCommentReel(null)}>
-          <Pressable style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 30, maxHeight: '65%' }} onPress={() => {}}>
-            <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 16, textAlign: 'center', paddingVertical: 14 }}>
-              Comentarios ({comments.length})
-            </Text>
-            <FlatList
-              data={comments}
-              keyExtractor={(c) => `${c.userId}-${c.at}`}
-              style={{ flexGrow: 0 }}
-              renderItem={({ item }) => (
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 20, paddingVertical: 8 }}>
-                  {item.avatar ? (
-                    <Image source={{ uri: item.avatar }} style={{ width: 32, height: 32, borderRadius: 16 }} />
-                  ) : (
-                    <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ color: '#fff', fontWeight: '700' }}>{item.name[0]?.toUpperCase()}</Text>
-                    </View>
-                  )}
-                  <View style={{ flex: 1, backgroundColor: colors.bgPrimary, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 }}>
-                    <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>{item.name}</Text>
-                    <Text style={{ color: colors.textPrimary, fontSize: 14 }}>{item.text}</Text>
-                  </View>
-                </View>
-              )}
-            />
-            <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 10 }}>
-              <TextInput
-                value={commentText}
-                onChangeText={setCommentText}
-                placeholder="Escribe un comentario…"
-                placeholderTextColor={colors.textSecondary}
-                style={{ flex: 1, backgroundColor: colors.bgPrimary, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, fontSize: 14 }}
-              />
-              <TouchableOpacity onPress={sendComment} style={{ backgroundColor: colors.accent, width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="send" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <ReelCommentsSheet
+        reel={commentReel}
+        token={token}
+        colors={colors}
+        onClose={() => setCommentReel(null)}
+        onCountChange={(reelId, count) =>
+          setReels(reels.map((r) => (r.id === reelId ? { ...r, commentCount: count } : r)))
+        }
+      />
     </View>
   );
 }

@@ -127,7 +127,7 @@ export async function deleteReel(token: string, id: string): Promise<void> {
   await api.delete(`/reels/${id}`, auth(token));
 }
 
-export interface ReelComment {
+export interface ReelReply {
   userId: string;
   name: string;
   avatar?: string;
@@ -135,8 +135,26 @@ export interface ReelComment {
   at: string;
 }
 
-export async function addReelComment(token: string, id: string, text: string): Promise<{ ok: boolean; commentCount: number }> {
-  const { data } = await api.post(`/reels/${id}/comments`, { text }, auth(token));
+export interface ReelComment {
+  /** Falta en los comentarios anteriores al esquema con hilos: sin él no se
+   *  puede responder (`scripts/reelCommentIds.mjs` se lo pone). */
+  id?: string;
+  userId: string;
+  name: string;
+  avatar?: string;
+  text: string;
+  at: string;
+  replies?: ReelReply[];
+}
+
+/** `parentId`: responder a un comentario concreto en vez de al reel. */
+export async function addReelComment(
+  token: string,
+  id: string,
+  text: string,
+  parentId?: string
+): Promise<{ ok: boolean; commentCount: number }> {
+  const { data } = await api.post(`/reels/${id}/comments`, { text, parentId }, auth(token));
   return data;
 }
 

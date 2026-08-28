@@ -167,6 +167,57 @@ Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed ve
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
 - **Navegación estilo Facebook en la web (2026-08-26)**: `frontend/src/lib/useSwipeNav.js` (teclado, rueda y deslizar con el dedo) lo usan `StoryViewer` (eje x) y `ReelsPage` (eje y). El gesto exige que el **eje dominante** coincida —si no, un deslizamiento en diagonal salta de historia— y bloquea la rueda 500 ms, porque un solo gesto de trackpad emite decenas de eventos; se desactiva con un modal abierto (comentarios, "quién la vio") o las flechas del teclado navegarían mientras se escribe. **Las flechas visibles son `md:` solamente**: en el móvil se desliza y unos botones ahí taparían el video. Los carruseles usan `components/reels/CarouselRow.jsx`, que mide con `ResizeObserver` (el contenido llega por consulta, no basta medir al montar) y solo enciende la flecha del lado que tiene recorrido. En `StoriesRow`, **"Crear" y "Reels" van FUERA del contenedor que se desplaza**: son accesos, y con unas cuantas historias se perdían de vista.
 
+## Visor de historias (web): pausar no podía cerrar el visor (2026-08-28)
+
+El visor tenía **dos** zonas táctiles — un tercio para atrás y **DOS TERCIOS**
+para adelante— y **ninguna forma de pausar**. Intentar pausar tocando el video
+caía en la zona de avanzar, y en la última historia avanzar es CERRAR el visor:
+por eso "al poner pausa se cierra". La app tenía su franja central desde el
+principio; la web no.
+
+- Ahora son **TRES zonas**, como en la app: atrás / pausa / adelante, un tercio
+  cada una, con un indicador visible en pausa (sin él no se distingue de un video
+  que se quedó cargando).
+- `ReelVideo` acepta `paused` por prop, y el visor lo pone también cuando hay un
+  modal encima (comentarios, "quién la vio"): la historia no puede seguir
+  corriendo detrás.
+- **Las historias de YouTube van por `postMessage`**, no por la prop: el iframe
+  solo entiende el IFrame API, y el `src` ya lleva `enablejsapi=1`. Sin ese
+  camino aparte, pausar una historia de YouTube no hacía nada.
+- **Ojo al verificar en el navegador**: `document.querySelector('video')` NO
+  devuelve el video del visor — las tarjetas de los carruseles de Home están
+  antes en el DOM. Hay que buscar dentro del overlay (`.fixed.inset-0.z-[100]`).
+
+## Comentarios de reels e historias: emojis, versículos y respuestas (2026-08-28)
+
+El chat tenía emojis y Biblia desde siempre y estas cajas no tenían ninguna de
+las dos: comentar aquí era escribir texto pelado.
+
+- **`ComposerExtras`** (web) y los dos botones de `ReelCommentsSheet` (móvil)
+  insertan TEXTO plano, no una tarjeta: un comentario es una cadena, no un
+  documento con adjuntos como un post.
+- **El selector de versículos necesitaba subir de z-index**: `BibleVerseModal`
+  era `z-[95]` fijo y estas cajas viven dentro del visor (z-100) y de su hoja de
+  comentarios (z-96), así que se abría DETRÁS y parecía que el botón no hacía
+  nada. Ahora acepta `zIndex` (95 por defecto).
+
+**Responder a un comentario**, un solo nivel como Instagram (responder a una
+respuesta sigue colgando del comentario de arriba; anidar más hace ilegible un
+hilo en un teléfono).
+- `Reel.comments` pasa a llevar **`_id`** — los demás arreglos del modelo no lo
+  llevan a propósito, pero aquí es lo que permite apuntar a UN comentario con un
+  update atómico (`arrayFilters` sobre `comments._id`). En `arrayFilters`
+  Mongoose **no castea**: el id va convertido a ObjectId a mano.
+- Los comentarios anteriores al cambio no tenían id y habrían sido los únicos sin
+  botón de responder: **`scripts/reelCommentIds.mjs`** se lo pone (idempotente,
+  ya ejecutado: 4 comentarios en 3 reels).
+- `getComments` resuelve los nombres de quienes respondieron en **UN solo
+  `$lookup`** para todo el hilo; uno por respuesta sería una consulta por cara.
+- La respuesta avisa a quien escribió el comentario, no al autor del reel.
+- **La hoja del móvil estaba copiada** en `reels.tsx` y `stories.tsx`; ahora es
+  `components/comunidad/ReelCommentsSheet.tsx`, espejo del
+  `ReelCommentsModal.jsx` de la web.
+
 ## Feed de reels: variedad de autores y proyección (2026-08-28)
 
 Los dos puntos amarillos que quedaban de la revisión, resueltos en la MISMA
