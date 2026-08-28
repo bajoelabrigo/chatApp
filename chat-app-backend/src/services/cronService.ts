@@ -181,7 +181,7 @@ export function startCronJobs(): void {
         const dateKey = localDateKey(now, tz);
         if (u.lastDailyVerseOn === dateKey) continue; // ya se le envió hoy
 
-        const verse = dailyVerseFor(dateKey);
+        const verse = await dailyVerseFor(dateKey);
         if (!verse) continue;
 
         const title = `📖 Versículo del día — ${verse.book} ${verse.chapter}:${verse.verse}`;

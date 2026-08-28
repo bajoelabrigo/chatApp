@@ -428,6 +428,27 @@ export async function fetchTopics(): Promise<{ categories: string[]; topics: Top
   }
 }
 
+/**
+ * Tema del día: el mismo tema para toda la comunidad cada día (lo decide el
+ * backend a partir de la fecha, como el versículo del día), con sus pasajes y su
+ * texto ya resueltos — así la tarjeta enseña una muestra y comparte el pasaje
+ * sin una segunda petición.
+ */
+export interface DailyTopic extends TopicDetail {
+  date: string;
+}
+
+export async function fetchDailyTopic(version = DEFAULT_VERSION): Promise<DailyTopic | null> {
+  try {
+    const { data } = await api.get<DailyTopic>('/bible/topics/daily', {
+      params: { version, tz: myTimezone() },
+    });
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchTopicDetail(
   key: string,
   version = DEFAULT_VERSION

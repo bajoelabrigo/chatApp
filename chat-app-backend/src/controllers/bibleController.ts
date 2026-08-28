@@ -3,7 +3,7 @@ import path from 'path';
 import { getDailyRef, localDateKey } from '../lib/dailyVerses';
 import { BibleLang, namesFor } from '../lib/bibleNames';
 import { fetchChapter as bibliaFetchChapter, searchBible as bibliaSearch, englishBookNames } from '../services/bibliaService';
-import { TOPICS, TOPIC_CATEGORIES, getTopic } from '../lib/bibleTopics';
+import { TOPICS, TOPIC_CATEGORIES, getTopic, topicOfDay, type Topic } from '../lib/bibleTopics';
 
 type BibleData = Record<string, Record<string, Record<string, string>>>;
 
@@ -135,34 +135,88 @@ export interface DailyVerse {
   text: string;
 }
 
-/** El versículo de ese día en esa versión. Lo usan el endpoint y el cron del push. */
-export function dailyVerseFor(dateKey: string, version: string = DEFAULT_VERSION): DailyVerse | null {
-  const versionId = (ALLOWED_VERSIONS as readonly string[]).includes(version)
-    ? (version as VersionId)
-    : DEFAULT_VERSION;
-  // Las versiones solo-en-línea no tienen daily (evita llamadas extra a la API):
-  // la tarjeta se oculta en el cliente (captura el 404).
-  if (isRemote(versionId)) return null;
-  const { data } = loadVersion(versionId);
+/**
+ * Texto de un pasaje referenciado por ÍNDICE canónico de libro (0–65), en la
+ * versión pedida. Es el puente entre los catálogos agnósticos de versión
+ * (versículo del día, temas) y el texto real:
+ *  · versión local  → del JSON ya cacheado.
+ *  · versión remota → del capítulo de api.biblia.com (cacheado 6 h; el nombre
+ *    de libro va en inglés, que es como la API referencia todos los idiomas).
+ *
+ * Devuelve `null` si el pasaje no existe en esa versión (las biblias históricas
+ * son parciales: JPS solo AT, TCNT solo NT…) o si la API falla. Quien llama
+ * decide si degradar a la versión por defecto.
+ */
+async function passageIn(
+  version: VersionId,
+  bookIdx: number,
+  chapter: number,
+  from: number,
+  to?: number
+): Promise<{ book: string; verses: { verse: string; text: string }[] } | null> {
+  const names = namesFor(VERSION_META[version].lang);
+  const book = names[bookIdx];
+  if (!book) return null;
+  const last = to && to > from ? to : from;
 
-  const ref = getDailyRef(dateKey);
-  const names = namesFor(VERSION_META[versionId].lang);
-  const book = names[ref.book];
-  const text = data[book]?.[String(ref.chapter)]?.[String(ref.verse)];
-  if (!text) return null;
+  let chapterData: Record<string, string> | undefined;
+  if (isRemote(version)) {
+    try {
+      const bookEn = englishBookNames()[bookIdx];
+      const rows = await bibliaFetchChapter(REMOTE_VERSIONS[version]!.bibleId, bookEn, String(chapter));
+      chapterData = Object.fromEntries(rows.map((r) => [r.verse, r.text]));
+    } catch {
+      return null; // API caída o sin key: quien llama degrada a la por defecto
+    }
+  } else {
+    chapterData = loadVersion(version).data[book]?.[String(chapter)];
+  }
+  if (!chapterData) return null;
 
-  return {
-    date: dateKey,
-    version: versionId,
-    versionName: VERSION_META[versionId].name,
-    book,
-    chapter: String(ref.chapter),
-    verse: String(ref.verse),
-    text: text.trim(),
-  };
+  const verses: { verse: string; text: string }[] = [];
+  for (let v = from; v <= last; v++) {
+    const text = chapterData[String(v)];
+    if (text) verses.push({ verse: String(v), text: text.trim() });
+  }
+  return verses.length ? { book, verses } : null;
 }
 
-export function getDailyVerse(req: Request, res: Response) {
+/**
+ * El versículo de ese día en esa versión. Lo usan el endpoint y el cron del push.
+ *
+ * **Nunca devuelve null salvo catástrofe**: si la versión pedida no tiene ese
+ * pasaje (biblia parcial) o es remota y la API falla, cae a la versión por
+ * defecto y lo dice en `version`/`versionName`. Antes devolvía null y el cliente
+ * escondía la tarjeta: con la RVR60 (solo en línea) el versículo del día
+ * desapareció de la web y de la app para todo el que la tuviera elegida.
+ */
+export async function dailyVerseFor(
+  dateKey: string,
+  version: string = DEFAULT_VERSION
+): Promise<DailyVerse | null> {
+  const requested = (ALLOWED_VERSIONS as readonly string[]).includes(String(version).toUpperCase())
+    ? (String(version).toUpperCase() as VersionId)
+    : DEFAULT_VERSION;
+
+  const ref = getDailyRef(dateKey);
+
+  for (const v of requested === DEFAULT_VERSION ? [requested] : [requested, DEFAULT_VERSION]) {
+    const p = await passageIn(v, ref.book, ref.chapter, ref.verse);
+    if (!p) continue;
+    return {
+      date: dateKey,
+      version: v,
+      versionName: VERSION_META[v].name,
+      book: p.book,
+      chapter: String(ref.chapter),
+      verse: String(ref.verse),
+      text: p.verses[0].text,
+    };
+  }
+  return null;
+}
+
+export async function getDailyVerse(req: Request, res: Response) {
   const tz = (req.query.tz as string) || 'UTC';
   let dateKey: string;
   try {
@@ -171,12 +225,10 @@ export function getDailyVerse(req: Request, res: Response) {
     dateKey = localDateKey(new Date(), 'UTC'); // zona horaria inválida del cliente
   }
 
-  const verse = dailyVerseFor(dateKey, resolveVersionId(req));
+  const verse = await dailyVerseFor(dateKey, resolveVersionId(req));
   if (!verse) {
-    // No debería pasar (los pasajes del versículo del día están verificados
-    // contra las versiones), pero si una versión tuviera un hueco —p.ej. la
-    // RV1865 o el Darby omiten algunos versículos que otras ediciones sí traen—,
-    // mejor un 404 claro que un crash.
+    // No debería pasar: los pasajes del versículo del día están verificados
+    // contra la versión por defecto, que es el último respaldo.
     res.status(404).json({ error: 'Versículo no disponible en esta versión' });
     return;
   }
@@ -406,42 +458,62 @@ export interface XrefResult {
 }
 
 /** Los destinos de un versículo, ya resueltos a nombre y texto de `version`. */
-function resolveTargets(
+async function resolveTargets(
   targets: XrefTarget[],
-  version: VersionId,
-  data: BibleData
-): XrefResult[] {
-  const names = bookNames(version);
-  const out: XrefResult[] = [];
+  version: VersionId
+): Promise<XrefResult[]> {
+  // Los pasajes destino se resuelven EN PARALELO: en una versión remota cada uno
+  // es una petición a api.biblia.com (cacheada 6 h), y un versículo puede tener
+  // diez. En secuencia, abrir el panel serían diez idas y vueltas.
+  const resolved = await Promise.all(
+    targets.map(async (t) => {
+      const [bookIdx, chapter, from, to] = t;
+      // Un tramo (Ps.148.4-5) se muestra como un solo bloque de texto. Si algún
+      // versículo del tramo no existe en esta versión, se usa lo que haya.
+      let p = await passageIn(version, bookIdx, chapter, from, to);
+      // Si la versión pedida no lo tiene (biblia parcial) o la API remota falló,
+      // se enseña el pasaje en la versión por defecto: el panel de referencias
+      // medio vacío es peor que un pasaje en RV1909.
+      if (!p && version !== DEFAULT_VERSION) p = await passageIn(DEFAULT_VERSION, bookIdx, chapter, from, to);
+      if (!p) return null;
 
-  for (const t of targets) {
-    const [bookIdx, chapter, from, to] = t;
-    const book = names[bookIdx];
-    if (!book) continue;
+      const last = to && to > from ? to : from;
+      const result: XrefResult = {
+        book: p.book,
+        chapter: String(chapter),
+        verse: String(from),
+        ...(last > from ? { endVerse: String(last) } : {}),
+        text: p.verses.map((v) => v.text).join(' '),
+      };
+      return result;
+    })
+  );
 
-    const chapterData = data[book]?.[String(chapter)];
-    if (!chapterData) continue;
+  return resolved.filter((r): r is XrefResult => r !== null);
+}
 
-    // Un tramo (Ps.148.4-5) se muestra como un solo bloque de texto. Si alguno de
-    // los versículos del tramo no existe en esta versión, se usa lo que haya.
-    const last = to && to > from ? to : from;
-    const parts: string[] = [];
-    for (let v = from; v <= last; v++) {
-      const text = chapterData[String(v)];
-      if (text) parts.push(text.trim());
-    }
-    if (!parts.length) continue;
-
-    out.push({
-      book,
-      chapter: String(chapter),
-      verse: String(from),
-      ...(last > from ? { endVerse: String(last) } : {}),
-      text: parts.join(' '),
-    });
+/**
+ * Índice `bookIdx.chapter` → `{ versículo: nº de referencias }`, construido una
+ * sola vez a partir del dataset de referencias cruzadas.
+ *
+ * Existe por las versiones REMOTAS: el recuento se sacaba recorriendo los
+ * versículos del capítulo en el JSON local, y una versión sin JSON (RVR60) se
+ * quedaba sin indicadores de referencias — que es justo lo que el usuario
+ * notaba. Con el índice, el recuento no depende del texto.
+ */
+let xrefCountsIndex: Record<string, Record<string, number>> | null = null;
+function loadXrefCounts(): Record<string, Record<string, number>> {
+  if (xrefCountsIndex) return xrefCountsIndex;
+  const idx: Record<string, Record<string, number>> = {};
+  for (const [key, targets] of Object.entries(loadXrefs())) {
+    const cut = key.lastIndexOf('.');
+    const chapterKey = key.slice(0, cut);
+    const verse = key.slice(cut + 1);
+    if (!targets?.length) continue;
+    (idx[chapterKey] ??= {})[verse] = targets.length;
   }
-
-  return out;
+  xrefCountsIndex = idx;
+  return idx;
 }
 
 /**
@@ -452,9 +524,6 @@ function resolveTargets(
  */
 export function getChapterXrefCounts(req: Request, res: Response) {
   const version = resolveVersionId(req);
-  // Remotas: el recuento necesita el texto local (no se pide a la API); el
-  // cliente degrada en silencio a "sin referencias".
-  if (isRemote(version)) { res.json({}); return; }
   const names = bookNames(version);
   const book = decodeURIComponent(req.params.book);
   const bookIdx = names.indexOf(book);
@@ -463,22 +532,19 @@ export function getChapterXrefCounts(req: Request, res: Response) {
   const chapter = parseInt(req.params.chapter, 10);
   if (!Number.isFinite(chapter)) { res.json({}); return; }
 
-  const xrefs = loadXrefs();
-  const counts: Record<string, number> = {};
-  const prefix = `${bookIdx}.${chapter}.`;
+  const counts = loadXrefCounts()[`${bookIdx}.${chapter}`] ?? {};
 
-  // Se recorren los versículos del capítulo (no las 29.000 claves del dataset):
-  // el capítulo más largo es Salmos 119 con 176.
-  const { data } = loadVersion(version);
-  const chapterData = data[book]?.[String(chapter)];
+  // En una versión local se filtran los versículos que esa edición no trae (las
+  // biblias históricas omiten algunos): un indicador junto a un versículo que no
+  // existe no llevaría a ninguna parte. Las remotas traen la Biblia completa.
+  if (isRemote(version)) { res.json(counts); return; }
+  const chapterData = loadVersion(version).data[book]?.[String(chapter)];
   if (!chapterData) { res.json({}); return; }
-
+  const filtered: Record<string, number> = {};
   for (const verse of Object.keys(chapterData)) {
-    const hit = xrefs[prefix + verse];
-    if (hit?.length) counts[verse] = hit.length;
+    if (counts[verse]) filtered[verse] = counts[verse];
   }
-
-  res.json(counts);
+  res.json(filtered);
 }
 
 /**
@@ -486,14 +552,8 @@ export function getChapterXrefCounts(req: Request, res: Response) {
  * resuelto en la versión activa. Una sola petición pinta el panel entero: sin
  * esto el cliente tendría que pedir 10 versículos sueltos.
  */
-export function getVerseXrefs(req: Request, res: Response) {
+export async function getVerseXrefs(req: Request, res: Response) {
   const version = resolveVersionId(req);
-  // Remotas: sin texto local no se pueden resolver los pasajes destino.
-  if (isRemote(version)) {
-    res.status(404).json({ error: 'Referencias no disponibles en esta versión' });
-    return;
-  }
-  const { data } = loadVersion(version);
   const names = bookNames(version);
 
   const book = decodeURIComponent(req.params.book);
@@ -513,7 +573,7 @@ export function getVerseXrefs(req: Request, res: Response) {
     verse: String(verse),
     version,
     source: XREF_SOURCE,
-    results: resolveTargets(targets, version, data),
+    results: await resolveTargets(targets, version),
   });
 }
 
@@ -555,53 +615,49 @@ export function getTopics(_req: Request, res: Response) {
 }
 
 // GET /bible/topics/:key?version=… — los pasajes del tema, con su texto.
-export function getTopicDetail(req: Request, res: Response) {
-  const topic = getTopic(req.params.key);
-  if (!topic) {
-    res.status(404).json({ error: 'Tema no encontrado' });
-    return;
+/**
+ * Los pasajes de un tema, con su texto, en la versión pedida.
+ *
+ * Las versiones remotas (RVR60) piden sus capítulos a api.biblia.com: un tema
+ * son ~7 pasajes, y `fetchChapter` cachea 6 h, así que el coste real es de unas
+ * pocas llamadas la primera vez del día. Los capítulos se piden en PARALELO
+ * (secuencial serían ~7 idas y vueltas).
+ *
+ * Si en la versión pedida no queda ningún pasaje (biblia parcial, o la API
+ * remota falló) se reintenta con la versión por defecto: mejor el tema en
+ * RV1909 —y diciéndolo en `version`— que una pestaña de temas vacía.
+ */
+async function buildTopicPayload(topic: Topic, requested: VersionId) {
+  const resolve = async (version: VersionId): Promise<TopicPassage[]> => {
+    const parts = await Promise.all(
+      topic.refs.map(async (ref) => {
+        const [bookIdx, chapter, from, to] = ref;
+        const p = await passageIn(version, bookIdx, chapter, from, to);
+        // Un pasaje que no existe en esta versión se omite en vez de salir vacío.
+        if (!p) return null;
+        const realLast = p.verses[p.verses.length - 1].verse;
+        const passage: TopicPassage = {
+          book: p.book,
+          chapter: String(chapter),
+          from: String(from),
+          ...(realLast !== String(from) ? { to: realLast } : {}),
+          label: `${p.book} ${chapter}:${from}${realLast !== String(from) ? `-${realLast}` : ''}`,
+          verses: p.verses,
+        };
+        return passage;
+      })
+    );
+    return parts.filter((p): p is TopicPassage => p !== null);
+  };
+
+  let version = requested;
+  let passages = await resolve(version);
+  if (!passages.length && requested !== DEFAULT_VERSION) {
+    version = DEFAULT_VERSION;
+    passages = await resolve(version);
   }
 
-  const version = resolveVersionId(req);
-  // Remotas: los temas resuelven el texto desde el JSON local.
-  if (isRemote(version)) {
-    res.status(404).json({ error: 'Temas no disponibles en esta versión' });
-    return;
-  }
-  const { data } = loadVersion(version);
-  const names = bookNames(version);
-
-  const passages: TopicPassage[] = [];
-
-  for (const ref of topic.refs) {
-    const [bookIdx, chapter, from, to] = ref;
-    const book = names[bookIdx];
-    if (!book) continue;
-
-    const chapterData = data[book]?.[String(chapter)];
-    if (!chapterData) continue;
-
-    const last = to && to > from ? to : from;
-    const verses: { verse: string; text: string }[] = [];
-    for (let v = from; v <= last; v++) {
-      const text = chapterData[String(v)];
-      if (text) verses.push({ verse: String(v), text: text.trim() });
-    }
-    // Un pasaje que no existe en esta versión se omite en vez de salir vacío.
-    if (!verses.length) continue;
-
-    const realLast = verses[verses.length - 1].verse;
-    passages.push({
-      book,
-      chapter: String(chapter),
-      from: String(from),
-      ...(realLast !== String(from) ? { to: realLast } : {}),
-      label: `${book} ${chapter}:${from}${realLast !== String(from) ? `-${realLast}` : ''}`,
-      verses,
-    });
-  }
-
-  res.json({
+  return {
     key: topic.key,
     title: topic.title,
     description: topic.description,
@@ -609,7 +665,42 @@ export function getTopicDetail(req: Request, res: Response) {
     emoji: topic.emoji,
     version,
     passages,
-  });
+  };
+}
+
+export async function getTopicDetail(req: Request, res: Response) {
+  const topic = getTopic(req.params.key);
+  if (!topic) {
+    res.status(404).json({ error: 'Tema no encontrado' });
+    return;
+  }
+  res.json(await buildTopicPayload(topic, resolveVersionId(req)));
+}
+
+/**
+ * GET /bible/topics/daily?tz=&version= — el TEMA DEL DÍA.
+ *
+ * Mismo principio que el versículo del día: se deriva de la fecha (no al azar),
+ * así que es el mismo para toda la comunidad y se puede compartir y comentar.
+ * `tz` decide de qué día hablamos. El catálogo tiene 26 temas: el ciclo entero
+ * dura 26 días y se recorre sin repetir.
+ *
+ * Se sirve con el texto ya resuelto (los mismos `passages` que el detalle del
+ * tema) para que la tarjeta pueda enseñar un versículo de muestra y compartir
+ * el pasaje sin una segunda petición.
+ */
+export async function getDailyTopic(req: Request, res: Response) {
+  const tz = (req.query.tz as string) || 'UTC';
+  let dateKey: string;
+  try {
+    dateKey = localDateKey(new Date(), tz);
+  } catch {
+    dateKey = localDateKey(new Date(), 'UTC');
+  }
+
+  const topic = topicOfDay(dateKey);
+  const payload = await buildTopicPayload(topic, resolveVersionId(req));
+  res.json({ date: dateKey, ...payload });
 }
 
 export function downloadBible(req: Request, res: Response) {

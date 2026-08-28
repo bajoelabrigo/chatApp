@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Image, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import EmojiPicker, { type EmojiType } from 'rn-emoji-keyboard';
@@ -37,7 +37,19 @@ export default function CreatePostScreen() {
   const [posting, setPosting] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [bibleOpen, setBibleOpen] = useState(false);
-  const [bibleAttachment, setBibleAttachment] = useState<SharedBible | null>(null);
+  // El pasaje puede llegar ya puesto desde fuera (compartir el tema del día:
+  // `/comunidad/create?bible=<json>`). Se lee en el valor inicial del estado y no
+  // en un efecto: así el editor NACE con la tarjeta, sin un primer render vacío.
+  const { bible: bibleParam } = useLocalSearchParams<{ bible?: string }>();
+  const [bibleAttachment, setBibleAttachment] = useState<SharedBible | null>(() => {
+    if (!bibleParam) return null;
+    try {
+      const p = JSON.parse(bibleParam);
+      return p?.verses?.length ? (p as SharedBible) : null;
+    } catch {
+      return null; // parámetro corrupto: se abre el editor vacío, no se rompe
+    }
+  });
 
   const pickImage = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();

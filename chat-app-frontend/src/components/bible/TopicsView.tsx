@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fetchTopics, fetchTopicDetail } from '../../services/bibleService';
@@ -22,6 +22,8 @@ import type { VerseItem } from '../../constants/bible';
 
 interface Props {
   version: string;
+  /** Tema a abrir al entrar (lo pone "Leer" de la tarjeta del tema del día). */
+  initialKey?: string | null;
   colors: any;
   bottomInset: number;
   /** Ir al pasaje (abre el capítulo y resalta el versículo). */
@@ -32,6 +34,7 @@ interface Props {
 
 export function TopicsView({
   version,
+  initialKey,
   colors,
   bottomInset,
   onOpenVerse,
@@ -50,6 +53,16 @@ export function TopicsView({
       setTopics(c.topics);
     });
   }, []);
+
+  // Abrir un tema concreto al entrar desde fuera (la tarjeta del tema del día).
+  // Se aplica UNA vez por clave: sin el ref, volver a "Todos los temas" lo
+  // reabriría al instante.
+  const appliedKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialKey || appliedKey.current === initialKey) return;
+    appliedKey.current = initialKey;
+    setOpenKey(initialKey);
+  }, [initialKey]);
 
   // Al cambiar de versión se recarga el tema abierto: sus textos son de la
   // versión anterior.

@@ -11,6 +11,7 @@ import {
   getVerseXrefs,
   getTopics,
   getTopicDetail,
+  getDailyTopic,
 } from '../controllers/bibleController';
 import { authMiddleware } from '../middleware/authMiddleware';
 import {
@@ -97,6 +98,9 @@ router.get('/xrefs/:book/:chapter', getChapterXrefCounts);
 
 // Temas (pasajes para una ocasión). También antes de las rutas dinámicas.
 router.get('/topics', getTopics);
+// El tema del día. ANTES de `/topics/:key` o "daily" se tomaría por la clave de
+// un tema (y devolvería 404).
+router.get('/topics/daily', getDailyTopic);
 router.get('/topics/:key', getTopicDetail);
 
 router.get('/:book/chapters', getChapters);

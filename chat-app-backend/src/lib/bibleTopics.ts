@@ -429,3 +429,19 @@ export const TOPICS: Topic[] = [
 export function getTopic(key: string): Topic | undefined {
   return TOPICS.find((t) => t.key === key);
 }
+
+/**
+ * El tema de un día concreto. Determinista: mismo día → mismo tema para todo el
+ * mundo (así la tarjeta es un punto de encuentro y se puede comentar en
+ * comunidad), y rota por número de día absoluto, de modo que el catálogo entero
+ * se recorre antes de repetir.
+ *
+ * Mismo mecanismo que `getDailyRef` del versículo del día, pero con un desfase
+ * primo: sin él, tema y versículo avanzarían acompasados y las parejas serían
+ * siempre las mismas.
+ */
+export function topicOfDay(dateKey: string): Topic {
+  const days = Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 86400000);
+  const i = (((days * 7 + 3) % TOPICS.length) + TOPICS.length) % TOPICS.length;
+  return TOPICS[i];
+}

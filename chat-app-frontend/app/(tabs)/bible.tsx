@@ -38,6 +38,7 @@ import {
   cancelBibleDownload,
   purgeRetiredBibles,
   fetchDailyVerse,
+  fetchDailyTopic,
   searchBackgroundPhotos,
   fetchReadingPlans,
   fetchMyReadingPlans,
@@ -60,6 +61,7 @@ import type {
   BibleSearchResult,
   BibleVersion,
   DailyVerse,
+  DailyTopic,
   MemorizeVerse,
   ReadingStreak,
 } from '../../src/services/bibleService';
@@ -90,6 +92,8 @@ import {
 } from '../../src/constants/bible';
 import type { ScreenView, BookOrder, VerseItem } from '../../src/constants/bible';
 import { DailyVerseCard } from '../../src/components/bible/DailyVerseCard';
+import { DailyTopicCard, type TopicShareTarget } from '../../src/components/bible/DailyTopicCard';
+import { WEB_URL } from '../../src/components/ShareSheet';
 import { PrayerFeedCard } from '../../src/components/bible/PrayerFeedCard';
 import { ContinueReadingCard } from '../../src/components/bible/ContinueReadingCard';
 import { GroupPlanCard } from '../../src/components/bible/GroupPlanCard';
@@ -211,6 +215,11 @@ export default function BibleScreen() {
   // Versículo del día (#8): el mismo para toda la comunidad cada día. La foto de
   // fondo es opcional (si el backend no tiene clave de Pexels, queda el color).
   const [daily, setDaily] = useState<DailyVerse | null>(null);
+  // Tema del día: un pasaje para una ocasión (cumpleaños, bautismo, duelo…),
+  // también el mismo para toda la comunidad cada día.
+  const [dailyTopic, setDailyTopic] = useState<DailyTopic | null>(null);
+  // Tema a abrir en la pestaña Temas (lo pone "Leer" de esa tarjeta).
+  const [openTopicKey, setOpenTopicKey] = useState<string | null>(null);
   const [dailyPhoto, setDailyPhoto] = useState<string | null>(null);
   // null = aún no sabemos si tiene el aviso diario activo → no se pinta la campana.
   const [dailyReminder, setDailyReminder] = useState<boolean | null>(null);
@@ -409,6 +418,7 @@ export default function BibleScreen() {
       if (books.length === 0) doLoadBooks();
       checkAllDownloads();
       loadDailyVerse();
+      fetchDailyTopic(selectedVersion).then(setDailyTopic).catch(() => {});
       loadPrayerFeed();
       AsyncStorage.getItem(SEARCH_HISTORY_KEY)
         .then((raw) => { if (raw) setSearchHistory(JSON.parse(raw)); })
@@ -455,6 +465,14 @@ export default function BibleScreen() {
         .catch(() => {});
     }
   };
+
+  // Al cambiar de versión, las tarjetas del día se rehacen: su texto es el de la
+  // versión anterior (y hasta el nombre del libro cambia de idioma).
+  useEffect(() => {
+    loadDailyVerse();
+    fetchDailyTopic(selectedVersion).then(setDailyTopic).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedVersion]);
 
   const toggleDailyReminder = async () => {
     if (!token) return;
@@ -1268,6 +1286,9 @@ export default function BibleScreen() {
   // "Juan 3:16" / "Juan 3:16-18" para un rango del mismo capítulo / el primero +
   // cuántos más si abarca varios.
   const [sendChatPassage, setSendChatPassage] = useState<SharedBible | null>(null);
+  // Acota la hoja de envío a los grupos (compartir "con el grupo"): la lista
+  // completa obligaría a rebuscar el grupo entre los chats privados.
+  const [sendChatGroupsOnly, setSendChatGroupsOnly] = useState(false);
   // Elegir grupo para leer EN VIVO el capítulo actual.
   const [liveReadPickerOpen, setLiveReadPickerOpen] = useState(false);
 
@@ -1310,6 +1331,73 @@ export default function BibleScreen() {
       })),
     });
     setSelectedVerses(new Map());
+  };
+
+  // ── Tema del día: leer y compartir ──────────────────────────
+  // El tema entero viaja como UN pasaje (tarjeta `bible`): la referencia es el
+  // título del tema, porque abarca varios libros y "Números 6:24 (+15)" no diría
+  // nada. El backend acota a 50 versículos en un mensaje y a 20 en un post.
+  const MAX_TOPIC_SHARE_VERSES = 20;
+
+  const topicToPassage = (topic: DailyTopic): SharedBible | null => {
+    const verses = topic.passages
+      .flatMap((p) =>
+        p.verses.map((v) => ({
+          book: p.book,
+          chapter: Number(p.chapter),
+          verse: Number(v.verse),
+          text: v.text,
+        }))
+      )
+      .slice(0, MAX_TOPIC_SHARE_VERSES);
+    if (!verses.length) return null;
+    return {
+      reference: `${topic.emoji} ${topic.title}`,
+      version: topic.version,
+      versionName: VERSION_META[topic.version]?.name ?? topic.version,
+      book: verses[0].book,
+      chapter: verses[0].chapter,
+      verse: verses[0].verse,
+      verses,
+    };
+  };
+
+  const handleTopicRead = (topic: DailyTopic) => {
+    setOpenTopicKey(topic.key);
+    setView('topics');
+  };
+
+  const handleTopicShare = async (topic: DailyTopic, target: TopicShareTarget) => {
+    const passage = topicToPassage(topic);
+    if (!passage) return;
+
+    if (target === 'group' || target === 'chat') {
+      // Un grupo ES una conversación: es la misma hoja con la lista filtrada.
+      setSendChatGroupsOnly(target === 'group');
+      setSendChatPassage(passage);
+      return;
+    }
+
+    if (target === 'post') {
+      // El editor de la comunidad nace con la tarjeta bíblica ya puesta.
+      router.push({
+        pathname: '/comunidad/create',
+        params: { bible: JSON.stringify(passage) },
+      } as any);
+      return;
+    }
+
+    // Redes: el compartir del sistema, con el enlace a la web (donde el tema se
+    // abre entero aunque quien lo reciba no tenga la app).
+    const refs = topic.passages.map((p) => p.label).join(', ');
+    await Share.share({
+      message: `${topic.emoji} ${topic.title}
+${topic.description}
+
+${refs}
+
+${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
+    });
   };
 
   const sendPassageToConversation = (conv: Conversation) => {
@@ -1781,6 +1869,16 @@ export default function BibleScreen() {
           goToReference({ book: item.book, chapter: item.chapter, verse: item.verse })
         }
         onToggleReminder={toggleDailyReminder}
+      />
+
+      {/* Tema del día: un pasaje para una ocasión concreta. Va pegado al
+          versículo del día porque son la misma idea (algo distinto cada día,
+          igual para toda la comunidad). */}
+      <DailyTopicCard
+        topic={dailyTopic}
+        colors={colors}
+        onRead={handleTopicRead}
+        onShare={handleTopicShare}
       />
 
       {/* Lee con tu grupo. Antes esto solo se encontraba entrando al menú de los
@@ -2561,6 +2659,7 @@ export default function BibleScreen() {
         return (
           <TopicsView
             version={selectedVersion}
+            initialKey={openTopicKey}
             colors={colors}
             bottomInset={insets.bottom}
             onOpenVerse={(v) =>
@@ -3010,12 +3109,13 @@ export default function BibleScreen() {
       {/* Elegir a qué chat enviar el pasaje (mensaje `bible`). */}
       <SendToChatModal
         visible={!!sendChatPassage}
-        conversations={conversations}
+        conversations={sendChatGroupsOnly ? myGroups : conversations}
         currentUserId={useAuthStore.getState().user?.id}
         reference={sendChatPassage?.reference ?? ''}
         colors={colors}
         bottomInset={insets.bottom}
-        onClose={() => setSendChatPassage(null)}
+        title={sendChatGroupsOnly ? 'Enviar a un grupo' : 'Enviar a un chat'}
+        onClose={() => { setSendChatPassage(null); setSendChatGroupsOnly(false); }}
         onPick={sendPassageToConversation}
       />
 

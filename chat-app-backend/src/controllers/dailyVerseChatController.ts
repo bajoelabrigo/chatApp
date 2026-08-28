@@ -47,7 +47,7 @@ export async function getGroupDailyVerse(req: Request, res: Response) {
 
     const dateKey = dateKeyFromReq(req);
     const version = typeof req.query.version === 'string' ? req.query.version : undefined;
-    const verse = dailyVerseFor(dateKey, version);
+    const verse = await dailyVerseFor(dateKey, version);
     if (!verse) return res.status(404).json({ error: 'Versículo no disponible' });
 
     const doc = await GroupDailyVerse.findOne({ groupId, dateKey }).lean();
