@@ -17,6 +17,7 @@ import { getReels, toggleReelLike, addReelView, deleteReel, reportReel, reelShar
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
+import { PrivateMessageSheet } from '../src/components/comunidad/PrivateMessageSheet';
 import { timeAgo } from '../src/utils/timeAgo';
 
 // Feed vertical de Reels (cortos permanentes, estilo Instagram) con barra de
@@ -164,6 +165,7 @@ export default function ReelsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [commentReel, setCommentReel] = useState<Reel | null>(null);
+  const [mensajeReel, setMensajeReel] = useState<Reel | null>(null);
   const viewedRef = useRef<Set<string>>(new Set());
   const { height } = useWindowDimensions();
 
@@ -280,6 +282,16 @@ export default function ReelsScreen() {
             <Ionicons name="chatbubble-outline" size={28} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{item.commentCount ?? 0}</Text>
           </Pressable>
+          {/* Mensaje PRIVADO al autor, junto a comentar. En los reels no existía
+              y en las historias era una caja fija al pie que convivía con la de
+              comentarios: dos cajas con consecuencias opuestas que parecían la
+              misma cosa. */}
+          {!isMine && (
+            <Pressable onPress={() => setMensajeReel(item)} style={{ alignItems: 'center', gap: 3 }}>
+              <Ionicons name="mail-outline" size={28} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Mensaje</Text>
+            </Pressable>
+          )}
           <Pressable onPress={() => onShare(item)} style={{ alignItems: 'center', gap: 3 }}>
             <Ionicons name="share-social-outline" size={28} color="#fff" />
             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
@@ -378,6 +390,13 @@ export default function ReelsScreen() {
           }
         />
       )}
+
+      <PrivateMessageSheet
+        reel={mensajeReel}
+        token={token}
+        colors={colors}
+        onClose={() => setMensajeReel(null)}
+      />
 
       <ReelCommentsSheet
         reel={commentReel}

@@ -70,10 +70,17 @@ const buildHtml = (videoId: string, muted: boolean, host: string, origin: string
       playerVars: {
         autoplay: 1, controls: 0, playsinline: 1, rel: 0,
         modestbranding: 1, fs: 0, iv_load_policy: 3, disablekb: 1,
+        // Estos videos traen el texto YA QUEMADO en la imagen, asi que los
+        // subtitulos encima duplican lo mismo y tapan medio video vertical.
+        cc_load_policy: 0,
         origin: ${JSON.stringify(origin)}
       },
       events: {
         onReady: function (e) {
+          // Fuera los subtitulos. OJO: cc_load_policy 0 NO los apaga (solo el
+          // 1 los FUERZA; sin el manda la preferencia de quien mira). Los dos
+          // nombres de modulo porque YouTube usa uno u otro segun el video.
+          try { e.target.unloadModule('captions'); e.target.unloadModule('cc'); } catch (err) {}
           ${muted ? 'e.target.mute();' : ''}
           e.target.playVideo();
           send({ type: 'ready' });

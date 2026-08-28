@@ -188,6 +188,52 @@ principio; la web no.
   devuelve el video del visor — las tarjetas de los carruseles de Home están
   antes en el DOM. Hay que buscar dentro del overlay (`.fixed.inset-0.z-[100]`).
 
+## Comentar es PÚBLICO y escribir al autor es PRIVADO: un input a la vez (2026-08-28)
+
+El visor de historias tenía una caja de texto FIJA al pie ("Responder a X") y
+otra dentro de la hoja de comentarios. Dos cajas en la misma pantalla con
+consecuencias opuestas —una la lee toda la comunidad, la otra solo el autor— y
+lo único que las distinguía era el texto gris de dentro. El usuario lo dijo tal
+cual: **"cuál es la diferencia porque aparentemente lo veo igual"**.
+
+Ponerles etiqueta no bastaba: seguían siendo dos cajas. Lo que se hizo:
+- **La barra fija desaparece.** El mensaje privado sale de un botón "Mensaje" en
+  la barra de acciones, junto a comentar, y abre su propia hoja/modal
+  (`PrivateMessageModal.jsx` / `PrivateMessageSheet.tsx`). **Nunca hay dos
+  inputs**; hay un test que lo vigila.
+- **Ahora también en los REELS**, donde no existía: solo estaba en historias, que
+  es parte de por qué no se encontraba.
+- Cada superficie dice lo que es: el modal, "Privado · solo X lo verá, en
+  Mensajes"; la hoja de comentarios, "Los verá todo el que abra esto". Sin eso
+  alguien comenta creyendo que escribe en privado.
+- **El botón solo sale en contenido ajeno** (`!isMine`): escribirse a uno mismo no
+  tiene sentido, y por eso en la historia PROPIA no aparece nada de esto — que
+  era lo que hacía que no se viera al probarlo con la historia de uno.
+
+## Reels de YouTube sin subtítulos — `cc_load_policy=0` NO los apaga (2026-08-28)
+
+Estos videos traen el texto **ya quemado en la imagen** (vienen de TikTok y
+similares), así que los subtítulos automáticos encima duplican lo mismo y tapan
+medio video vertical.
+
+**`cc_load_policy=0` no sirve**: la documentación de YouTube solo define `=1`
+para FORZARLOS; sin él (o con 0) manda la preferencia de quien mira. Verificado
+en pantalla: con `cc_load_policy=0` el video seguía mostrando los automáticos.
+
+Lo único que los quita es **`unloadModule` del IFrame API**, y hay que mandar los
+DOS nombres de módulo — `"captions"` (reproductor viejo) y `"cc"` (HTML5)— porque
+YouTube usa uno u otro según el video.
+- Web: `lib/ytCaptions.js` (`apagarSubtitulos`). Manda los comandos por
+  `postMessage`, así que **el iframe necesita `enablejsapi=1`** o se ignoran en
+  silencio, y **reintenta unas cuantas veces**: sin cargar el API entera no hay
+  evento de "listo" y los primeros mensajes llegan antes de que el reproductor
+  exista. Usado en `StoryViewer`, `ReelsPage` y `VideoPreviewCard`.
+- Móvil: en `YouTubeEmbed` hay API de verdad, así que se llama en `onReady`.
+  **Ojo con los backticks en los comentarios de ese archivo**: el reproductor se
+  arma dentro de una plantilla de texto y un backtick la cierra a media función.
+- Cubierto por `reelsUi.test.mjs`, que exige `enablejsapi=1` y el uso del helper
+  en las tres superficies.
+
 ## Comentarios de reels e historias: emojis, versículos y respuestas (2026-08-28)
 
 El chat tenía emojis y Biblia desde siempre y estas cajas no tenían ninguna de

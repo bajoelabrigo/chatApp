@@ -18,21 +18,21 @@ import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
 import { addReelView, getReelViewers, toggleReelLike, deleteReel, reportReel, reelShareUrl, type Reel, type ReelViewer } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
-import { createOrGetConversation } from '../src/services/conversationService';
-import { getSocket } from '../src/services/socketService';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
+import { PrivateMessageSheet } from '../src/components/comunidad/PrivateMessageSheet';
 
 // Historia de video en pantalla completa, con barras de progreso, tocar para
 // avanzar/retroceder, barra de acción (me gusta / comentar / compartir /
 // eliminar) y (para las propias) quién la vio.
 
 function StoryItem({
-  story, index, total, active, paused, onNext, onPrev, onTogglePause, onOpenViewers, onOpenComments,
+  story, index, total, active, paused, onNext, onPrev, onTogglePause, onOpenViewers, onOpenComments, onOpenMessage,
 }: {
   story: Reel; index: number; total: number; active: boolean;
   paused: boolean; onNext: () => void; onPrev: () => void;
   onTogglePause: () => void; onOpenViewers: () => void; onOpenComments: () => void;
+  onOpenMessage: () => void;
 }) {
   const { colors } = useTheme();
   const { token, user } = useAuthStore();
@@ -44,9 +44,6 @@ function StoryItem({
   const [ytFailed, setYtFailed] = useState<number | null>(null);
   const [ytMuted, setYtMuted] = useState(true);
   const [ytProgress, setYtProgress] = useState(0);
-  const [respuesta, setRespuesta] = useState('');
-  const [enviando, setEnviando] = useState(false);
-  const socket = getSocket();
 
   // `null` cuando la historia es de YouTube: crear un reproductor con una
   // fuente vacía es lo que dejaba la pantalla en blanco al cerrar.
@@ -99,38 +96,6 @@ function StoryItem({
   const onShare = async () => {
     const text = story.caption || story.youtubeTitle || 'Mira esta historia en HolyChat';
     try { await Share.share({ message: `${text}\n${reelShareUrl(story.id)}` }); } catch { /* best-effort */ }
-  };
-
-  /**
-   * Responder a una historia abre (o crea) el chat 1:1 con su autor y manda el
-   * mensaje. Es el gesto con el que una historia se convierte en conversación,
-   * que es lo que hace que la gente publique otra.
-   *
-   * Va como mensaje de TEXTO con el enlace de la historia, no como un tipo de
-   * mensaje nuevo: el chat ya pinta la vista previa de los enlaces, así que la
-   * miniatura sale sola desde la ruta de Open Graph. Estrenar un `type` obliga a
-   * tocar los dos clientes y el backend en un orden concreto, y aquí no hace
-   * ninguna falta.
-   */
-  const responder = async () => {
-    const texto = respuesta.trim();
-    if (!texto || enviando || !token) return;
-    if (!socket) { Alert.alert('Sin conexión', 'Abre el chat e inténtalo de nuevo.'); return; }
-    setEnviando(true);
-    try {
-      const conv = await createOrGetConversation(token, story.author.id);
-      socket.emit('message:send', {
-        conversationId: conv._id,
-        content: `${texto}\n${reelShareUrl(story.id)}`,
-        type: 'text',
-      });
-      setRespuesta('');
-      Alert.alert('Enviado', `Tu respuesta llegó a ${story.author.name}`);
-    } catch {
-      Alert.alert('Error', 'No se pudo enviar la respuesta');
-    } finally {
-      setEnviando(false);
-    }
   };
 
   const onReport = () => {
@@ -302,6 +267,15 @@ function StoryItem({
           <Ionicons name="chatbubble-outline" size={26} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>{story.commentCount ?? 0}</Text>
         </Pressable>
+        {/* Mensaje PRIVADO al autor. Va aquí y no en una caja fija al pie: con
+            la barra siempre visible había DOS cajas de texto en la misma
+            pantalla con consecuencias opuestas, y parecían la misma cosa. */}
+        {!isMine && (
+          <Pressable onPress={onOpenMessage} style={{ alignItems: 'center', gap: 3 }}>
+            <Ionicons name="mail-outline" size={26} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Mensaje</Text>
+          </Pressable>
+        )}
         <Pressable onPress={onShare} style={{ alignItems: 'center', gap: 3 }}>
           <Ionicons name="share-social-outline" size={26} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Compartir</Text>
@@ -325,53 +299,6 @@ function StoryItem({
         <View style={{ position: 'absolute', bottom: 40, left: 16, right: 70 }}>
           <Text style={{ color: '#fff', fontSize: 15, lineHeight: 20 }} numberOfLines={3}>{story.caption}</Text>
         </View>
-      )}
-
-      {/* Mensaje PRIVADO al autor, que no es lo mismo que comentar. Las dos
-          cosas conviven en esta pantalla y antes solo se distinguían por el
-          texto gris de dentro de la caja: poquísima señal para dos acciones con
-          consecuencias opuestas — una la lee toda la comunidad y la otra solo el
-          autor. De ahí el icono de sobre y la línea de aviso.
-
-          `zIndex` por encima de las zonas táctiles (10): si no, tocar el campo se
-          lo come el "siguiente". En la propia no se ofrece: no tiene sentido
-          escribirse a uno mismo. */}
-      {!isMine && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={{ position: 'absolute', left: 12, right: 12, bottom: 16, zIndex: 20 }}
-        >
-          <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '600', marginBottom: 4, marginLeft: 14 }}>
-            Mensaje privado · solo lo verá {story.author.name}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Ionicons name="mail-outline" size={18} color="rgba(255,255,255,0.75)" style={{ alignSelf: 'center' }} />
-          <TextInput
-            value={respuesta}
-            onChangeText={setRespuesta}
-            placeholder={`Mensaje para ${story.author.name}…`}
-            placeholderTextColor="rgba(255,255,255,0.6)"
-            style={{
-              flex: 1, borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10,
-              color: '#fff', fontSize: 14,
-              backgroundColor: 'rgba(0,0,0,0.45)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.45)',
-            }}
-            onSubmitEditing={responder}
-            returnKeyType="send"
-          />
-          <TouchableOpacity
-            onPress={responder}
-            disabled={!respuesta.trim() || enviando}
-            style={{
-              backgroundColor: colors.accent, borderRadius: 22, paddingHorizontal: 16,
-              alignItems: 'center', justifyContent: 'center',
-              opacity: !respuesta.trim() || enviando ? 0.45 : 1,
-            }}
-          >
-            {enviando ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="send" size={18} color="#fff" />}
-          </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
       )}
 
       {/* Zonas táctiles */}
@@ -400,6 +327,7 @@ export default function StoriesScreen() {
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewers, setViewers] = useState<ReelViewer[]>([]);
   const [commentStory, setCommentStory] = useState<Reel | null>(null);
+  const [mensajeStory, setMensajeStory] = useState<Reel | null>(null);
   const viewedRef = useRef<Set<string>>(new Set());
   const { width } = useWindowDimensions();
   _width = width;
@@ -474,6 +402,7 @@ export default function StoriesScreen() {
               onTogglePause={() => setPaused((p) => !p)}
               onOpenViewers={() => openViewers(item)}
               onOpenComments={() => openComments(item)}
+              onOpenMessage={() => setMensajeStory(item)}
             />
           </View>
         )}
@@ -516,6 +445,13 @@ export default function StoriesScreen() {
         token={token}
         colors={colors}
         onClose={() => setCommentStory(null)}
+      />
+
+      <PrivateMessageSheet
+        reel={mensajeStory}
+        token={token}
+        colors={colors}
+        onClose={() => setMensajeStory(null)}
       />
     </View>
   );
