@@ -761,6 +761,19 @@ La contraseña de root estuvo un rato en `chat-app-backend/.env` como
   `/etc/ssh/sshd_config`), **antes hay que confirmar que la consola web de
   Hostinger sigue siendo una vía de entrada**: perder la clave sin esa red de
   seguridad deja el servidor inaccesible.
+  Medido el 2026-08-28 en `/var/log/auth.log`: **82 intentos fallidos de
+  contraseña en 5 días desde 9 IPs distintas**, 30 de ellos contra `root`. Eso es
+  lo que cierra desactivarla; contra una clave esos intentos no pueden nada.
+
+**Otra máquina (otro portátil) → SU PROPIA clave, nunca copiar la privada.**
+`chat-app-backend/deploy/nueva-maquina-ssh.sh` lo hace: genera la clave ahí, la
+autoriza en el VPS y deja el alias `holyvps`. Copiar la clave de un equipo a otro
+funciona, pero el secreto viaja y queda copiado donde no se controla, y revocar
+el acceso de UN equipo obligaría a revocar el de todos. Con una clave por máquina,
+revocar es borrar **una línea** de `~/.ssh/authorized_keys` en el servidor.
+**Hay que hacerlo mientras el acceso por contraseña siga habilitado** (el script
+entra una vez para dejar la clave); si ya se desactivó, hay que pegar la clave
+pública a mano desde la consola web de Hostinger.
 
 ## Deploy workflow
 
