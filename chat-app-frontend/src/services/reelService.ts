@@ -103,6 +103,11 @@ export async function getReelViewers(token: string, id: string): Promise<ReelVie
   return data;
 }
 
+/** Registra el compartido y avisa al autor. Idempotente: solo la primera vez. */
+export async function registrarCompartido(token: string, id: string): Promise<void> {
+  await api.post(`/reels/${id}/share`, {}, auth(token));
+}
+
 /** Denunciar un reel/historia. Idempotente: denunciar dos veces no suma. */
 export async function reportReel(token: string, id: string, reason = ''): Promise<void> {
   await api.post(`/reels/${id}/report`, { reason }, auth(token));

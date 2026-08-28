@@ -41,7 +41,7 @@ test('las consultas independientes se lanzan juntas', () => {
   const lote = cuerpo.slice(cuerpo.indexOf('] = await Promise.all(['));
   for (const q of [
     'q_unreadAgg', 'q_missedCalls', 'q_prayers', 'q_myPrayers', 'q_myPolls',
-    'q_myReels', 'q_myCommitments', 'q_tzDoc', 'q_groupCommitments',
+    'q_myReels', 'q_reelsConMisComentarios', 'q_myCommitments', 'q_tzDoc', 'q_groupCommitments',
     'q_personalCommitments', 'q_recentMaterials',
   ]) {
     assert.ok(lote.includes(q), `${q} deberia ir dentro del Promise.all`);
@@ -53,7 +53,7 @@ test('una Query definida fuera del await no toca la base todavia', () => {
   // perezosa; sin await/then/exec no hay viaje. Si alguien le añade .exec() o
   // un await a una de las q_*, se ejecutaria suelta y volveriamos a encadenar.
   const decls = cuerpo.match(/const q_[A-Za-z]+ = [^;]+;/gs) ?? [];
-  assert.equal(decls.length, 11, `esperaba 11 consultas declaradas, hay ${decls.length}`);
+  assert.equal(decls.length, 12, `esperaba 12 consultas declaradas, hay ${decls.length}`);
   for (const d of decls) {
     assert.equal(/\bawait\b/.test(d), false, `no debe llevar await:\n${d}`);
     assert.equal(/\.exec\(\)/.test(d), false, `no debe llevar .exec():\n${d}`);
@@ -68,5 +68,7 @@ test('las que dependen de tener grupos siguen condicionadas', () => {
   }
   // Los reels NO: cualquiera publica uno sin estar en ningun grupo, y
   // condicionarlos dejaria sin avisos justo a quien todavia no se ha unido a nada.
-  assert.ok(!cuerpo.includes('hayGrupos ? q_myReels'), 'q_myReels no debe depender de tener grupos');
+  for (const q of ['q_myReels', 'q_reelsConMisComentarios']) {
+    assert.ok(!cuerpo.includes(`hayGrupos ? ${q}`), `${q} no debe depender de tener grupos`);
+  }
 });

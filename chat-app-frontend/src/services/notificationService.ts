@@ -8,6 +8,7 @@ export type NotificationKind =
   | 'poll_vote'
   | 'reel_like'
   | 'reel_comment'
+  | 'reel_share'
   | 'activity'
   | 'reminder'
   | 'material'

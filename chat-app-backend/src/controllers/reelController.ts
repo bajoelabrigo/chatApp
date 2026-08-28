@@ -566,6 +566,37 @@ export async function deleteReel(req: Request, res: Response) {
   }
 }
 
+// ── Compartir (registra quién y avisa al autor) ─────────────────────
+//
+// Compartir era la única interacción que no avisaba a nadie. El filtro
+// `shares.userId: {$ne}` hace las veces de `$addToSet` con hora: compartir tres
+// veces el mismo reel registra UNA y manda UN aviso.
+export async function shareReel(req: Request, res: Response) {
+  const userId = (req as any).userId as string;
+  const { id } = req.params;
+  try {
+    const uid = new Types.ObjectId(userId);
+    const nuevo = await Reel.findOneAndUpdate(
+      { _id: id, 'shares.userId': { $ne: uid } },
+      { $push: { shares: { userId: uid, at: new Date() } } },
+      { new: true }
+    ).lean();
+
+    if (!nuevo) {
+      // O no existe, o ya lo había compartido: lo segundo no es un error.
+      const existe = await Reel.findById(id).select('shares').lean();
+      if (!existe) { res.status(404).json({ error: 'Reel no encontrado' }); return; }
+      res.json({ ok: true, shareCount: (existe.shares ?? []).length });
+      return;
+    }
+
+    res.json({ ok: true, shareCount: (nuevo.shares ?? []).length });
+    notifyReelAuthor(nuevo as any, userId, 'share').catch(() => {});
+  } catch {
+    res.status(500).json({ error: 'Error registrando el compartido' });
+  }
+}
+
 // ── Denunciar (cualquiera con sesión, una vez por persona) ─────────────
 //
 // Reutiliza el modelo `Report` que ya usaban grupos y usuarios en vez de crear

@@ -27,6 +27,7 @@ export interface IReel extends Document {
   /** Cuándo dio me gusta cada uno. Ver la nota del esquema. */
   likedAt: { userId: Types.ObjectId; at: Date }[];
   views: { userId: Types.ObjectId; at: Date }[];
+  shares: { userId: Types.ObjectId; at: Date }[];
   comments: {
     _id: Types.ObjectId;
     userId: Types.ObjectId;
@@ -65,6 +66,16 @@ const ReelSchema = new Schema<IReel>(
       },
     ],
     views: [
+      {
+        userId: { type: Schema.Types.ObjectId, ref: 'User' },
+        at: { type: Date, default: Date.now },
+        _id: false,
+      },
+    ],
+    // Quién lo compartió y cuándo. Con la hora dentro desde el principio (a
+    // diferencia de `likes`, que la necesitó en un arreglo aparte): así la
+    // campana puede ordenarlo y decir cuándo fue.
+    shares: [
       {
         userId: { type: Schema.Types.ObjectId, ref: 'User' },
         at: { type: Date, default: Date.now },

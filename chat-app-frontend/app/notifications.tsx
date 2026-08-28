@@ -32,7 +32,7 @@ function relativeTime(iso: string): string {
 }
 
 const KIND_ORDER: NotificationKind[] = [
-  'reminder', 'material', 'group_join', 'chat', 'missed_call', 'reel_like', 'reel_comment',
+  'reminder', 'material', 'group_join', 'chat', 'missed_call', 'reel_like', 'reel_comment', 'reel_share',
   'poll_vote', 'prayer_pray', 'prayer', 'activity',
 ];
 const KIND_TITLE: Record<NotificationKind, string> = {
@@ -43,6 +43,7 @@ const KIND_TITLE: Record<NotificationKind, string> = {
   missed_call: 'Llamadas perdidas',
   reel_like: 'Me gusta en tus reels',
   reel_comment: 'Comentarios en tus reels',
+  reel_share: 'Compartieron tus reels',
   poll_vote: 'Votos en tus encuestas',
   prayer_pray: 'Oraciones por tus peticiones',
   prayer: 'Peticiones de oración',
@@ -58,6 +59,7 @@ function kindIcon(kind: NotificationKind): keyof typeof Ionicons.glyphMap {
     case 'missed_call': return 'call';
     case 'reel_like': return 'heart';
     case 'reel_comment': return 'chatbubble';
+    case 'reel_share': return 'share-social';
     case 'poll_vote': return 'stats-chart';
     case 'prayer_pray': return 'people';
     case 'prayer': return 'heart';
@@ -74,6 +76,7 @@ function kindColor(kind: NotificationKind, colors: any): string {
     case 'missed_call': return colors.danger;
     case 'reel_like': return '#EC4899';
     case 'reel_comment': return '#EC4899';
+    case 'reel_share': return '#EC4899';
     case 'poll_vote': return '#0EA5E9';
     case 'prayer_pray': return '#8B5CF6';
     case 'prayer': return '#22C55E';
@@ -104,7 +107,7 @@ export default function NotificationsScreen() {
   const sections = useMemo(() => {
     const grouped: Record<NotificationKind, NotificationItem[]> = {
       reminder: [], material: [], group_join: [], chat: [], missed_call: [],
-      reel_like: [], reel_comment: [],
+      reel_like: [], reel_comment: [], reel_share: [],
       poll_vote: [], prayer_pray: [], prayer: [], activity: [],
     };
     // Con `?.`: un tipo de aviso que estrene el servidor y este bundle todavía no

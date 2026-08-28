@@ -188,6 +188,45 @@ principio; la web no.
   devuelve el video del visor — las tarjetas de los carruseles de Home están
   antes en el DOM. Hay que buscar dentro del overlay (`.fixed.inset-0.z-[100]`).
 
+## El enlace de una HISTORIA no puede apuntar a `/reels` (2026-08-28)
+
+`/api/share/reel/:id` redirigía siempre a `/reels?reel=<id>`, también cuando lo
+compartido era una historia. Pero esa página **solo lista `kind: 'reel'`**: el id
+no se encontraba, el `findIndex` daba -1 y se quedaba en el índice 0, o sea que
+**abría el PRIMER reel de la lista**. Desde un reel funcionaba, y por eso el
+síntoma parecía aleatorio.
+
+- El `humanUrl` mira ahora `reel.kind`: una historia va a **`/?story=<id>`**, que
+  el feed (`Home.jsx`) lee para abrir su visor en esa historia y luego **borra el
+  parámetro** — si no, cerrar el visor y recargar lo volvería a abrir.
+- Si la historia ya caducó se avisa y no se abre nada: 24 h después, ese enlace
+  compartido apunta a algo que ya no existe.
+- **La misma regla en los push** (`reelNotifier.ts`): el aviso de un me gusta en
+  una historia también llevaba a `/reels`.
+
+## Toda interacción con un reel avisa a alguien (2026-08-28)
+
+| Interacción | A quién avisa |
+|---|---|
+| Me gusta | al autor |
+| Comentario | al autor |
+| **Respuesta a un comentario** | **a quien escribió ese comentario** |
+| **Compartir** | **al autor** |
+| Mensaje privado | al autor, por el chat de siempre (push incluido) |
+
+- **Compartir era la única sin aviso.** `POST /reels/:id/share` guarda
+  `shares: [{userId, at}]` (con la hora dentro desde el principio, a diferencia
+  de `likes`, que la necesitó en un arreglo aparte) y avisa. El filtro
+  `shares.userId: {$ne}` hace de `$addToSet`: **compartir tres veces registra UNA
+  y manda UN aviso**. Se llama al abrir el diálogo de compartir aunque el usuario
+  lo cancele — no hay forma de saberlo, y quedarse sin aviso es peor.
+- **La campana muestra las respuestas a TUS comentarios aunque el reel no sea
+  tuyo.** `q_myReels` solo mira los propios, así que hacía falta una consulta
+  aparte (`q_reelsConMisComentarios`); sin ella la respuesta llegaba por push y
+  no quedaba en la campana de quien la recibía.
+- Tipo nuevo `reel_share` en la campana — recordar la regla de CLAUDE.md:
+  **un `kind` que el backend EMPIEZA a mandar va a los CLIENTES primero**.
+
 ## Comentar es PÚBLICO y escribir al autor es PRIVADO: un input a la vez (2026-08-28)
 
 El visor de historias tenía una caja de texto FIJA al pie ("Responder a X") y

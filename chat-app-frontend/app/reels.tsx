@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { getReels, toggleReelLike, addReelView, deleteReel, reportReel, reelShareUrl, type Reel } from '../src/services/reelService';
+import { getReels, toggleReelLike, addReelView, deleteReel, reportReel, registrarCompartido, reelShareUrl, type Reel } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
@@ -215,6 +215,9 @@ export default function ReelsScreen() {
 
   const onShare = async (reel: Reel) => {
     const text = reel.caption || reel.youtubeTitle || 'Mira este reel en HolyChat';
+    // Se avisa al autor aunque luego se cancele la hoja del sistema: no hay
+    // forma de saberlo, y era la única interacción sin aviso ninguno.
+    if (token) registrarCompartido(token, reel.id).catch(() => {});
     try {
       // El enlace lleva AL REEL, no a la lista: antes quien lo abría veía el
       // primero del feed y no el que le habían mandado.

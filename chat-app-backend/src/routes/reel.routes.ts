@@ -12,6 +12,7 @@ import {
   getComments,
   deleteReel,
   reportReel,
+  shareReel,
   getYouTubeMetaEndpoint,
 } from '../controllers/reelController';
 
@@ -34,6 +35,7 @@ router.post('/:id/view', addView);
 router.get('/:id/views', getViewers);
 router.post('/:id/comments', addComment);
 router.get('/:id/comments', getComments);
+router.post('/:id/share', shareReel);
 router.post('/:id/report', reportReel);
 router.delete('/:id', deleteReel);
 

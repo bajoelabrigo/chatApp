@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../src/context/ThemeContext';
 import { useAuthStore } from '../src/store/useAuthStore';
 import { useReelsStore } from '../src/store/useReelsStore';
-import { addReelView, getReelViewers, toggleReelLike, deleteReel, reportReel, reelShareUrl, type Reel, type ReelViewer } from '../src/services/reelService';
+import { addReelView, getReelViewers, toggleReelLike, deleteReel, reportReel, registrarCompartido, reelShareUrl, type Reel, type ReelViewer } from '../src/services/reelService';
 import { videoPlayUrl, videoThumbUrl } from '../src/lib/cldImage';
 import { YouTubeEmbed } from '../src/components/comunidad/YouTubeEmbed';
 import { ReelCommentsSheet } from '../src/components/comunidad/ReelCommentsSheet';
@@ -95,6 +95,7 @@ function StoryItem({
 
   const onShare = async () => {
     const text = story.caption || story.youtubeTitle || 'Mira esta historia en HolyChat';
+    if (token) registrarCompartido(token, story.id).catch(() => {});
     try { await Share.share({ message: `${text}\n${reelShareUrl(story.id)}` }); } catch { /* best-effort */ }
   };
 

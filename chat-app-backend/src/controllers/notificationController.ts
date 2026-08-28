@@ -21,6 +21,7 @@ type NotificationKind =
   | 'poll_vote'
   | 'reel_like'
   | 'reel_comment'
+  | 'reel_share'
   | 'activity'
   | 'reminder'
   | 'material'
@@ -203,9 +204,23 @@ export async function getNotifications(req: Request, res: Response) {
     // accion (`likedAt[].at` y `comments[].at`).
     const q_myReels = Reel.find({
       authorId: userObjId,
-      $or: [{ 'likedAt.0': { $exists: true } }, { 'comments.0': { $exists: true } }],
+      $or: [
+        { 'likedAt.0': { $exists: true } },
+        { 'comments.0': { $exists: true } },
+        { 'shares.0': { $exists: true } },
+      ],
     })
-      .select('kind caption likedAt comments')
+      .select('kind caption likedAt comments shares')
+      .lean();
+
+    // Reels de OTROS donde yo comenté: si alguien responde a mi comentario, el
+    // aviso es para mí aunque el reel no sea mío. `q_myReels` solo mira los
+    // míos, así que sin esto una respuesta solo llegaba por push.
+    const q_reelsConMisComentarios = Reel.find({
+      authorId: { $ne: userObjId },
+      comments: { $elemMatch: { userId: userObjId, 'replies.0': { $exists: true } } },
+    })
+      .select('kind caption comments')
       .lean();
 
     const q_myCommitments = ActivityCommitment.find({ userId, isActive: true })
@@ -242,6 +257,7 @@ export async function getNotifications(req: Request, res: Response) {
       myPrayers,
       myPolls,
       myReels,
+      reelsConMisComentarios,
       myCommitments,
       tzDoc,
       groupCommitments,
@@ -255,6 +271,7 @@ export async function getNotifications(req: Request, res: Response) {
       cron('myPolls', hayGrupos ? q_myPolls : Promise.resolve([] as any[])),
       // Los reels NO dependen de tener grupos: cualquiera publica uno.
       cron('myReels', q_myReels),
+      cron('reelsConMisComentarios', q_reelsConMisComentarios),
       cron('myCommitments', hayGrupos ? q_myCommitments : Promise.resolve([] as any[])),
       cron('tzDoc', q_tzDoc),
       cron('groupCommitments', q_groupCommitments),
@@ -506,6 +523,46 @@ export async function getNotifications(req: Request, res: Response) {
           isNew: new Date(c.at).getTime() > lastSeen.getTime(),
           nav: { screen: 'reel', id: r._id.toString() },
         });
+      }
+      // Compartir era la única interacción que no dejaba rastro en la campana.
+      for (const sh of r.shares ?? []) {
+        const uid = sh?.userId?.toString();
+        if (!uid || uid === userId) continue;
+        if (!sh.at || new Date(sh.at) < windowStart) continue;
+        actorIds.add(uid);
+        reelItems.push({
+          id: `reelshare:${r._id}:${uid}`,
+          kind: 'reel_share',
+          title: '',
+          body: `compartió ${que}${pie ? ` · ${pie}` : ''}`,
+          timestamp: sh.at,
+          isNew: new Date(sh.at).getTime() > lastSeen.getTime(),
+          nav: { screen: 'reel', id: r._id.toString() },
+        });
+      }
+    }
+
+    // Respuestas a MIS comentarios, en reels que NO son míos. `myReels` solo
+    // mira los propios, así que sin esto una respuesta llegaba por push y no
+    // quedaba en la campana de quien la recibió.
+    for (const r of reelsConMisComentarios as any[]) {
+      for (const c of r.comments ?? []) {
+        if (c?.userId?.toString() !== userId) continue; // solo MIS comentarios
+        for (const rep of c.replies ?? []) {
+          const uid = rep?.userId?.toString();
+          if (!uid || uid === userId) continue;
+          if (!rep.at || new Date(rep.at) < windowStart) continue;
+          actorIds.add(uid);
+          reelItems.push({
+            id: `reelreply:${r._id}:${uid}:${new Date(rep.at).getTime()}`,
+            kind: 'reel_comment',
+            title: '',
+            body: `respondió a tu comentario: ${(rep.text ?? '').slice(0, 60)}`,
+            timestamp: rep.at,
+            isNew: new Date(rep.at).getTime() > lastSeen.getTime(),
+            nav: { screen: 'reel', id: r._id.toString() },
+          });
+        }
       }
     }
     // ── Hidratación común: UNA consulta para todos los nombres ────────────
