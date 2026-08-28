@@ -12,6 +12,7 @@ import { getConnectionRequests } from '../../src/services/connectionService';
 import { PostCard } from '../../src/components/comunidad/PostCard';
 import { StoriesRow } from '../../src/components/comunidad/StoriesRow';
 import { ReelsStrip } from '../../src/components/comunidad/ReelsStrip';
+import { DailyVerseFeedCard } from '../../src/components/comunidad/DailyVerseFeedCard';
 
 const SCOPE_KEY = 'comunidad_feed_scope';
 const LIMIT = 10;
@@ -155,6 +156,12 @@ export default function ComunidadScreen() {
           contentContainerStyle={{ paddingBottom: 40 }}
           ListHeaderComponent={
             <>
+              {/* Versículo del día, arriba del todo. Igual que en el feed móvil
+                  de la web: es lo primero que se ve al entrar. El tema del día
+                  NO se repite aquí — vive en la pestaña Biblia, y dos tarjetas
+                  seguidas empujarían las publicaciones fuera de la pantalla. */}
+              <DailyVerseFeedCard />
+
               {/* Pestañas Historias / Reels (juntas, como en la web) */}
               <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 8 }}>
                 {([['stories', 'Historias'], ['reels', 'Reels']] as const).map(([key, label]) => (

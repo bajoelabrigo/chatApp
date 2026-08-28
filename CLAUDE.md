@@ -167,6 +167,53 @@ Estilo Instagram: historias efímeras (24 h, TTL) + reels permanentes en feed ve
 - **Regla de duración**: el cliente mide y topea a 60 s; el backend acepta `durationSeconds` declarado y lo clava a 60. No hay sondeo del archivo.
 - **Navegación estilo Facebook en la web (2026-08-26)**: `frontend/src/lib/useSwipeNav.js` (teclado, rueda y deslizar con el dedo) lo usan `StoryViewer` (eje x) y `ReelsPage` (eje y). El gesto exige que el **eje dominante** coincida —si no, un deslizamiento en diagonal salta de historia— y bloquea la rueda 500 ms, porque un solo gesto de trackpad emite decenas de eventos; se desactiva con un modal abierto (comentarios, "quién la vio") o las flechas del teclado navegarían mientras se escribe. **Las flechas visibles son `md:` solamente**: en el móvil se desliza y unos botones ahí taparían el video. Los carruseles usan `components/reels/CarouselRow.jsx`, que mide con `ResizeObserver` (el contenido llega por consulta, no basta medir al montar) y solo enciende la flecha del lado que tiene recorrido. En `StoriesRow`, **"Crear" y "Reels" van FUERA del contenedor que se desplaza**: son accesos, y con unas cuantas historias se perdían de vista.
 
+## Feed de reels: variedad de autores y proyección (2026-08-28)
+
+Los dos puntos amarillos que quedaban de la revisión, resueltos en la MISMA
+agregación (`reelFeedPage` + `shapeStages` en `reelController.ts`).
+
+**Variedad de autores**, igual que el feed de publicaciones: cada reel EXTRA del
+mismo autor compite como si fuera 24 h más antiguo (`$setWindowFields` +
+`$documentNumber` → `feedScore`). Sin esto quien publica mucho se queda la
+portada — medido en producción, **4 de los 5 reels del feed eran de la misma
+persona y salían seguidos**. Comprobado con datos sintéticos contra el propio
+Mongo (`$documents`): `Prolifico > Prolifico > Prolifico > Prolifico > Ana >
+Beto` pasa a `Prolifico > Ana > Beto > Prolifico > Prolifico > Prolifico`.
+**Hay respaldo cronológico** si el servidor no soporta `$setWindowFields` (Mongo
+5.0): sin él el feed saldría VACÍO en vez de mal ordenado.
+
+**Proyección.** `Reel.find().lean()` traía los arreglos completos de `likes`,
+`views` y `comments` para acabar usando solo sus recuentos. `$size` y `$in` los
+resuelven en la base: medido con los 5 reels de hoy, la respuesta bajó de 4.570 a
+2.726 bytes (−40%) **y ya no crece con la popularidad** — un reel con 5.000
+vistas eran ~250 KB de arreglo viajando de París a São Paulo por cada carga.
+- Lo usan los TRES endpoints de lista (`getReelsFeed`, `getStories`,
+  `getUserReels`) vía `shapeStages`, y `shapeAggregated` les da la misma forma
+  exacta que devolvía `serialize` — los clientes no notan el cambio.
+- `$unwind` del autor va con `preserveNullAndEmptyArrays`: si al autor lo
+  borraron, el reel sigue saliendo en vez de desaparecer sin explicación.
+- Cubierto por `scripts/reelFeed.test.mjs`, que además vigila que nadie vuelva a
+  un `find().lean()` sin proyección en esos tres endpoints.
+
+## Tarjetas del día en el feed: solo el versículo, y arriba del todo (2026-08-28)
+
+En el feed de publicaciones va **únicamente el versículo del día, lo primero de
+todo**. El tema del día se quedó fuera: dos tarjetas seguidas antes del primer
+post empujaban el feed fuera de la pantalla en un teléfono.
+- Web (`pages/home/Home.jsx`): el bloque `lg:hidden` sube por encima del editor y
+  pierde el `DailyTopicCard`. **En escritorio no cambia nada**: la columna
+  derecha (`hidden lg:block`) sigue con las dos tarjetas.
+- Móvil: el feed no tenía ninguna. Se añadió
+  `components/comunidad/DailyVerseFeedCard.tsx`, **autónoma a propósito**: la de
+  la pestaña Biblia recibe por props los favoritos, la foto, el recordatorio y
+  cuatro manejadores — todo estado de esa pantalla, y traerlo aquí habría
+  significado duplicarlo en dos pestañas para mostrar el mismo versículo. Aquí
+  solo se lee y "Leer" abre la Biblia por `openRef`, que es donde viven las
+  acciones. Usa la versión ELEGIDA por la persona, no la de por defecto.
+- Si la petición falla o la versión no trae ese pasaje (las biblias históricas
+  son parciales), la tarjeta **no se pinta**: es un extra del feed, no puede
+  dejar un hueco donde deberían estar las publicaciones.
+
 ## Reels e historias — lo social (2026-08-28)
 
 La función estaba entera por dentro y vacía por fuera: **5 reels y 0 historias

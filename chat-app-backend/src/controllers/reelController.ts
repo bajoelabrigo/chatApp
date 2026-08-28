@@ -54,6 +54,77 @@ function serialize(reel: IReel & { authorId: AuthorDoc }, me: string) {
 
 const populateAuthor = { path: 'authorId', select: 'name avatar isSocio' };
 
+// Variedad de autores, igual que el feed de publicaciones: cada reel EXTRA del
+// mismo autor compite como si fuera 24 h más antiguo. Sin esto quien publica
+// mucho se queda la portada — medido en producción, 4 de los 5 reels del feed
+// eran de la misma persona y salían seguidos.
+const AUTHOR_DEMOTION_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Etapas que dejan el documento con lo que el cliente necesita Y NADA MÁS.
+ *
+ * `Reel.find().lean()` traía los arrays completos de `likes`, `views` y
+ * `comments` para acabar usando solo sus recuentos: hoy son 624 bytes por
+ * documento, pero un reel con 5.000 vistas son ~250 KB de arreglo viajando de
+ * París a São Paulo en cada carga del feed para calcular un número.
+ * `$size` y `$in` lo resuelven en el servidor de base de datos.
+ */
+function shapeStages(viewer: Types.ObjectId): any[] {
+  return [
+    {
+      $project: {
+        kind: 1, caption: 1, durationSeconds: 1, videoUrl: 1,
+        youtubeVideoId: 1, youtubeTitle: 1, thumbUrl: 1,
+        authorId: 1, createdAt: 1, expiresAt: 1,
+        likeCount: { $size: { $ifNull: ['$likes', []] } },
+        viewCount: { $size: { $ifNull: ['$views', []] } },
+        commentCount: { $size: { $ifNull: ['$comments', []] } },
+        liked: { $in: [viewer, { $ifNull: ['$likes', []] }] },
+        viewed: { $in: [viewer, { $ifNull: ['$views.userId', []] }] },
+      },
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'authorId',
+        foreignField: '_id',
+        as: 'author',
+        pipeline: [{ $project: { name: 1, avatar: 1, isSocio: 1 } }],
+      },
+    },
+    // `preserveNull`: si al autor lo borraron, el reel sigue saliendo con un
+    // nombre de respaldo en vez de desaparecer del feed sin explicación.
+    { $unwind: { path: '$author', preserveNullAndEmptyArrays: true } },
+  ];
+}
+
+/** Da a un documento ya agregado la MISMA forma que devuelve `serialize`. */
+function shapeAggregated(r: any) {
+  return {
+    id: r._id,
+    kind: r.kind,
+    caption: r.caption ?? '',
+    durationSeconds: r.durationSeconds,
+    videoUrl: r.videoUrl ?? '',
+    youtubeVideoId: r.youtubeVideoId ?? '',
+    youtubeTitle: r.youtubeTitle ?? '',
+    thumbUrl: r.thumbUrl ?? '',
+    author: {
+      id: r.author?._id ?? r.authorId,
+      name: r.author?.name ?? 'Usuario',
+      avatar: r.author?.avatar ?? '',
+      isSocio: !!r.author?.isSocio,
+    },
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt ?? null,
+    likeCount: r.likeCount ?? 0,
+    viewCount: r.viewCount ?? 0,
+    commentCount: r.commentCount ?? 0,
+    liked: !!r.liked,
+    viewed: !!r.viewed,
+  };
+}
+
 // ── Crear ────────────────────────────────────────────────────────────────────
 // Body: { kind, videoUrl?, cloudinaryPublicId?, youtubeUrl?, caption?, durationSeconds? }
 export async function createReel(req: Request, res: Response) {
@@ -125,28 +196,66 @@ export async function getReelsFeed(req: Request, res: Response) {
   const limit = Math.min(30, Math.max(1, parseInt(String(req.query.limit ?? String(PAGE_LIMIT)), 10) || PAGE_LIMIT));
 
   try {
+    const viewer = new Types.ObjectId(userId);
     // Bloquear a alguien tiene que valer TAMBIÉN aquí: hasta ahora desaparecía
     // de tu muro y lo seguías viendo en los reels.
     //
     // Los bloqueos se piden EN PARALELO con los reels y el filtro se aplica en
-    // memoria. Meterlos en el `$nin` obligaba a esperarlos primero, y eso es un
-    // viaje de ida y vuelta más a Atlas (~205 ms desde el VPS) en un endpoint
+    // memoria. Meterlos en el `$match` obligaba a esperarlos primero, y eso es
+    // un viaje de ida y vuelta más a Atlas (~205 ms desde el VPS) en un endpoint
     // que los clientes consultan solos. Como contrapartida, una página puede
     // devolver menos de `limit` elementos si el bloqueado sale en ella: con un
     // bloqueo en toda la base es un precio que no se nota.
     const [hidden, reels] = await Promise.all([
       getHiddenUserIds(userId),
-      Reel.find({ kind: 'reel' })
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate(populateAuthor)
-        .lean(),
+      reelFeedPage(viewer, (page - 1) * limit, limit),
     ]);
-    const visibles = reels.filter((r: any) => !hidden.has(r.authorId?._id?.toString()));
-    res.json(visibles.map((r) => serialize(r as any, userId)));
+    const visibles = reels.filter((r: any) => !hidden.has(r.authorId?.toString()));
+    res.json(visibles.map(shapeAggregated));
   } catch {
     res.status(500).json({ error: 'Error obteniendo reels' });
+  }
+}
+
+/**
+ * Una página del feed, ordenada por VARIEDAD DE AUTORES y ya proyectada.
+ *
+ * `$setWindowFields` es de Mongo 5.0: si el servidor no lo soporta se cae al
+ * orden cronológico de siempre en vez de dejar el feed vacío (mismo respaldo
+ * que `orderFeedIds` en el feed de publicaciones).
+ */
+async function reelFeedPage(viewer: Types.ObjectId, skip: number, limit: number): Promise<any[]> {
+  const base = [{ $match: { kind: 'reel' } }];
+  try {
+    return await Reel.aggregate([
+      ...base,
+      {
+        $setWindowFields: {
+          partitionBy: '$authorId',
+          sortBy: { createdAt: -1 },
+          output: { authorRank: { $documentNumber: {} } },
+        },
+      },
+      {
+        $addFields: {
+          feedScore: {
+            $subtract: ['$createdAt', { $multiply: [{ $subtract: ['$authorRank', 1] }, AUTHOR_DEMOTION_MS] }],
+          },
+        },
+      },
+      { $sort: { feedScore: -1, _id: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      ...shapeStages(viewer),
+    ]);
+  } catch {
+    return Reel.aggregate([
+      ...base,
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      ...shapeStages(viewer),
+    ]);
   }
 }
 
@@ -154,19 +263,21 @@ export async function getReelsFeed(req: Request, res: Response) {
 export async function getStories(req: Request, res: Response) {
   const userId = (req as any).userId as string;
   try {
+    const viewer = new Types.ObjectId(userId);
     // En paralelo, por lo mismo que el feed: esto se pide cada minuto desde el
     // carrusel de historias y un viaje de más aquí se paga 1.440 veces al día
     // por cada persona conectada.
     const [hidden, stories] = await Promise.all([
       getHiddenUserIds(userId),
-      Reel.find({ kind: 'story', expiresAt: { $gt: new Date() } })
-        .sort({ createdAt: -1 })
-        .limit(STORIES_LIMIT)
-        .populate(populateAuthor)
-        .lean(),
+      Reel.aggregate([
+        { $match: { kind: 'story', expiresAt: { $gt: new Date() } } },
+        { $sort: { createdAt: -1 } },
+        { $limit: STORIES_LIMIT },
+        ...shapeStages(viewer),
+      ]),
     ]);
-    const visibles = stories.filter((r: any) => !hidden.has(r.authorId?._id?.toString()));
-    res.json(visibles.map((r) => serialize(r as any, userId)));
+    const visibles = stories.filter((r: any) => !hidden.has(r.authorId?.toString()));
+    res.json(visibles.map(shapeAggregated));
   } catch {
     res.status(500).json({ error: 'Error obteniendo historias' });
   }
@@ -188,26 +299,31 @@ export async function getUserReels(req: Request, res: Response) {
       res.status(400).json({ error: 'Usuario inválido' });
       return;
     }
+    const viewer = new Types.ObjectId(userId);
+    const autor = new Types.ObjectId(target);
     // Un bloqueo tapa el perfil entero: ni sus reels ni sus historias.
     const [hidden, reels, stories] = await Promise.all([
       getHiddenUserIds(userId),
-      Reel.find({ kind: 'reel', authorId: target })
-        .sort({ createdAt: -1 })
-        .limit(limit)
-        .populate(populateAuthor)
-        .lean(),
-      Reel.find({ kind: 'story', authorId: target, expiresAt: { $gt: new Date() } })
-        .sort({ createdAt: -1 })
-        .populate(populateAuthor)
-        .lean(),
+      Reel.aggregate([
+        { $match: { kind: 'reel', authorId: autor } },
+        { $sort: { createdAt: -1 } },
+        { $limit: limit },
+        ...shapeStages(viewer),
+      ]),
+      Reel.aggregate([
+        { $match: { kind: 'story', authorId: autor, expiresAt: { $gt: new Date() } } },
+        { $sort: { createdAt: -1 } },
+        { $limit: STORIES_LIMIT },
+        ...shapeStages(viewer),
+      ]),
     ]);
     if (hidden.has(target)) {
       res.json({ reels: [], stories: [] });
       return;
     }
     res.json({
-      reels: reels.map((r) => serialize(r as any, userId)),
-      stories: stories.map((r) => serialize(r as any, userId)),
+      reels: reels.map(shapeAggregated),
+      stories: stories.map(shapeAggregated),
     });
   } catch {
     res.status(500).json({ error: 'Error obteniendo los reels del usuario' });

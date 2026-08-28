@@ -7,7 +7,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js",
-    "test": "npm run build && node scripts/refunds.test.mjs && node scripts/paypalFees.test.mjs && node scripts/authCodes.test.mjs && node scripts/rateLimit.test.mjs && node scripts/env.test.mjs && node scripts/logger.test.mjs && node scripts/notificationsPerf.test.mjs && node scripts/messagesPayload.test.mjs && node scripts/mediaCleanup.test.mjs"
+    "test": "npm run build && node scripts/refunds.test.mjs && node scripts/paypalFees.test.mjs && node scripts/authCodes.test.mjs && node scripts/rateLimit.test.mjs && node scripts/env.test.mjs && node scripts/logger.test.mjs && node scripts/notificationsPerf.test.mjs && node scripts/messagesPayload.test.mjs && node scripts/mediaCleanup.test.mjs && node scripts/reelFeed.test.mjs"
   },
   "dependencies": {
     "@types/bcrypt": "^6.0.0",
