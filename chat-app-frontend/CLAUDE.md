@@ -135,6 +135,36 @@ Cuando se cierra (close): `setOverlay(false)`.
 - **"Orando por"**: peticiones de oración activas (`isAnswered: false`) donde el usuario aparece en `prayingUsers`. Cargadas con `GET /users/me/prayer-requests` → `getMyPrayingRequests()`. Muestra autor, nombre del grupo, contenido truncado, fecha de inicio y fecha límite. El botón **"Estoy orando"** (verde) llama a `togglePray` y elimina la tarjeta de la lista al confirmar. Tocar la tarjeta navega a `group-prayer/[groupId]`.
 - **"Mis grupos"**: grupos únicos derivados de los compromisos activos, con acceso rápido a peticiones de oración y actividades del grupo.
 
+## Creador de imágenes de versículos (móvil) — 2026-08-29
+
+`components/bible/VerseImageSheet.tsx`. Rediseñado a la vez que el de la web
+(**el detalle completo está en `holy_app/CLAUDE.md`**, sección "El creador de
+imágenes: seis paneles"). Lo propio de la app:
+
+- **Dos pasos** (elegir fondo → editor) y **barra inferior de seis paneles**
+  (Estilo, Fuente, Texto, Palabras, Formato, Fondo). Antes todo iba en un scroll
+  único bajo la previa.
+- **"Guardar" abre una hoja** con *Publicar en la comunidad* (nuevo: era la única
+  salida que el móvil no tenía) y *Compartir o guardar*. **No hay guardado
+  directo al carrete**: necesitaría `expo-media-library`, que es nativo; la hoja
+  del sistema ya ofrece "Guardar imagen" junto al resto de apps.
+- **El difuminado usa `blurRadius`, que es del CORE de React Native.** No hace
+  falta `expo-blur` (nativo) y por eso esto llega por `eas update`. El valor va
+  en píxeles del lienzo de 1080 → se escala con `s()`, o se notaría el triple en
+  la previa que en la imagen capturada.
+- **El brillo es una capa translúcida** (`brightnessOverlay`), no un filtro: en
+  RN no hay `filter: brightness()` sin otra dependencia nativa.
+- **Los sliders son propios**: `components/bible/PosterSlider.tsx` con
+  `PanResponder` (mismo patrón que los gestos de la lista de chats).
+  `@react-native-community/slider` es nativo y habría obligado a un `eas build`.
+  Dentro del PanResponder el ancho y el `onChange` se leen por `ref`: con las
+  variables de estado se quedaría con las del primer render y el slider movería
+  siempre al mismo sitio.
+- **Los rangos de los seis ajustes están ESPEJADOS** en `src/lib/versePosterLayout.ts`
+  y `holy_app/frontend/src/lib/posterLayout.js`. Hay un test en la web
+  (`scripts/versePoster.test.mjs`) que **lee este .ts como texto** y falla si un
+  rango se desalinea: son dos motores dibujando el mismo diseño.
+
 ## Notas de voz — UN reproductor global, fuera de React (2026-08-13)
 
 Cada burbuja tenía su `useAudioPlayer`, atado al ciclo de vida del componente: salir del chat —o que la FlashList reciclara la fila al desplazarse— liberaba el reproductor y **el audio se cortaba a media frase**. WhatsApp lo sigue reproduciendo hasta el final aunque te muevas por la app.

@@ -21,6 +21,9 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { searchBackgroundPhotos, type BackgroundPhoto } from '../../services/bibleService';
+import { uploadFile } from '../../services/uploadService';
+import { createPost } from '../../services/postService';
+import { useAuthStore } from '../../store/useAuthStore';
 import {
   FORMATS,
   FONTS,
@@ -41,7 +44,18 @@ import {
   type TemplateDef,
   highlightColor,
   type FormatDef,
+  ADJUST_DEFAULTS,
+  SIZE_ADJ,
+  LINE_ADJ,
+  TRACK_ADJ,
+  VEIL_ADJ,
+  BLUR_ADJ,
+  BRIGHT_ADJ,
+  brightnessOverlay,
+  clampNum,
+  type Adjust,
 } from '../../lib/versePosterLayout';
+import PosterSlider from './PosterSlider';
 import {
   tokenize,
   isSpace,
@@ -107,6 +121,7 @@ interface Props {
 export default function VerseImageSheet({ verse, versionLabel, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const { token } = useAuthStore();
   const posterRef = useRef<View>(null); // póster a tamaño completo (fuera de pantalla)
   const previewRef = useRef<View>(null); // el visible, solo como respaldo de captura
 
@@ -137,6 +152,22 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   const [customText, setCustomText] = useState<string | null>(null);
   const [editingText, setEditingText] = useState(false);
   const [bgMode, setBgMode] = useState<'color' | 'photo'>('color');
+
+  // ── Barra inferior (2026-08-29) ────────────────────────────
+  // Antes TODO iba en un único scroll larguísimo bajo la previa: para llegar al
+  // fondo o al adorno había que bajar a ciegas. Ahora los mismos controles
+  // viven en seis paneles y solo se ve el del botón pulsado.
+  //
+  // `paso` separa ELEGIR EL FONDO de RETOCAR: al abrir se pregunta primero de
+  // dónde sale la imagen (color, foto de la web o una propia).
+  const [paso, setPaso] = useState<'fondo' | 'editor'>('fondo');
+  const [tab, setTab] = useState<'estilo' | 'fuente' | 'texto' | 'palabras' | 'formato' | 'fondo'>('estilo');
+  const [showSave, setShowSave] = useState(false);
+  // Qué está pasando al publicar. Sin esto el botón se queda mudo mientras sube
+  // la imagen a Cloudinary, que en una foto grande son varios segundos.
+  const [publicando, setPublicando] = useState<string | null>(null);
+  const [adjust, setAdjust] = useState<Adjust>(ADJUST_DEFAULTS);
+  const setAdj = (k: keyof Adjust, v: number) => setAdjust((a) => ({ ...a, [k]: v }));
   const [busy, setBusy] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
 
@@ -199,8 +230,20 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
 
   // OJO: el tamaño del cuerpo lo manda la longitud del CUERPO, no la del texto
   // entero — con gancho el resto es más corto y debe crecer.
-  const verseSize = s(verseBaseSize(bodyText.length, format, font, hasHook));
-  const lineHeight = verseSize * 1.55 * (font.lineScale ?? 1);
+  // El tamaño automático (longitud del cuerpo × formato × altura de x de la
+  // familia) SE MULTIPLICA por el mando del usuario; no se sustituye. Al
+  // cambiar de versículo el diseño se sigue recolocando solo.
+  const verseSize =
+    s(verseBaseSize(bodyText.length, format, font, hasHook)) *
+    clampNum(adjust.sizeAdj, SIZE_ADJ.min, SIZE_ADJ.max);
+  const lineHeight =
+    verseSize * 1.55 * (font.lineScale ?? 1) * clampNum(adjust.lineAdj, LINE_ADJ.min, LINE_ADJ.max);
+  // Espaciado entre letras: las MAYÚSCULAS lo llevan de serie (sin él, un texto
+  // en caja alta se lee apelotonado) y el mando SUMA por encima, así que
+  // también se puede separar un texto en minúsculas.
+  const bodyTracking =
+    (upper ? verseSize * 0.09 : 0) +
+    verseSize * clampNum(adjust.trackAdj, TRACK_ADJ.min, TRACK_ADJ.max);
   const hookSize = hasHook ? s(hookBaseSize(hookText.trim().length, hookFont)) : 0;
   // Interlineado corto: una caligráfica tiene los trazos muy altos y con el
   // 1,55 del cuerpo las líneas del gancho quedarían desparramadas.
@@ -336,6 +379,18 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
 
   const capturePreviewRef = () => captureRef(previewRef, { format: 'png', quality: 1 });
 
+  // Captura el póster a tamaño completo (fuera de pantalla). Si eso fallara
+  // —capturar una vista no visible depende del dispositivo— se cae a la previa,
+  // que sí está en pantalla: la imagen sale más pequeña, pero NUNCA se queda
+  // sin poder guardarse, que es lo que importa.
+  const capturarPoster = async () => {
+    try {
+      return await captureRef(posterRef, { format: 'png', quality: 1 });
+    } catch {
+      return await capturePreviewRef();
+    }
+  };
+
   const handleShare = async () => {
     if (busy) return;
     setBusy(true);
@@ -344,12 +399,7 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
       // fallara —capturar una vista no visible depende del dispositivo— se cae
       // a la previa, que sí está en pantalla: la imagen sale más pequeña, pero
       // compartir NUNCA se queda sin funcionar, que es lo que importa.
-      let uri: string;
-      try {
-        uri = await captureRef(posterRef, { format: 'png', quality: 1 });
-      } catch {
-        uri = await capturePreviewRef();
-      }
+      const uri = await capturarPoster();
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, {
           mimeType: 'image/png',
@@ -363,6 +413,31 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
     }
   };
 
+  // Publicar en la comunidad. La web lo tenía desde siempre y el móvil no: aquí
+  // compartir era la ÚNICA salida de la imagen. Se sube la captura por el mismo
+  // `/upload` del chat y se crea el post con la referencia de texto.
+  const handlePublish = async () => {
+    if (busy || !token) return;
+    setBusy(true);
+    setPublicando('Preparando la imagen...');
+    try {
+      const uri = await capturarPoster();
+      setPublicando('Subiendo...');
+      const subida = await uploadFile(token, uri, 'image/png', `versiculo-${Date.now()}.png`);
+      setPublicando('Publicando...');
+      await createPost(token, { content: `${reference} — ${versionLabel}`, image: subida.url });
+      setShowSave(false);
+      Alert.alert('Publicado', 'Tu imagen ya está en la comunidad.');
+    } catch {
+      // El fallo se dice: una publicación que no aparece y no avisa se
+      // interpreta como que la app se colgó, y la gente vuelve a pulsar.
+      Alert.alert('No se pudo publicar', 'Inténtalo de nuevo en un momento.');
+    } finally {
+      setPublicando(null);
+      setBusy(false);
+    }
+  };
+
   const shareDisabled = busy || (usingPhoto && !photoReady);
 
   // Sombra/contorno del texto sobre foto (el contorno real no existe en RN;
@@ -370,6 +445,7 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   // Con texto oscuro sobre foto clara hay que invertirla: una sombra oscura
   // bajo letras oscuras las emborrona en vez de despegarlas (ver photoShadow).
   const sombra = usingPhoto ? photoShadow(modo) : {};
+  const brilloCapa = usingPhoto ? brightnessOverlay(adjust.brightness) : null;
 
   // Zonas reservadas del anclaje: arriba el margen (o la marca, si está), abajo
   // lo que ocupa el pie. Es lo que impide que, apoyado en un borde, el texto se
@@ -525,15 +601,24 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
         source={{ uri: photoUrl! }}
         style={StyleSheet.absoluteFill}
         resizeMode="cover"
+        // `blurRadius` es del CORE de React Native (no un módulo aparte), así
+        // que el difuminado llega por `eas update` como el resto. El valor va
+        // en píxeles del lienzo de 1080, de ahí el `s()`: sin escalarlo se
+        // notaría el triple en la previa que en la imagen capturada.
+        blurRadius={adjust.blur > 0 ? s(adjust.blur) : 0}
         onLoad={() => setPhotoReady(true)}
         onError={() => setPhotoReady(false)}
       />
+      {/* Brillo. En la web es `filter: brightness()`; aquí no existe ese filtro
+          sin un módulo nativo, así que es una capa translúcida (ver
+          brightnessOverlay). */}
+      {brilloCapa && <View style={[StyleSheet.absoluteFill, brilloCapa]} pointerEvents="none" />}
       {/* Velo: SOLO en la franja por la que pasa el texto, apoyado en el borde
           del anclaje. Antes cubría la foto entera de arriba abajo y la dejaba
           en barro — justo lo que no hacen las imágenes que sirven de
           referencia, donde la foto se ve y solo se oscurece donde hay letras.
           Y puede ser blanco: con texto oscuro lo que hace falta es aclarar. */}
-      <LinearGradient {...scrimFor(anchor, modo)} style={StyleSheet.absoluteFill} />
+      <LinearGradient {...scrimFor(anchor, modo, adjust.veilAdj)} style={StyleSheet.absoluteFill} />
     </>
                 ) : (
     <LinearGradient colors={theme.colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
@@ -598,7 +683,7 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
         fontWeight: font.weight ?? '400', fontFamily: verseFamily,
         // Mayúsculas + espaciado: el texto secundario de las referencias.
         textTransform: upper ? 'uppercase' : undefined,
-        letterSpacing: upper ? verseSize * 0.09 : undefined,
+        letterSpacing: bodyTracking || undefined,
         ...sombra,
       }}>
         {pintarTokens(bodyItems, verseSize, font)}
@@ -652,10 +737,29 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
             flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
             paddingHorizontal: 16, paddingTop: insets.top + 8, paddingBottom: 12,
           }}>
-            <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>Compartir como imagen</Text>
-            <TouchableOpacity onPress={onClose} style={{ padding: 4 }}>
+            <TouchableOpacity onPress={onClose} style={{ padding: 4 }} accessibilityLabel="Cerrar">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
+            <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>
+              {paso === 'fondo' ? 'Elegir fondo' : 'Imagen'}
+            </Text>
+            {/* En el paso del fondo NO hay "Guardar": todavía no hay nada que
+                guardar, y ofrecerlo invita a saltarse el editor. El hueco se
+                reserva igual para que el título no se descentre. */}
+            {paso === 'editor' ? (
+              <TouchableOpacity
+                onPress={() => setShowSave(true)}
+                disabled={shareDisabled}
+                style={{
+                  paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999,
+                  backgroundColor: colors.accent, opacity: shareDisabled ? 0.6 : 1,
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Guardar</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 32 }} />
+            )}
           </View>
 
           {/* Vista previa: el póster encogido para que quepa junto a los
@@ -683,7 +787,9 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
 
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
           <View style={{ gap: 14 }}>
-            {/* Plantillas */}
+            {(paso === 'editor' && tab === 'estilo') && (
+              <>
+{/* Plantillas */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
               {TEMPLATES.map((tpl) => {
                 const th = THEMES.find((x) => x.id === tpl.themeId) || THEMES[0];
@@ -724,8 +830,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                 );
               })}
             </ScrollView>
+              </>
+            )}
 
-            {/* Formato */}
+            {(paso === 'editor' && tab === 'formato') && (
+              <>
+{/* Formato */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {FORMATS.map((f: FormatDef) => {
                 const activo = formatId === f.id;
@@ -737,8 +847,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                 );
               })}
             </ScrollView>
+              </>
+            )}
 
-            {/* ── Composición ─────────────────────────────────
+            {(paso === 'editor' && tab === 'texto') && (
+              <>
+{/* ── Composición ─────────────────────────────────
                 Lo que de verdad cambia el aspecto: dónde se apoya el texto y
                 si hay frase destacada. Va antes que la tipografía porque
                 decide la imagen mucho más que la letra. */}
@@ -831,6 +945,58 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                 </ScrollView>
               )}
 
+              {/* Color del texto sobre foto. Sin "automático": aquí no se puede
+                  medir la luminancia de la foto (ver scrimFor). */}
+              {usingPhoto && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, width: 72 }}>Texto</Text>
+                  {([
+                    { id: 'light' as const, name: 'Claro' },
+                    { id: 'dark' as const, name: 'Oscuro' },
+                  ]).map((m) => {
+                    const activo = photoText === m.id;
+                    return (
+                      <TouchableOpacity key={m.id} onPress={() => setPhotoText(m.id)} style={[chip(activo), { paddingHorizontal: 10, paddingVertical: 6 }]}>
+                        <Text style={[chipText(activo), { fontSize: 12 }]}>{m.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            {/* Los tres mandos del texto. Son MULTIPLICADORES de lo que el motor
+                calcula solo (ver ADJUST_DEFAULTS): al cambiar de versículo o de
+                formato el diseño se sigue recolocando y esto solo lo empuja. */}
+            <View style={{ gap: 6, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+              <PosterSlider label="Tamaño" range={SIZE_ADJ} value={adjust.sizeAdj} onChange={(v) => setAdj('sizeAdj', v)} />
+              <PosterSlider label="Altura de línea" range={LINE_ADJ} value={adjust.lineAdj} onChange={(v) => setAdj('lineAdj', v)} />
+              <PosterSlider
+                label="Espaciado"
+                range={TRACK_ADJ}
+                value={adjust.trackAdj}
+                onChange={(v) => setAdj('trackAdj', v)}
+                fmt={(v) => (v ? `+${(v * 100).toFixed(0)}` : '0')}
+              />
+              <TouchableOpacity
+                onPress={() => setAdjust((a) => ({ ...a, sizeAdj: SIZE_ADJ.def, lineAdj: LINE_ADJ.def, trackAdj: TRACK_ADJ.def }))}
+                style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12 }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Restablecer</Text>
+              </TouchableOpacity>
+            </View>
+              </>
+            )}
+
+            {(paso === 'editor' && tab === 'estilo') && (
+              <>
+{/* Adorno y remates: separador, pincelada tras la cita y marca de
+                agua. Van con el ESTILO —no con la colocación del texto—, igual
+                que en la web. */}
+            <View style={{
+              gap: 10, padding: 10, borderRadius: 12,
+              borderWidth: 1, borderColor: colors.border,
+            }}>
               {/* Adorno separador */}
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 <Text style={{ color: colors.textSecondary, fontSize: 12, alignSelf: 'center', marginRight: 6 }}>Adorno</Text>
@@ -852,28 +1018,13 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                   <Text style={[chipText(brandTop), { fontSize: 12 }]}>Marca arriba</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* Color del texto sobre foto. Sin "automático": aquí no se puede
-                  medir la luminancia de la foto (ver scrimFor). */}
-              {usingPhoto && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 12, width: 72 }}>Texto</Text>
-                  {([
-                    { id: 'light' as const, name: 'Claro' },
-                    { id: 'dark' as const, name: 'Oscuro' },
-                  ]).map((m) => {
-                    const activo = photoText === m.id;
-                    return (
-                      <TouchableOpacity key={m.id} onPress={() => setPhotoText(m.id)} style={[chip(activo), { paddingHorizontal: 10, paddingVertical: 6 }]}>
-                        <Text style={[chipText(activo), { fontSize: 12 }]}>{m.name}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
             </View>
+              </>
+            )}
 
-            {/* Tipografía */}
+            {(paso === 'editor' && tab === 'fuente') && (
+              <>
+{/* Tipografía */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {FONTS.map((f) => {
                 const activo = fontId === f.id;
@@ -886,8 +1037,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                 );
               })}
             </ScrollView>
+              </>
+            )}
 
-            {/* Resaltar una palabra. Va con el resto de lo que se le hace al
+            {(paso === 'editor' && tab === 'palabras') && (
+              <>
+{/* Resaltar una palabra. Va con el resto de lo que se le hace al
                 TEXTO (justo encima de estilizar por palabra) y no arriba junto
                 a la alineación: allí parecía parte de la composición. */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
@@ -903,8 +1058,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                 );
               })}
             </ScrollView>
+              </>
+            )}
 
-            {/* ── Estilo por palabra ──────────────────────────────
+            {(paso === 'editor' && tab === 'palabras') && (
+              <>
+{/* ── Estilo por palabra ──────────────────────────────
                 NO es un editor de texto enriquecido: se toca la palabra y se
                 pulsa el estilo. Con el dedo no hay forma cómoda de seleccionar
                 un rango, y el póster que se captura no es HTML. */}
@@ -1071,8 +1230,12 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               </>
               )}
             </View>
+              </>
+            )}
 
-            {/* Color / Foto */}
+            {(paso === 'fondo' || tab === 'fondo') && (
+              <>
+{/* Color / Foto */}
             <View style={{ flexDirection: 'row', gap: 10 }}>
               {[{ k: 'color' as const, label: 'Color' }, { k: 'photo' as const, label: 'Foto' }].map((m) => (
                 <TouchableOpacity
@@ -1173,23 +1336,156 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               </View>
             )}
 
-            {/* Compartir */}
-            <TouchableOpacity
-              onPress={handleShare}
-              disabled={shareDisabled}
-              style={{
-                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                paddingVertical: 14, borderRadius: 14, backgroundColor: colors.accent, opacity: shareDisabled ? 0.6 : 1,
-                marginTop: 4,
-              }}
-            >
-              {busy ? <ActivityIndicator color="#fff" /> : <Ionicons name="share-social" size={18} color="#fff" />}
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>
-                {usingPhoto && !photoReady ? 'Cargando foto...' : 'Compartir'}
-              </Text>
-            </TouchableOpacity>
+            {/* Velo, difuminado y brillo: solo tienen sentido con una foto —
+                sobre un color plano no hay nada que difuminar. Se muestran
+                igualmente, apagados, para que se sepa que existen. */}
+            <View style={{ gap: 6, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+              <PosterSlider label="Opacidad del velo" range={VEIL_ADJ} value={adjust.veilAdj} onChange={(v) => setAdj('veilAdj', v)} disabled={!usingPhoto} />
+              <PosterSlider label="Difuminar" range={BLUR_ADJ} value={adjust.blur} onChange={(v) => setAdj('blur', v)} fmt={(v) => `${v} px`} disabled={!usingPhoto} />
+              <PosterSlider label="Brillo" range={BRIGHT_ADJ} value={adjust.brightness} onChange={(v) => setAdj('brightness', v)} disabled={!usingPhoto} />
+              <TouchableOpacity
+                disabled={!usingPhoto}
+                onPress={() => setAdjust((a) => ({ ...a, veilAdj: VEIL_ADJ.def, blur: BLUR_ADJ.def, brightness: BRIGHT_ADJ.def }))}
+                style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12, opacity: usingPhoto ? 1 : 0.4 }}
+              >
+                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Restablecer</Text>
+              </TouchableOpacity>
+            </View>
+              </>
+            )}
+
+            {/* Paso 1: elegido el fondo, se pasa al editor. Sin este botón no
+                hay forma de salir del selector — y "Guardar" no está ahí: no
+                tendría sentido guardar antes de componer nada. */}
+            {paso === 'fondo' && (
+              <TouchableOpacity
+                onPress={() => {
+                  setPaso('editor');
+                  setTab('estilo');
+                }}
+                style={{
+                  alignItems: 'center', justifyContent: 'center',
+                  paddingVertical: 14, borderRadius: 14, backgroundColor: colors.accent, marginTop: 4,
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Continuar</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </ScrollView>
+
+        {/* Barra inferior: cada botón abre SU panel y solo se ve ese, en vez del
+            scroll larguísimo que había. Se queda fija mientras se retoca. */}
+        {paso === 'editor' && (
+          <View style={{
+            flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.border,
+            backgroundColor: colors.bgPrimary,
+            paddingTop: 6, paddingBottom: Math.max(insets.bottom, 6), paddingHorizontal: 4,
+          }}>
+            {([
+              { id: 'estilo', label: 'Estilo', icon: 'sparkles-outline' },
+              { id: 'fuente', label: 'Fuente', icon: 'text-outline' },
+              { id: 'texto', label: 'Texto', icon: 'options-outline' },
+              { id: 'palabras', label: 'Palabras', icon: 'color-wand-outline' },
+              { id: 'formato', label: 'Formato', icon: 'crop-outline' },
+              { id: 'fondo', label: 'Fondo', icon: 'image-outline' },
+            ] as const).map((b) => {
+              const activo = tab === b.id;
+              return (
+                <TouchableOpacity
+                  key={b.id}
+                  onPress={() => setTab(b.id)}
+                  style={{
+                    flex: 1, alignItems: 'center', gap: 2, paddingVertical: 6, borderRadius: 10,
+                    backgroundColor: activo ? colors.bgTertiary : 'transparent',
+                  }}
+                >
+                  <Ionicons name={b.icon} size={20} color={activo ? colors.accent : colors.textMuted} />
+                  <Text style={{
+                    fontSize: 10, color: activo ? colors.accent : colors.textMuted,
+                    fontWeight: activo ? '700' : '400',
+                  }}>{b.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Guardar: las salidas de la imagen, juntas y detrás de un botón.
+            Antes solo existía "Compartir" y vivía al final del scroll, o sea
+            que había que recorrer TODOS los controles para llegar a él. */}
+        {showSave && (
+          <View style={{
+            position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end',
+          }}>
+            <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => !busy && setShowSave(false)} />
+            <View style={{
+              backgroundColor: colors.bgPrimary, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+              padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 10,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ color: colors.textPrimary, fontSize: 16, fontWeight: '700' }}>Guardar imagen</Text>
+                <TouchableOpacity onPress={() => !busy && setShowSave(false)} style={{ padding: 4 }}>
+                  <Ionicons name="close" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* Qué está pasando: subir la imagen tarda y un botón mudo se lee
+                  como "se colgó". */}
+              {publicando && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
+                  <ActivityIndicator color={colors.accent} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{publicando}</Text>
+                </View>
+              )}
+
+              {/* Publicar solo con sesión: sin ella no hay a nombre de quién. */}
+              {!!token && (
+                <TouchableOpacity
+                  onPress={handlePublish}
+                  disabled={shareDisabled}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 12,
+                    paddingVertical: 14, paddingHorizontal: 16, borderRadius: 14,
+                    backgroundColor: colors.accent, opacity: shareDisabled ? 0.6 : 1,
+                  }}
+                >
+                  <Ionicons name="people-outline" size={20} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Publicar en la comunidad</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* "Guardar" y "Compartir" son la MISMA hoja del sistema: ahí
+                  Android e iOS ofrecen "Guardar imagen" junto al resto de apps.
+                  Guardar directo en el carrete necesitaría expo-media-library,
+                  que es un módulo nativo y dejaría esto fuera de `eas update`. */}
+              <TouchableOpacity
+                onPress={handleShare}
+                disabled={shareDisabled}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  paddingVertical: 14, paddingHorizontal: 16, borderRadius: 14,
+                  borderWidth: 1, borderColor: colors.border, opacity: shareDisabled ? 0.6 : 1,
+                }}
+              >
+                {busy && !publicando ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : (
+                  <Ionicons name="share-social-outline" size={20} color={colors.textPrimary} />
+                )}
+                <View>
+                  <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>
+                    {usingPhoto && !photoReady ? 'Cargando foto...' : 'Compartir o guardar'}
+                  </Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                    WhatsApp, galería, otras apps…
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Póster REAL que se captura: a tamaño completo y fuera de pantalla.
             La previa de arriba va encogida con un transform, y si el transform

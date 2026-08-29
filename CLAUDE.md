@@ -31,6 +31,7 @@ archivo indicado.
 | Formato de texto del chat (`*negrita*`, `_cursiva_`) | `chatFormat.ts` ↔ `extraLinkChat.js` | **aquí abajo** |
 | Banner de correo sin verificar | `EmailNotVerifiedBanner.tsx` ↔ `EmailNotVerifiedNotice.jsx` | **aquí abajo** |
 | Póster de versículos (medidas, fuentes, plantillas) | `versePosterLayout.ts` + `VerseImageSheet.tsx` ↔ `posterLayout.js` + `versePoster.js` + `VerseImageModal.jsx` | `holy_app/CLAUDE.md` |
+| Ajustes finos del póster (tamaño, interlineado, velo, difuminado…) — **los rangos deben ser idénticos**, hay un test | `versePosterLayout.ts` ↔ `posterLayout.js` | `holy_app/CLAUDE.md` |
 | Notas de pasaje / elegir varios versículos | `useBibleStore.ts` ↔ `bibleService.js` | `holy_app/CLAUDE.md` |
 | Referencia de un pasaje bíblico (`normalizeVerses`) | `backend/utils/biblePassage.js` ↔ `frontend/src/lib/biblePassage.js` | `holy_app/CLAUDE.md` |
 | Subtítulos de YouTube (`unloadModule`) | `YouTubeEmbed.tsx` ↔ `lib/ytCaptions.js` | `holy_app/CLAUDE.md` |

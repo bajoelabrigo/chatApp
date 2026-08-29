@@ -133,6 +133,70 @@ export const ANCHORS: { id: AnchorId; name: string }[] = [
   { id: 'bottom', name: 'Abajo' },
 ];
 
+// ── Ajustes finos (2026-08-29) ────────────────────────────────
+//
+// Los mandos de la barra inferior (Texto y Fondo). Cada uno es un
+// MULTIPLICADOR de lo que el motor calcula solo, nunca un valor absoluto: así
+// el cálculo automático —longitud del texto, formato, altura de x de la
+// familia— sigue mandando y el usuario solo lo empuja. Con valores absolutos,
+// cambiar de versículo o de formato descuadraría el diseño.
+//
+// `def` es el valor neutro: con todos en `def` la imagen sale EXACTAMENTE igual
+// que antes de que existieran.
+//
+// ESPEJO de `holy_app/frontend/src/lib/posterLayout.js` — al tocar un rango,
+// tocar los dos o la misma imagen saldrá distinta en cada cliente.
+export interface AdjustRange { min: number; max: number; def: number; step: number }
+export const SIZE_ADJ: AdjustRange = { min: 0.6, max: 1.7, def: 1, step: 0.05 };
+export const LINE_ADJ: AdjustRange = { min: 0.75, max: 1.7, def: 1, step: 0.05 };
+/** Espaciado entre letras, como fracción del tamaño del versículo. */
+export const TRACK_ADJ: AdjustRange = { min: 0, max: 0.22, def: 0, step: 0.01 };
+export const VEIL_ADJ: AdjustRange = { min: 0, max: 1.7, def: 1, step: 0.05 };
+/** Difuminado de la foto, en píxeles del lienzo de 1080. */
+export const BLUR_ADJ: AdjustRange = { min: 0, max: 24, def: 0, step: 1 };
+export const BRIGHT_ADJ: AdjustRange = { min: 0.45, max: 1.6, def: 1, step: 0.05 };
+
+export interface Adjust {
+  sizeAdj: number;
+  lineAdj: number;
+  trackAdj: number;
+  veilAdj: number;
+  blur: number;
+  brightness: number;
+}
+
+export const ADJUST_DEFAULTS: Adjust = {
+  sizeAdj: SIZE_ADJ.def,
+  lineAdj: LINE_ADJ.def,
+  trackAdj: TRACK_ADJ.def,
+  veilAdj: VEIL_ADJ.def,
+  blur: BLUR_ADJ.def,
+  brightness: BRIGHT_ADJ.def,
+};
+
+export const clampNum = (v: number, min: number, max: number) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return min > 0 ? 1 : 0;
+  return Math.min(max, Math.max(min, n));
+};
+
+/**
+ * Capa de brillo sobre la foto.
+ *
+ * En la web esto es `filter: brightness()`; aquí NO existe ese filtro (haría
+ * falta un módulo nativo), así que se consigue con una capa negra o blanca
+ * translúcida encima. No es idéntico —un filtro multiplica y esto mezcla— pero
+ * a ojo hace lo mismo: aclarar u oscurecer la foto. Devuelve `null` en el valor
+ * neutro para no montar una vista que no pinta nada.
+ */
+export function brightnessOverlay(brightness: number) {
+  const b = clampNum(brightness, BRIGHT_ADJ.min, BRIGHT_ADJ.max);
+  if (Math.abs(b - 1) < 0.02) return null;
+  return b < 1
+    ? { backgroundColor: '#000000', opacity: Math.min(0.6, (1 - b) * 0.9) }
+    : { backgroundColor: '#ffffff', opacity: Math.min(0.55, (b - 1) * 0.75) };
+}
+
 // Mismos adornos que la web (ver ORNAMENTS en posterLayout.js) y en el mismo
 // orden. Allí cada uno es UN path SVG; aquí se componen con Views, porque no
 // hay react-native-svg — y añadirlo sería un módulo nativo, o sea que esto ya no
@@ -267,9 +331,13 @@ export function hookBaseSize(len: number, font?: FontDef) {
 // OJO: aquí no se puede MEDIR la foto (React Native no lee los píxeles sin otra
 // dependencia nativa), así que no hay modo "automático" como en la web: el
 // usuario elige claro u oscuro y se asume una foto media.
-export function scrimFor(anchor: AnchorId, textMode: 'light' | 'dark') {
+export function scrimFor(anchor: AnchorId, textMode: 'light' | 'dark', veilAdj = VEIL_ADJ.def) {
   const oscuro = textMode !== 'dark';
-  const need = oscuro ? 0.5 : 0.48;
+  // El mando de "Opacidad" multiplica el velo que se asumía fijo. En 1 manda lo
+  // de siempre; en 0 la foto se ve limpia. El tope de 0.96 deja SIEMPRE algo de
+  // foto: un velo al 100% es un rectángulo liso y ya no es una foto.
+  const base = oscuro ? 0.5 : 0.48;
+  const need = Math.min(0.96, Math.max(0, base * clampNum(veilAdj, VEIL_ADJ.min, VEIL_ADJ.max)));
   const rgb = oscuro ? '0,0,0' : '255,255,255';
   let stops: [number, number][];
   if (anchor === 'bottom') {
