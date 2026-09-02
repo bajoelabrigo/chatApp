@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { VERSION_META, langFlag, langLabel } from '../../constants/bible';
 import type { BibleVersion } from '../../services/bibleService';
@@ -110,6 +110,10 @@ export function VersionPickerModal({
 
   const list = versionList(versions);
   const filtered = langFilter === 'all' ? list : list.filter((v) => v.lang === langFilter);
+  // Son 35 versiones: sin scroll propio la hoja crece por encima de la pantalla y
+  // las de abajo quedan fuera, sin forma de alcanzarlas. Los chips de idioma y el
+  // botón de cerrar se quedan FUERA del scroll para que sigan siempre a mano.
+  const { height: screenH } = useWindowDimensions();
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -131,6 +135,7 @@ export function VersionPickerModal({
 
             <LangFilterChips list={list} value={langFilter} onChange={setLangFilter} colors={colors} />
 
+            <ScrollView style={{ maxHeight: screenH * 0.6 }} contentContainerStyle={{ paddingBottom: 4 }}>
             {filtered.map((v) => {
               const isActive = v.id === selectedVersion;
               const isDownloaded = downloadedVersions.has(v.id);
@@ -185,6 +190,7 @@ export function VersionPickerModal({
                 </TouchableOpacity>
               );
             })}
+            </ScrollView>
 
             <TouchableOpacity
               onPress={onClose}
@@ -228,6 +234,7 @@ export function ComparePickerModal({
 
   const list = versionList(versions).filter((v) => v.id !== selectedVersion);
   const filtered = langFilter === 'all' ? list : list.filter((v) => v.lang === langFilter);
+  const { height: screenH } = useWindowDimensions();
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -250,6 +257,7 @@ export function ComparePickerModal({
             <LangFilterChips list={list} value={langFilter} onChange={setLangFilter} colors={colors} />
 
             {/* No tiene sentido comparar una versión consigo misma */}
+            <ScrollView style={{ maxHeight: screenH * 0.6 }} contentContainerStyle={{ paddingBottom: 4 }}>
             {filtered.map((v) => {
               const isActive = v.id === compareVersion;
               return (
@@ -273,6 +281,7 @@ export function ComparePickerModal({
                 </TouchableOpacity>
               );
             })}
+            </ScrollView>
 
             <TouchableOpacity
               onPress={() => onSelect(null)}

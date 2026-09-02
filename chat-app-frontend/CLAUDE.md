@@ -175,6 +175,24 @@ Cada burbuja tenía su `useAudioPlayer`, atado al ciclo de vida del componente: 
 - Se pausa sola al **empezar a grabar** (`useVoiceRecorder.start`) y al **sonar un tono de llamada** (`ringtoneService.playLoop`): en Android se pelearían por la sesión de audio.
 - **No hay reproducción en segundo plano** (app minimizada) a propósito: `shouldPlayInBackground` necesita configuración nativa (`eas build`), y esto tenía que llegar por `eas update`.
 
+## Una hoja con 35 opciones necesita su PROPIO scroll (2026-09-01)
+
+Se reportó como "no aparecen todas las biblias". No era el backend (devuelve las
+35) ni la lista de la app: los selectores pintaban `filtered.map(...)` **suelto
+dentro de la hoja**, sin `ScrollView` ni `maxHeight`, así que el bottom sheet
+crecía por encima de la pantalla y a la mayoría de versiones **no había forma de
+llegar**. Con 7 versiones cabían; al pasar a 35 dejó de caber, y el fallo no se
+ve como un error sino como contenido que no existe.
+
+- Arreglado en los **tres** selectores: `VersionPickerModal` (pestaña Biblia),
+  `ComparePickerModal` (vista paralela) y el de `chat/BibleModal.tsx`.
+- La lista va en un `ScrollView` con `maxHeight: alto * 0.6` (de
+  `useWindowDimensions`, no una constante). **Los chips de idioma y el botón de
+  cerrar se quedan FUERA del scroll**, o desaparecen al bajar.
+- Regla general: cualquier hoja cuyo contenido crezca con los datos necesita
+  altura acotada y scroll propio. `animationType="slide"` + `justifyContent:
+  'flex-end'` no recorta nada — simplemente se sale por arriba.
+
 ## Lectura en voz alta de la Biblia (móvil) — ya activa
 
 `expo-speech` es un **módulo nativo**: no se activa con `eas update`. Estuvo escrito y sin funcionar desde el 2026-07-11 hasta el APK del **2026-07-13** (build `e8353a0e`, perfil `preview`, runtime 1.0.3, versionCode 4), que lo incluyó. Desde ahí el botón de escuchar sale solo (`src/hooks/useSpeech.ts` + barra de reproducción en `app/(tabs)/bible.tsx`).

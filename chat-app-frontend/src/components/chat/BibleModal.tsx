@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -116,6 +117,7 @@ function formatVersesForShare(verses: SelectedVerse[], versionName: string): str
 
 export default function BibleModal({ visible, onClose, onSendBible }: Props) {
   const insets = useSafeAreaInsets();
+  const { height: winHeight } = useWindowDimensions();
   const { colors } = useTheme();
   const { token } = useAuthStore();
   const {
@@ -650,6 +652,9 @@ export default function BibleModal({ visible, onClose, onSendBible }: Props) {
               return (
                 <>
                   <LangFilterChips list={list} value={pickerLang} onChange={setPickerLang} colors={colors} />
+                  {/* Son 35 versiones: sin scroll propio la hoja se sale de la
+                      pantalla y las de abajo quedan inalcanzables. */}
+                  <ScrollView style={{ maxHeight: winHeight * 0.6 }} contentContainerStyle={{ paddingBottom: 4 }}>
                   {filtered.map((v) => {
                     const isActive = v.id === selectedVersion;
                     const isDownloaded = downloadedVersions.has(v.id);
@@ -684,6 +689,7 @@ export default function BibleModal({ visible, onClose, onSendBible }: Props) {
                       </TouchableOpacity>
                     );
                   })}
+                  </ScrollView>
                 </>
               );
             })()}
