@@ -250,17 +250,42 @@ export default function MaterialesScreen() {
               marginTop: 12,
             }}
           >
-            <View
-              style={{
-                backgroundColor: colors.accent,
-                paddingHorizontal: 12,
-                paddingVertical: 5,
-                borderRadius: 999,
-              }}
-            >
-              <Text style={{ color: colors.accentText, fontWeight: '700', fontSize: 13 }}>
-                {priceLabel(item)}
-              </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+              <View
+                style={{
+                  backgroundColor: colors.accent,
+                  paddingHorizontal: 12,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                }}
+              >
+                <Text style={{ color: colors.accentText, fontWeight: '700', fontSize: 13 }}>
+                  {priceLabel(item)}
+                </Text>
+              </View>
+              {/* Este material entra en la membresía con menos ofrenda de la
+                  que piden los de su tipo. Sin decirlo aquí, quien mira el
+                  catálogo solo ve el precio y nunca se entera de que su
+                  membresía de $5 lo incluye. Lo decide el backend. */}
+              {item.socioDealMin != null && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 3,
+                    borderWidth: 1,
+                    borderColor: colors.accent,
+                    paddingHorizontal: 9,
+                    paddingVertical: 4,
+                    borderRadius: 999,
+                  }}
+                >
+                  <Ionicons name="shield-checkmark" size={12} color={colors.accent} />
+                  <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                    o Socio ${item.socioDealMin}+
+                  </Text>
+                </View>
+              )}
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <Ionicons

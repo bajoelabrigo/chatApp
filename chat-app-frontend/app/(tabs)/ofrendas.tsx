@@ -22,12 +22,14 @@ import { WEB_URL } from '../../src/components/ShareSheet';
 
 const PRESET_AMOUNTS = [5, 10, 25, 50];
 
-// Todos los tiers hacen Socio (insignia). El acceso a materiales gratis es solo
-// desde $20 (SOCIO_MATERIAL_MIN en el backend); $5 y $10 dan la insignia sola.
+// Todos los niveles hacen Socio (insignia). El catálogo de estudios se abre
+// desde $10/mes (bajó de $20 el 2026-09-05; el número manda en
+// `SOCIO_MIN_BY_KIND`, espejado en los dos backends y en la web). Al de $5 le
+// entran los materiales que se marquen uno a uno en el panel.
 const SUBSCRIPTION_TIERS: { tier: SubscriptionTier; label: string; price: string; desc: string }[] = [
-  { tier: 'sub_5',   label: 'Grano',      price: '$5/mes',   desc: 'Insignia de Socio' },
-  { tier: 'sub_10',  label: 'Espiga',     price: '$10/mes',  desc: 'Insignia de Socio' },
-  { tier: 'sub_20',  label: 'Semilla',    price: '$20/mes',  desc: 'Socio + materiales gratis' },
+  { tier: 'sub_5',   label: 'Grano',      price: '$5/mes',   desc: 'Insignia + materiales marcados' },
+  { tier: 'sub_10',  label: 'Espiga',     price: '$10/mes',  desc: 'Socio + estudios gratis' },
+  { tier: 'sub_20',  label: 'Semilla',    price: '$20/mes',  desc: 'Socio + estudios gratis' },
   { tier: 'sub_50',  label: 'Cosecha',    price: '$50/mes',  desc: 'Socio + materiales gratis' },
   { tier: 'sub_100', label: 'Abundancia', price: '$100/mes', desc: 'Socio + materiales gratis' },
   { tier: 'sub_200', label: 'Primicia',   price: '$200/mes', desc: 'Socio + materiales gratis' },

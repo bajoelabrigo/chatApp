@@ -37,7 +37,7 @@ archivo indicado.
 | Subtítulos de YouTube (`unloadModule`) | `YouTubeEmbed.tsx` ↔ `lib/ytCaptions.js` | `holy_app/CLAUDE.md` |
 | `isVideoUrl` — decidir si un adjunto es video | `postMedia.ts` ↔ `fileName.js` | `holy_app/CLAUDE.md` |
 | `UploadBar` — barra de subida | `UploadBar.tsx` ↔ `UploadBar.jsx` | `holy_app/CLAUDE.md` |
-| Acceso de socio a materiales (`materialAccess`) | `backend/utils/` ↔ `frontend/src/lib/` | `holy_app/CLAUDE.md` |
+| Acceso de socio a materiales (`materialAccess`) — **TRES** espejos desde 2026-09-05 | `holy_app/backend/utils/` ↔ `holy_app/frontend/src/lib/` ↔ `chat-app-backend/src/lib/materialAccess.ts` (solo anuncia; la app móvil no decide) | `holy_app/CLAUDE.md` |
 | Archivos de una clase de seminario (`seminarFiles`) | `backend/utils/` ↔ `frontend/src/lib/` | `holy_app/CLAUDE.md` |
 | Dinero (`money.js`), métodos de gasto y de ofrenda | `backend/utils/` ↔ `frontend/src/lib/` | `holy_app/CLAUDE.md` |
 | Órdenes canónicos de la Biblia — **TRES** espejos | `bibleNames.ts` ↔ `constants/bible.ts` ↔ `bibleOrder.js` | `chat-app-backend/CLAUDE.md` |

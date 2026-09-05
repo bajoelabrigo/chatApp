@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 import { Material } from '../models/Material';
 import { MaterialView } from '../models/MaterialView';
+import { socioDealMin } from '../lib/materialAccess';
 
 // Lista efectiva de archivos: `files[]` o el legacy fileUrl.
 function effectiveFiles(m: any): { url: string; fileName?: string; fileType?: string }[] {
@@ -26,6 +27,10 @@ function publicFields(m: any, flags: { owned?: boolean; viewed?: boolean } = {})
     thumbnail: m.thumbnail,
     price: m.price,
     payWhatYouWant: m.payWhatYouWant,
+    // Importe con el que este material entra en la membresía cuando pide MENOS
+    // que los de su tipo (si no, `null`). La app lo pinta tal cual: "o Socio $5+".
+    // El cálculo va aquí para que cambiar un mínimo no exija publicar la app.
+    socioDealMin: socioDealMin(m),
     salesCount: m.salesCount,
     files: files.map((f) => ({ fileName: f.fileName, fileType: f.fileType })),
     fileCount: files.length,
@@ -41,7 +46,11 @@ function publicFields(m: any, flags: { owned?: boolean; viewed?: boolean } = {})
 export async function listMaterials(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
-    const materials = await Material.find({ published: true })
+    // Los NO LISTADOS quedan fuera: son los que la web reparte solo por enlace
+    // con clave (`?k=`). La app no tiene ese flujo, así que listarlos era
+    // publicar en el catálogo lo que se quiso mantener privado — pasaba con 2
+    // materiales reales hasta 2026-09-05.
+    const materials = await Material.find({ published: true, unlisted: { $ne: true } })
       .sort({ order: 1, createdAt: -1 })
       .lean();
 
@@ -69,6 +78,7 @@ export async function getMaterialFeed(req: Request, res: Response) {
 
     const material = await Material.findOne({
       published: true,
+      unlisted: { $ne: true }, // un no listado tampoco se anuncia en el popup
       _id: { $nin: seenIds },
     })
       .sort({ notifiedAt: -1, createdAt: -1 })
@@ -102,7 +112,11 @@ export async function markViewed(req: Request, res: Response) {
 export async function downloadMaterial(req: Request, res: Response) {
   try {
     const userId = (req as any).userId;
-    const material = await Material.findOne({ _id: req.params.id, published: true });
+    const material = await Material.findOne({
+      _id: req.params.id,
+      published: true,
+      unlisted: { $ne: true }, // el no listado se entrega en la web, con su clave
+    });
     if (!material) return res.status(404).json({ error: 'Material no encontrado' });
 
     if ((material.price || 0) > 0) {

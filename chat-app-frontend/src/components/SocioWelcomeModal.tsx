@@ -93,7 +93,7 @@ export function SocioWelcomeModal() {
                   <>
                     <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 14 }}>Desbloquea +100 estudios</Text>
                     <Text style={{ color: colors.textMuted, fontSize: 13, lineHeight: 19 }}>
-                      Con una ofrenda mensual de $20 o más accedes gratis a más de 100 estudios para descargar.
+                      Con una ofrenda mensual de $10 o más accedes gratis a más de 100 estudios para descargar.
                     </Text>
                   </>
                 )}

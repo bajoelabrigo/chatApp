@@ -11,6 +11,10 @@ export interface Material {
   thumbnail?: string;
   price: number;
   payWhatYouWant: boolean;
+  // Ofrenda mensual con la que este material entra gratis, SOLO cuando pide
+  // menos que los de su tipo (si no, null/ausente). Lo calcula el backend
+  // (`src/lib/materialAccess.ts`): la app no sabe ningún mínimo de memoria.
+  socioDealMin?: number | null;
   salesCount?: number;
   createdAt?: string;
   files?: { fileName?: string; fileType?: string }[];

@@ -16,7 +16,16 @@ export interface IMaterial extends Document {
   fileType?: string;
   price: number;
   payWhatYouWant: boolean;
+  // Con qué ofrenda mensual lo recibe gratis un socio: `kind` marca el mínimo por
+  // defecto y `socioMin` (si lo tiene) lo pisa. Los administra la web; aquí se
+  // leen para poder anunciar en la app "o con membresía desde $5".
+  kind?: string;
+  socioMin?: number | null;
   published: boolean;
+  // Publicado pero FUERA del catálogo: existe solo para quien recibe su enlace
+  // con la clave (eso lo gestiona la web). Tiene que estar en el esquema o el
+  // filtro que lo excluye no se aplicaría.
+  unlisted?: boolean;
   order: number;
   salesCount: number;
   notifiedAt?: Date;
@@ -45,6 +54,9 @@ const MaterialSchema = new Schema<IMaterial>(
     fileName: { type: String, default: '' },
     fileType: { type: String, default: '' },
     price: { type: Number, default: 0 },
+    kind: { type: String, default: 'material' },
+    socioMin: { type: Number, default: null },
+    unlisted: { type: Boolean, default: false },
     payWhatYouWant: { type: Boolean, default: true },
     published: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
