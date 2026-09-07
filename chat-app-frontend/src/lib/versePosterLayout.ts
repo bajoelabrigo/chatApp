@@ -251,6 +251,43 @@ export function highlightColor(t: { text: string; accent: string }, onPhoto: boo
   return contraste(t.accent, t.text) >= 1.35 ? t.accent : respaldo;
 }
 
+// ── Color del texto (2026-09-07) ─────────────────────────────
+// Espejo de INK_COLORS / applyInk en `posterLayout.js` de la web — los VALORES
+// deben ser idénticos en las dos copias o el mismo estilo guardado (viven en la
+// cuenta, no en el dispositivo) pintaría distinto en cada sitio.
+//
+// Es la tinta del texto ENTERO (gancho, cuerpo y marca de arriba), distinto de
+// WORD_COLORS, que pinta palabras sueltas encima de esta. La referencia y la
+// versión no cambian: van con el acento y el gris del tema, que es el contraste
+// que sostiene el diseño. `null` = "del tema", que es como salía siempre.
+export const INK_COLORS: { id: string; name: string; value: string }[] = [
+  { id: 'blanco', name: 'Blanco', value: '#ffffff' },
+  { id: 'crema', name: 'Crema', value: '#f6efe2' },
+  { id: 'dorado', name: 'Dorado', value: '#ffd166' },
+  { id: 'ambar', name: 'Ámbar', value: '#f59e0b' },
+  { id: 'coral', name: 'Coral', value: '#fb7185' },
+  { id: 'rojo', name: 'Rojo', value: '#ef4444' },
+  { id: 'menta', name: 'Menta', value: '#34d399' },
+  { id: 'cielo', name: 'Cielo', value: '#38bdf8' },
+  { id: 'lila', name: 'Lila', value: '#c084fc' },
+  { id: 'grafito', name: 'Grafito', value: '#374151' },
+  { id: 'negro', name: 'Negro', value: '#111827' },
+];
+
+/** ¿Es `v` uno de los colores de texto que ofrecemos? (null = del tema). */
+export const isInkColor = (v: unknown): v is string =>
+  INK_COLORS.some((c) => c.value === v);
+
+/**
+ * Aplica el color de texto elegido sobre la paleta en uso (la del tema o la de
+ * la foto). Cambiar `text` arrastra solo lo que debe arrastrar:
+ * `highlightColor` (compara el acento contra la tinta) y el color de reserva de
+ * los estilos por palabra.
+ */
+export function applyInk<T extends { text: string }>(base: T, inkColor?: string | null): T {
+  return isInkColor(inkColor) ? { ...base, text: inkColor } : base;
+}
+
 // Carga las fuentes propias. Se llama al ABRIR la hoja y no al arrancar la app:
 // son ~1,7 MB que solo necesita quien comparte una imagen.
 //

@@ -12,6 +12,8 @@ import {
   Dimensions,
   Platform,
   Alert,
+  Keyboard,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -53,6 +55,8 @@ import {
   BRIGHT_ADJ,
   brightnessOverlay,
   clampNum,
+  applyInk,
+  INK_COLORS,
   type Adjust,
 } from '../../lib/versePosterLayout';
 import PosterSlider from './PosterSlider';
@@ -142,6 +146,9 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   // Claro u oscuro sobre foto. Aquí NO hay "automático" como en la web: React
   // Native no puede leer los píxeles de la foto para medir su luminancia.
   const [photoText, setPhotoText] = useState<'light' | 'dark'>('light');
+  // Color del texto (2026-09-07). `null` = el del tema, que es como salía
+  // siempre. Espejo del mismo control en la web (panel "Texto").
+  const [inkColor, setInkColor] = useState<string | null>(null);
   const [highlight, setHighlight] = useState('');
   // Estilos por palabra: { [índiceDelToken]: {b,i,c,bg} }. Ver verseRichText.
   // Se indexan por posición y NO por la palabra, para poder poner en negrita
@@ -196,7 +203,9 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   const hookFont = fontById(hookFontId);
   const usingPhoto = bgMode === 'photo' && !!photoUrl;
   const modo: 'light' | 'dark' = usingPhoto ? photoText : 'light';
-  const t = usingPhoto ? photoPalette(modo) : theme;
+  // El color elegido en el panel "Texto" se aplica con el mismo helper que usa
+  // la web (applyInk), para que las dos apps pinten igual.
+  const t = applyInk(usingPhoto ? photoPalette(modo) : theme, inkColor);
   // El resaltado no usa el acento sin más: hay temas cuyo acento es blanco o
   // casi y dentro del texto no se distinguiría (ver highlightColor).
   const hiColor = highlightColor(t, usingPhoto);
@@ -205,6 +214,38 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   const text = customText?.trim() ? customText : originalText;
   const edited = !!customText?.trim() && customText.trim() !== originalText.trim();
 
+  // ── El teclado y la barra de paneles (2026-09-07) ──────────
+  // Al pulsar "Editar texto" desaparecía la barra de los seis botones y no
+  // había forma de cambiar de panel ni de seguir. La causa: `app.json` declara
+  // `softwareKeyboardLayoutMode: "pan"`, así que Android DESPLAZA la ventana
+  // entera hacia arriba para enseñar el campo enfocado —y la barra, que está
+  // pegada al borde de abajo, se va detrás del teclado— y en iOS el teclado
+  // simplemente se dibuja encima. Cambiar ese modo exige un `eas build`; esto
+  // se arregla en JS y viaja por `eas update`.
+  //
+  // El truco es restarle al contenedor el alto del teclado: si TODO cabe por
+  // encima del teclado, Android no tiene nada que revelar y no desplaza nada.
+  // Se hace con `paddingBottom` y no con un alto absoluto para no tener que
+  // acertar la aritmética del modo edge-to-edge.
+  const { height: winH } = useWindowDimensions();
+  const [kbHeight, setKbHeight] = useState(0);
+  useEffect(() => {
+    const abrir = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      (e) => setKbHeight(e.endCoordinates?.height ?? 0)
+    );
+    const cerrar = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKbHeight(0)
+    );
+    return () => {
+      abrir.remove();
+      cerrar.remove();
+    };
+  }, []);
+  // Lo que queda de pantalla con el teclado abierto.
+  const availH = Math.max(240, winH - kbHeight);
+
   // Dimensiones del póster (diseño de 1080 escalado a la pantalla).
   const screenW = Dimensions.get('window').width;
   const POSTER_W = Math.min(screenW - 48, 340);
@@ -212,7 +253,13 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   // La previa va fija arriba, así que se le pone techo de alto: "Historia" y
   // "Fondo" son tan verticales que a tamaño natural no dejarían ver los
   // controles. Solo afecta a lo que se VE; la captura va a tamaño completo.
-  const previewScale = Math.min(1, 250 / POSTER_H);
+  //
+  // Ese techo BAJA con la pantalla: con el teclado abierto quedan ~400 px y una
+  // previa de 250 no deja sitio ni para el campo de texto ni para la barra. Se
+  // encoge en vez de esconderse, porque verla cambiar mientras se escribe es
+  // justo para lo que está.
+  const previewMaxH = Math.max(96, Math.min(250, Math.round(availH * 0.32)));
+  const previewScale = Math.min(1, previewMaxH / POSTER_H);
   const scale = POSTER_W / format.w;
   const s = (n: number) => n * scale;
 
@@ -729,7 +776,7 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
+      <View style={{ flex: 1, backgroundColor: colors.bgPrimary, paddingBottom: kbHeight }}>
         {/* Cabecera + vista previa, fijas: al bajar a los controles se perdía
             de vista justo lo que se está ajustando. */}
         <View style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -746,7 +793,22 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
             {/* En el paso del fondo NO hay "Guardar": todavía no hay nada que
                 guardar, y ofrecerlo invita a saltarse el editor. El hueco se
                 reserva igual para que el título no se descentre. */}
-            {paso === 'editor' ? (
+            {/* Editando el texto, el botón de la cabecera es "Listo".
+                La cabecera es lo único que SIEMPRE se ve: con el teclado
+                abierto quedan ~340 px y el "Listo" del panel se queda debajo de
+                la barra por unos pocos píxeles. Y guardar en mitad de una
+                edición no es lo que se quiere hacer desde ahí. */}
+            {paso === 'editor' && editingText ? (
+              <TouchableOpacity
+                onPress={() => setEditingText(false)}
+                style={{
+                  paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999,
+                  backgroundColor: colors.accent,
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>Listo</Text>
+              </TouchableOpacity>
+            ) : paso === 'editor' ? (
               <TouchableOpacity
                 onPress={() => setShowSave(true)}
                 disabled={shareDisabled}
@@ -785,7 +847,13 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
           </View>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
+        <ScrollView
+          // Sin esto, con el teclado abierto el primer toque en cualquier
+          // control solo lo cierra y hay que volver a pulsar: se lee como que
+          // los botones no responden.
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
+        >
           <View style={{ gap: 14 }}>
             {(paso === 'editor' && tab === 'estilo') && (
               <>
@@ -963,6 +1031,35 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                   })}
                 </View>
               )}
+
+              {/* Color del texto (2026-09-07). Pinta el gancho, el cuerpo y la
+                  marca de arriba; la referencia y la versión se quedan con el
+                  acento y el gris del tema, que es el contraste que sostiene el
+                  diseño. "Del tema" es lo de siempre y el valor de serie.
+                  Espejo del mismo control en la web. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 12, width: 72 }}>Color</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: 'center', paddingRight: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => setInkColor(null)}
+                    style={[chip(!inkColor), { paddingHorizontal: 10, paddingVertical: 6 }]}
+                  >
+                    <Text style={[chipText(!inkColor), { fontSize: 12 }]}>Del tema</Text>
+                  </TouchableOpacity>
+                  {INK_COLORS.map((c) => (
+                    <TouchableOpacity
+                      key={c.id}
+                      onPress={() => setInkColor(c.value)}
+                      accessibilityLabel={c.name}
+                      style={{
+                        width: 26, height: 26, borderRadius: 13, backgroundColor: c.value,
+                        borderWidth: inkColor === c.value ? 3 : 1,
+                        borderColor: inkColor === c.value ? colors.accent : colors.border,
+                      }}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
             </View>
 
             {/* Los tres mandos del texto. Son MULTIPLICADORES de lo que el motor
@@ -1114,7 +1211,10 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
                     style={{
                       backgroundColor: colors.inputBg, borderRadius: 12, borderWidth: 1,
                       borderColor: colors.border, color: colors.inputText,
-                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 90,
+                      paddingHorizontal: 12, paddingVertical: 10, fontSize: 14,
+                      // Con el teclado abierto 90 px dejan el "Listo" justo
+                      // debajo de la barra de paneles.
+                      minHeight: availH < 560 ? 56 : 90,
                       textAlignVertical: 'top',
                     }}
                   />
@@ -1394,7 +1494,13 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
               return (
                 <TouchableOpacity
                   key={b.id}
-                  onPress={() => setTab(b.id)}
+                  onPress={() => {
+                    // Salir del modo edición al cambiar de panel: si no, se
+                    // vuelve a "Palabras" y sigue el campo de texto en vez de
+                    // las palabras, con el teclado abierto otra vez.
+                    setEditingText(false);
+                    setTab(b.id);
+                  }}
                   style={{
                     flex: 1, alignItems: 'center', gap: 2, paddingVertical: 6, borderRadius: 10,
                     backgroundColor: activo ? colors.bgTertiary : 'transparent',
