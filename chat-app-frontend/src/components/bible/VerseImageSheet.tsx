@@ -109,6 +109,35 @@ const THEMES: ThemeDef[] = [
   { id: 'menta', colors: ['#134e5e', '#71b280'], text: '#ffffff', accent: '#eafff1', sub: 'rgba(255,255,255,0.75)' },
   { id: 'cielo', colors: ['#2c3e50', '#4ca1af'], text: '#ffffff', accent: '#d7f4ff', sub: 'rgba(255,255,255,0.75)' },
   { id: 'crema', colors: ['#f7f1e3', '#f7f1e3'], text: '#2d2a26', accent: '#b3701f', sub: '#8a8172' },
+  // ── 20 gradientes de tendencia (2026-09-08) ────────────────────────────
+  // Espejo exacto de los de la web (`VerseImageModal.jsx`): el estilo guardado
+  // viaja en la cuenta, así que un fondo que solo exista en un cliente se
+  // descartaría al abrir el póster en el otro. Hay un test que lo vigila
+  // (`holy_app/frontend/scripts/versePoster.test.mjs`).
+  //
+  // El `accent` NO puede ser casi blanco: `highlightColor` lo descarta por
+  // debajo de 1.35 de contraste con la tinta y la palabra resaltada saldría
+  // igual que el resto. Los fondos claros llevan tinta oscura por lo mismo.
+  { id: 'atardecer', colors: ['#f58529', '#dd2a7b', '#8134af'], text: '#ffffff', accent: '#ffd08a', sub: 'rgba(255,255,255,0.75)' },
+  { id: 'hoguera', colors: ['#1a2a6c', '#b21f1f', '#e8a317'], text: '#ffffff', accent: '#ffd166', sub: 'rgba(255,255,255,0.75)' },
+  { id: 'ciber', colors: ['#0f0c29', '#302b63', '#24243e'], text: '#ffffff', accent: '#ff7ce5', sub: 'rgba(255,255,255,0.7)' },
+  { id: 'aurora', colors: ['#00c9ff', '#92fe9d'], text: '#063b45', accent: '#0a7d8c', sub: 'rgba(6,59,69,0.7)' },
+  { id: 'fucsia', colors: ['#ec008c', '#fc6767'], text: '#ffffff', accent: '#ffc2a8', sub: 'rgba(255,255,255,0.78)' },
+  { id: 'indigo', colors: ['#2b5876', '#4e4376'], text: '#ffffff', accent: '#a8d8ff', sub: 'rgba(255,255,255,0.72)' },
+  { id: 'esmeralda', colors: ['#0ba360', '#3cba92'], text: '#ffffff', accent: '#8ce8b8', sub: 'rgba(255,255,255,0.75)' },
+  { id: 'mandarina', colors: ['#f12711', '#f39c12'], text: '#ffffff', accent: '#ffd27a', sub: 'rgba(255,255,255,0.8)' },
+  { id: 'neon', colors: ['#7f00ff', '#e100ff'], text: '#ffffff', accent: '#ffc6ff', sub: 'rgba(255,255,255,0.78)' },
+  { id: 'cosmos', colors: ['#020024', '#090979', '#00b4e6'], text: '#ffffff', accent: '#7fe4ff', sub: 'rgba(255,255,255,0.72)' },
+  { id: 'rosaoro', colors: ['#c48f8f', '#f3d7ca'], text: '#4a2b2f', accent: '#9c5b5b', sub: 'rgba(74,43,47,0.72)' },
+  { id: 'lima', colors: ['#a8e063', '#56ab2f'], text: '#14361f', accent: '#0b5d2a', sub: 'rgba(20,54,31,0.7)' },
+  { id: 'cobalto', colors: ['#396afc', '#2948ff'], text: '#ffffff', accent: '#bcd2ff', sub: 'rgba(255,255,255,0.75)' },
+  { id: 'durazno', colors: ['#ffecd2', '#fcb69f'], text: '#4a2f22', accent: '#b1541f', sub: 'rgba(74,47,34,0.7)' },
+  { id: 'niebla', colors: ['#a18cd1', '#fbc2eb'], text: '#3d2a52', accent: '#7b3fa0', sub: 'rgba(61,42,82,0.72)' },
+  { id: 'abismo', colors: ['#093028', '#237a57'], text: '#ffffff', accent: '#9fe8c6', sub: 'rgba(255,255,255,0.72)' },
+  { id: 'uva', colors: ['#41295a', '#2f0743'], text: '#ffffff', accent: '#c9a3ff', sub: 'rgba(255,255,255,0.7)' },
+  { id: 'celestial', colors: ['#c33764', '#1d2671'], text: '#ffffff', accent: '#ffb3d1', sub: 'rgba(255,255,255,0.74)' },
+  { id: 'arena', colors: ['#eddcd2', '#d6bfa9'], text: '#3f3126', accent: '#9a6b3f', sub: 'rgba(63,49,38,0.72)' },
+  { id: 'hielo', colors: ['#e0eafc', '#cfdef3'], text: '#22314a', accent: '#2f6fb0', sub: 'rgba(34,49,74,0.7)' },
 ];
 
 const PHOTO_THEME = { text: '#ffffff', accent: '#ffffff', sub: 'rgba(255,255,255,0.92)' };
