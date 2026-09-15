@@ -33,6 +33,7 @@ archivo indicado.
 | Póster de versículos (medidas, fuentes, plantillas) | `versePosterLayout.ts` + `VerseImageSheet.tsx` ↔ `posterLayout.js` + `versePoster.js` + `VerseImageModal.jsx` | `holy_app/CLAUDE.md` |
 | Ajustes finos del póster (tamaño, interlineado, velo, difuminado…) — **los rangos deben ser idénticos**, hay un test | `versePosterLayout.ts` ↔ `posterLayout.js` | `holy_app/CLAUDE.md` |
 | Color del texto del póster (`INK_COLORS`/`applyInk`) — **los valores deben ser idénticos**, hay un test | `versePosterLayout.ts` ↔ `posterLayout.js` | `holy_app/CLAUDE.md` |
+| Comilla del póster (`QUOTE`/`quoteOffset`) — sigue a la primera línea del cuerpo, no a una esquina; tamaño proporcional al cuerpo | `versePosterLayout.ts` ↔ `posterLayout.js` (se usa en `versePoster.js`, `VerseImageModal.jsx` y `VerseImageSheet.tsx` vía `onTextLayout`) | `holy_app/CLAUDE.md` |
 | Fondos de color del póster (`THEMES`, 32 degradados) — **la lista debe ser idéntica**, hay test | `VerseImageSheet.tsx` ↔ `VerseImageModal.jsx` | `holy_app/CLAUDE.md` |
 | Notas de pasaje / elegir varios versículos | `useBibleStore.ts` ↔ `bibleService.js` | `holy_app/CLAUDE.md` |
 | Referencia de un pasaje bíblico (`normalizeVerses`) | `backend/utils/biblePassage.js` ↔ `frontend/src/lib/biblePassage.js` | `holy_app/CLAUDE.md` |

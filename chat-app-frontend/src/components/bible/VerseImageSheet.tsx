@@ -57,6 +57,8 @@ import {
   clampNum,
   applyInk,
   INK_COLORS,
+  QUOTE,
+  quoteOffset,
   type Adjust,
 } from '../../lib/versePosterLayout';
 import PosterSlider from './PosterSlider';
@@ -167,6 +169,9 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
   // de verdad cambia el aspecto de la imagen (ver TEMPLATES).
   const [anchor, setAnchor] = useState<AnchorId>('center');
   const [hookWords, setHookWords] = useState(0);
+  // Dónde empieza la primera línea del cuerpo (x dentro de su <Text>), medido
+  // con onTextLayout: la comilla se cuelga de ahí para seguir al texto.
+  const [firstLineX, setFirstLineX] = useState(0);
   const [hookFontId, setHookFontId] = useState('caligrafica');
   const [upper, setUpper] = useState(false);
   const [ornament, setOrnament] = useState<OrnamentId>('linea');
@@ -715,17 +720,6 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
       }}>holyholyholy.es</Text>
     )}
 
-    {/* La comilla solo sin frase destacada (con ella son dos elementos grandes
-        peleándose por la misma esquina) y solo si el texto NO está anclado
-        arriba, que es justo donde ella vive: se solaparían. */}
-    {!hasHook && anchor !== 'top' && (
-      <Text style={{
-        position: 'absolute', top: s(format.h > format.w ? 180 : 40), left: s(80),
-        fontSize: s(300), lineHeight: s(300), color: t.accent, opacity: usingPhoto ? 0.3 : 0.18,
-        fontFamily: verseFamily,
-      }}>“</Text>
-    )}
-
     {/* El bloque (versículo + línea + referencia) se desplaza en el
         formato de fondo de pantalla, para no quedar bajo los iconos. */}
     <View style={{
@@ -754,16 +748,40 @@ export default function VerseImageSheet({ verse, versionLabel, onClose }: Props)
         </Text>
       )}
 
-      <Text style={{
-        color: t.text, fontSize: verseSize, lineHeight, textAlign,
-        fontWeight: font.weight ?? '400', fontFamily: verseFamily,
-        // Mayúsculas + espaciado: el texto secundario de las referencias.
-        textTransform: upper ? 'uppercase' : undefined,
-        letterSpacing: bodyTracking || undefined,
-        ...sombra,
-      }}>
-        {pintarTokens(bodyItems, verseSize, font)}
-      </Text>
+      {/* Contenedor del cuerpo: mide lo mismo que el <Text>, y es la referencia
+          de la comilla, que va colgada del inicio de la primera línea y un poco
+          por encima (quoteOffset, espejo del canvas de la web). Va ANTES del
+          texto para quedar detrás. Solo sin frase destacada y sin anclar
+          arriba (se saldría por el borde). */}
+      <View>
+        {!hasHook && anchor !== 'top' && bodyItems.length > 0 && (() => {
+          const quoteSize = verseSize * QUOTE.size;
+          const q = quoteOffset(verseSize, lineHeight, quoteSize);
+          return (
+            <Text pointerEvents="none" style={{
+              position: 'absolute', top: q.top, left: firstLineX + q.left,
+              fontSize: quoteSize, lineHeight: quoteSize, color: t.accent,
+              opacity: usingPhoto ? 0.3 : 0.18, fontFamily: verseFamily,
+            }}>“</Text>
+          );
+        })()}
+        <Text
+          onTextLayout={(e) => {
+            const x = e.nativeEvent.lines[0]?.x ?? 0;
+            setFirstLineX((prev) => (Math.abs(prev - x) > 0.5 ? x : prev));
+          }}
+          style={{
+            color: t.text, fontSize: verseSize, lineHeight, textAlign,
+            fontWeight: font.weight ?? '400', fontFamily: verseFamily,
+            // Mayúsculas + espaciado: el texto secundario de las referencias.
+            textTransform: upper ? 'uppercase' : undefined,
+            letterSpacing: bodyTracking || undefined,
+            ...sombra,
+          }}
+        >
+          {pintarTokens(bodyItems, verseSize, font)}
+        </Text>
+      </View>
 
       {adorno}
 

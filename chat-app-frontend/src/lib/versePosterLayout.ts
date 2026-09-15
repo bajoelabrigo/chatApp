@@ -146,6 +146,18 @@ export const ANCHORS: { id: AnchorId; name: string }[] = [
 //
 // ESPEJO de `holy_app/frontend/src/lib/posterLayout.js` — al tocar un rango,
 // tocar los dos o la misma imagen saldrá distinta en cada cliente.
+// Comilla decorativa: sigue al versículo en vez de vivir clavada en una esquina.
+// Se apoya en el inicio de la primera línea del cuerpo, un poco por encima, y su
+// tamaño es proporcional al del cuerpo (al agrandar la letra ya no queda debajo).
+// ESPEJO de `QUOTE`/`quoteOffset` en `posterLayout.js` — valores idénticos.
+export const QUOTE = { size: 3.5, dx: -0.12, lift: 0.42 };
+export function quoteOffset(verseSize: number, lineHeight: number, quoteSize: number) {
+  return {
+    left: quoteSize * QUOTE.dx,
+    top: (lineHeight - verseSize) / 2 - quoteSize * QUOTE.lift,
+  };
+}
+
 export interface AdjustRange { min: number; max: number; def: number; step: number }
 export const SIZE_ADJ: AdjustRange = { min: 0.6, max: 1.7, def: 1, step: 0.05 };
 export const LINE_ADJ: AdjustRange = { min: 0.75, max: 1.7, def: 1, step: 0.05 };
