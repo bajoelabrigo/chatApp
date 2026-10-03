@@ -71,7 +71,7 @@ import { useSpeech } from '../../src/hooks/useSpeech';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseReference, formatReference } from '../../src/utils/bibleRef';
 import { highlightParts, fold } from '../../src/utils/textFold';
-import { HIGHLIGHT_PALETTE, meaningOf } from '../../src/utils/highlightPalette';
+import { HIGHLIGHT_PALETTE, meaningOf, inkOf, highlightBg } from '../../src/utils/highlightPalette';
 import type { BibleRef } from '../../src/utils/bibleRef';
 
 import {
@@ -2040,11 +2040,13 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
           const bg = isSelected
             ? colors.accent + '30'
             : hl
-            ? hl.color + 'AA'
+            ? highlightBg(hl.color, 'AA')
             : flashVerse === item.verse
             ? colors.accent + '1A'
             : 'transparent';
-          const textColor = hl ? '#1f2937' : colors.textPrimary;
+          // Elegido, el fondo es el tinte del acento (claro): ahí la letra blanca del
+          // azul y el rojo no se leería, así que vuelve la oscura.
+          const textColor = hl ? (isSelected ? '#1f2937' : inkOf(hl.color)) : colors.textPrimary;
           return (
             <TouchableOpacity
               onPress={() =>
@@ -2062,7 +2064,7 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
               }}
             >
               <View style={{ flex: 1, flexDirection: 'row' }}>
-                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 11, width: 20, marginTop: 2 }}>
+                <Text style={{ color: textColor === '#FFFFFF' ? textColor : colors.accent, fontWeight: '700', fontSize: 11, width: 20, marginTop: 2 }}>
                   {item.verse}
                 </Text>
                 <Text style={{ flex: 1, color: textColor, fontSize: fs, lineHeight: fs * 1.55 }}>
@@ -2119,10 +2121,14 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
           const isSpeaking = speech.currentId === item.verse;
           // El versículo al que se acaba de saltar (#7) parpadea unos segundos.
           const isFlash = flashVerse === item.verse;
+          // Letra sobre el resaltado: blanca en el azul y el rojo, salvo elegido
+          // (el fondo pasa a ser el tinte claro del acento).
+          const ink = hl ? (isSelected ? '#1f2937' : inkOf(hl.color)) : null;
+          const strongHl = !!ink && ink !== '#1f2937';
           const bg = isSelected
             ? colors.accent + '30'
             : hl
-            ? hl.color + 'AA'
+            ? highlightBg(hl.color, 'AA')
             : isSpeaking || isFlash
             ? colors.accent + '1A'
             : 'transparent';
@@ -2142,14 +2148,14 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
                 {isSelected ? (
                   <Ionicons name="checkmark-circle" size={16} color={colors.accent} />
                 ) : (
-                  <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 12 }}>
+                  <Text style={{ color: strongHl ? ink! : colors.accent, fontWeight: '700', fontSize: 12 }}>
                     {item.verse}
                   </Text>
                 )}
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{
-                  color: hl ? '#1f2937' : readText,
+                  color: ink ?? readText,
                   fontSize,
                   lineHeight: fontSize * 1.65,
                   fontFamily: readFontFamily,
@@ -2181,7 +2187,9 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
     const isSelected = selectedVerses.has(key);
     const hl = getHighlight(key);
     const annotation = getAnnotation(key);
-    const bg = isSelected ? colors.accent + '20' : hl ? hl.color + '60' : 'transparent';
+    const bg = isSelected ? colors.accent + '20' : hl ? highlightBg(hl.color, '60') : 'transparent';
+    // Sobre el azul y el rojo (opacos) la letra va blanca; con el resto, la de siempre.
+    const rowInk = hl && !isSelected && inkOf(hl.color) !== '#1f2937' ? inkOf(hl.color) : colors.textPrimary;
     return (
       <TouchableOpacity
         onPress={() => toggleVerse(item)}
@@ -2191,7 +2199,7 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
         <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '700', marginBottom: 3 }}>
           {item.book} {item.chapter}:{item.verse}
         </Text>
-        <Text style={{ color: colors.textPrimary, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6 }}>
+        <Text style={{ color: rowInk, fontSize: fontSize - 2, lineHeight: (fontSize - 2) * 1.6 }}>
           {highlightParts(item.text, query).map((part, i) =>
             part.hit ? (
               <Text key={i} style={{ backgroundColor: '#FEF08A', color: '#1f2937', fontWeight: '700' }}>

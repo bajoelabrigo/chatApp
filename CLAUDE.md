@@ -48,6 +48,7 @@ archivo indicado.
 | Política de popups de inicio | `dailyPopupService.ts` ↔ `popupPolicy.js` | `chat-app-backend/CLAUDE.md` |
 | Topes de tamaño de `/upload` (`MAX_MB`) | `uploadController.ts` ↔ `utils/chatFiles.js` | `chat-app-backend/CLAUDE.md` |
 | Extracción de enlaces de un post (`&nbsp;` de Quill) | `linkMeta.ts` ↔ `extraLinks.js` | `chat-app-backend/CLAUDE.md` |
+| Colores de resaltado (`HIGHLIGHT_PALETTE`, `inkOf`) — el azul y el rojo llevan letra BLANCA y en la app se pintan opacos (`highlightBg`) | `chat-app-frontend/src/utils/highlightPalette.ts` ↔ `holy_app/frontend/src/lib/highlightPalette.js` | los dos archivos |
 | Colores del nombre del remitente (`nameColor`) | `MessageBubble.tsx` ↔ `messages/Message.jsx` | `chat-app-frontend/CLAUDE.md` |
 
 ---

@@ -29,9 +29,10 @@ export interface VerseItem {
   text: string;
 }
 
-// Accesos rápidos de la barra de acciones: los 4 primeros de la paleta (los 6
-// con su significado están en el modal de resaltado).
-export const HIGHLIGHT_COLORS = HIGHLIGHT_PALETTE.slice(0, 4).map((c) => c.value);
+// Colores de la barra de acciones: la paleta entera (la fila se parte en dos
+// líneas si no cabe), para que el azul y el rojo estén a mano y no solo en el
+// modal de resaltado.
+export const HIGHLIGHT_COLORS = HIGHLIGHT_PALETTE.map((c) => c.value);
 
 export const SEARCH_HISTORY_KEY = 'bible_search_history';
 export const READING_THEME_KEY = 'bible_reading_theme';

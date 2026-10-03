@@ -195,7 +195,7 @@ export function VerseActionsSheet({
       >
         Resaltar
       </Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
         {highlightColors.map((color) => (
           <TouchableOpacity
             key={color}
