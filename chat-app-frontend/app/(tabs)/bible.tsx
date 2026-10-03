@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -100,6 +101,7 @@ import { GroupPlanCard } from '../../src/components/bible/GroupPlanCard';
 import { DownloadBanner } from '../../src/components/bible/DownloadBanner';
 import { VerseTagsModal } from '../../src/components/bible/VerseTagsModal';
 import { CrossRefsModal } from '../../src/components/bible/CrossRefsModal';
+import { CrossRefsPanel } from '../../src/components/bible/CrossRefsPanel';
 import type { CrossRef } from '../../src/services/bibleService';
 import { PrayerRequestModal } from '../../src/components/bible/PrayerRequestModal';
 import type { PrayerSubmission } from '../../src/components/bible/PrayerRequestModal';
@@ -119,6 +121,11 @@ import type { CustomPlanDraft } from '../../src/components/bible/CreatePlanModal
 
 export default function BibleScreen() {
   const insets = useSafeAreaInsets();
+  // Tablet o pantalla ancha: las referencias cruzadas van en panel lateral (el
+  // texto sigue visible al lado) y la vista paralela no encoge la letra.
+  const { width: screenWidth } = useWindowDimensions();
+  const isWide = screenWidth >= 720;
+  const xrefPanelWidth = Math.min(420, Math.round(screenWidth * 0.38));
   const { colors } = useTheme();
   const { token } = useAuthStore();
 
@@ -329,7 +336,9 @@ export default function BibleScreen() {
     // Con la nueva arquitectura el setter puede vaciar el state de forma síncrona
     // antes de que termine el handler: se captura el destino ANTES de cerrar.
     const target = { book: ref.book, chapter: ref.chapter, verse: ref.verse };
-    setXrefVerse(null);
+    // En el panel lateral se queda abierto: se salta de una referencia a otra
+    // con el capítulo a la vista. La hoja del teléfono tapa el texto: se cierra.
+    if (!isWide) setXrefVerse(null);
     setSelectedVerses(new Map());
     goToReference(target);
   };
@@ -2003,7 +2012,9 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
     const rightShort = VERSION_META[compareVersion!]?.short ?? compareVersion;
     // En dos columnas el texto es la mitad de ancho: baja un punto la letra para
     // que no queden líneas de dos palabras.
-    const fs = Math.max(MIN_FONT, fontSize - 1);
+    // En pantalla ancha cada columna ya tiene sitio: se queda la letra elegida.
+    const fs = isWide ? fontSize : Math.max(MIN_FONT, fontSize - 1);
+    const padH = isWide ? 20 : 12;
 
     if (!compareBook) {
       return (
@@ -2025,7 +2036,7 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
         stickyHeaderIndices={[0]}
         ListHeaderComponent={
           <View style={{
-            flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8,
+            flexDirection: 'row', paddingHorizontal: padH, paddingVertical: 8, gap: isWide ? 24 : 10,
             backgroundColor: colors.bgSecondary,
             borderBottomWidth: 1, borderBottomColor: colors.border,
           }}>
@@ -2058,7 +2069,7 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
                 setHighlightTarget({ book: selectedBook!, chapter: selectedChapter!, verse: item.verse, text: item.left })
               }
               style={{
-                flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8, gap: 10,
+                flexDirection: 'row', paddingHorizontal: padH, paddingVertical: isWide ? 10 : 8, gap: isWide ? 24 : 10,
                 backgroundColor: bg,
                 borderBottomWidth: 1, borderBottomColor: colors.borderLight,
               }}
@@ -3050,7 +3061,21 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
   return (
     <View style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
       {renderHeader()}
-      <View style={{ flex: 1 }}>{renderContent()}</View>
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+        <View style={{ flex: 1 }}>{renderContent()}</View>
+        {isWide && xrefVerse && token && (
+          <CrossRefsPanel
+            verse={xrefVerse}
+            token={token}
+            version={selectedVersion}
+            colors={colors}
+            width={xrefPanelWidth}
+            bottomInset={insets.bottom}
+            onClose={() => setXrefVerse(null)}
+            onOpenRef={openCrossRef}
+          />
+        )}
+      </View>
       {renderBookOrderBar()}
       {renderSpeechBar()}
       {renderChapterNav()}
@@ -3180,7 +3205,7 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
 
       {/* Referencias cruzadas. Se monta al abrirlo: el modal pide las referencias
           en su useEffect, y montado en vano dispararía peticiones sin verse. */}
-      {xrefVerse && token && (
+      {!isWide && xrefVerse && token && (
         <CrossRefsModal
           verse={xrefVerse}
           token={token}
