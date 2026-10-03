@@ -64,7 +64,7 @@ function buildReference(list: SelectedVerse[]): string {
 }
 
 const MIN_FONT = 13;
-const MAX_FONT = 26;
+const MAX_FONT = 30;
 
 // La RVR1960 se retiró por copyright (ver RETIRED_VERSIONS en bibleService).
 const VERSION_META: Record<string, { name: string; short: string; lang: string; remote?: boolean }> = {

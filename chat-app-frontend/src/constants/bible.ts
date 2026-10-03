@@ -43,7 +43,7 @@ export const SEPIA_BG = '#f4ecd8';
 export const SEPIA_TEXT = '#433422';
 
 export const MIN_FONT = 13;
-export const MAX_FONT = 26;
+export const MAX_FONT = 30; // igual que la web (ReadingMenuSheet.jsx)
 
 export const VERSION_META: Record<string, { name: string; short: string; lang: string; remote?: boolean }> = {
   RV1909:  { name: 'Reina Valera 1909',         short: 'RV 1909',  lang: 'es' },

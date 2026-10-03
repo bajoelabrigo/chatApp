@@ -409,7 +409,8 @@ export const useBibleStore = create<BibleStoreState>((set, get) => ({
   },
 
   setFontSize: async (n) => {
-    const clamped = Math.min(26, Math.max(13, n));
+    // Mismo rango que MIN_FONT/MAX_FONT de constants/bible.ts (13–30).
+    const clamped = Math.min(30, Math.max(13, n));
     set({ fontSize: clamped });
     await AsyncStorage.setItem(FONT_SIZE_KEY, String(clamped));
   },
