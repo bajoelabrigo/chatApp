@@ -31,6 +31,9 @@ interface Props {
    * dentro y solo al elegir uno se salta al pasaje (`onPickPassage`).
    */
   hideBar?: boolean;
+  /** Botón de versión al lado del libro, en la barra. */
+  versionLabel?: string;
+  onOpenVersions?: () => void;
   openRequest?: number;
   loadChapters?: (book: string) => Promise<string[]>;
   onPickPassage?: (book: string, chapter: string) => void;
@@ -46,6 +49,8 @@ export function BookChapterPicker({
   onPickBook,
   onPickChapter,
   hideBar,
+  versionLabel,
+  onOpenVersions,
   openRequest,
   loadChapters,
   onPickPassage,
@@ -132,19 +137,15 @@ export function BookChapterPicker({
           <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
         </TouchableOpacity>
 
-        {/* El capítulo no se puede elegir sin libro: el botón queda apagado. */}
-        <TouchableOpacity
-          onPress={() => selectedBook && chapters.length && setOpen('chapter')}
-          disabled={!selectedBook || !chapters.length}
-          style={{ ...btn, opacity: selectedBook && chapters.length ? 1 : 0.45, minWidth: 92 }}
-        >
-          <Text
-            style={{ color: selectedChapter ? colors.textPrimary : colors.textMuted, fontSize: 14, fontWeight: '600' }}
-          >
-            {selectedChapter ? `Cap. ${selectedChapter}` : 'Cap.'}
-          </Text>
-          <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
-        </TouchableOpacity>
+        {/* Al lado del libro, la versión: uno junto al otro, como en la web
+            (ExplorerControls.jsx). El capítulo se elige DENTRO de la hoja, al
+            tocar el libro (ya no hay botón "Cap." aparte). */}
+        {onOpenVersions && (
+          <TouchableOpacity onPress={onOpenVersions} style={btn}>
+            <Text style={{ color: colors.accent, fontSize: 14, fontWeight: '700' }}>{versionLabel}</Text>
+            <Ionicons name="chevron-down" size={14} color={colors.accent} />
+          </TouchableOpacity>
+        )}
       </View>
       )}
 

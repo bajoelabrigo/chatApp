@@ -1658,18 +1658,9 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
 
         <View style={{ flex: 1, alignItems: 'center' }}>
           {view === 'books' ? (
-            <TouchableOpacity
-              onPress={() => setVersionPickerOpen(true)}
-              style={{
-                flexDirection: 'row', alignItems: 'center', gap: 4,
-                paddingHorizontal: 14, paddingVertical: 7,
-                borderRadius: 18, backgroundColor: colors.bgTertiary,
-                borderWidth: 1, borderColor: colors.border,
-              }}
-            >
-              <Text style={{ color: colors.accent, fontSize: 15, fontWeight: '700' }}>{VERSION_META[selectedVersion]?.short ?? selectedVersion}</Text>
-              <Ionicons name="chevron-down" size={13} color={colors.accent} />
-            </TouchableOpacity>
+            // La versión ya no va aquí: está al lado del libro, justo debajo
+            // (BookChapterPicker), como en la web.
+            <Text style={{ fontSize: 17, fontWeight: '700', color: colors.textPrimary }}>Biblia</Text>
           ) : view === 'reading' ? (
             // Lector: "Libro N ▾" abre los libros y "RVA ▾" las versiones, como
             // en la web (FullScreenReader.jsx).
@@ -2022,6 +2013,10 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
         bottomInset={insets.bottom}
         onPickBook={selectBookInline}
         onPickChapter={selectChapter}
+        loadChapters={(book) => (token ? fetchChapters(token, book, selectedVersion) : Promise.resolve([]))}
+        onPickPassage={(book, chapter) => { setSelectedVerses(new Map()); goToReference({ book, chapter }); }}
+        versionLabel={VERSION_META[selectedVersion]?.short ?? selectedVersion}
+        onOpenVersions={() => setVersionPickerOpen(true)}
       />
 
       {loading && sortedBooks.length === 0 ? (
