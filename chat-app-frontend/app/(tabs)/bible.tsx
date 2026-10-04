@@ -1720,12 +1720,8 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
             </TouchableOpacity>
           )}
 
-          {/* Leer este capítulo EN VIVO con un grupo (si el usuario tiene grupos). */}
-          {view === 'reading' && myGroups.length > 0 && (
-            <TouchableOpacity onPress={() => setLiveReadPickerOpen(true)} style={iconBtn}>
-              <Ionicons name="people-outline" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
-          )}
+          {/* "Leer en grupo" va dentro del ⋯ (ReadingSettingsMenu), como en la
+              web: la cabecera iba apretada y el título se cortaba. */}
 
           {/* Vista paralela (#5): solo tiene sentido leyendo un capítulo. */}
           {view === 'reading' && (
@@ -3155,6 +3151,10 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
         dueCount={memorizeList.filter((m) => m.isDue).length}
         streak={streak}
         onOpenAppTheme={() => setAppThemeOpen(true)}
+        // Solo leyendo un capítulo y con algún grupo.
+        onReadInGroup={
+          view === 'reading' && myGroups.length > 0 ? () => setLiveReadPickerOpen(true) : undefined
+        }
         versionName={VERSION_META[selectedVersion]?.name ?? selectedVersion}
         versionShort={VERSION_META[selectedVersion]?.short ?? selectedVersion}
         onOpenVersions={() => setVersionPickerOpen(true)}

@@ -32,6 +32,8 @@ interface Props {
   streak: { current: number; longest: number; isTodayDone: boolean } | null;
   /** Claro / oscuro de toda la app (AppThemeSheet). */
   onOpenAppTheme: () => void;
+  /** Leer el capítulo en vivo con un grupo; undefined = no se muestra. */
+  onReadInGroup?: () => void;
   /** Versión activa: abre el mismo selector que la píldora de la cabecera. */
   versionName: string;
   versionShort: string;
@@ -64,6 +66,7 @@ export function ReadingSettingsMenu({
   dueCount,
   streak,
   onOpenAppTheme,
+  onReadInGroup,
   versionName,
   versionShort,
   onOpenVersions,
@@ -206,6 +209,18 @@ export function ReadingSettingsMenu({
             </View>
 
             <View style={{ height: 1, backgroundColor: colors.borderLight, marginHorizontal: 20, marginVertical: 12 }} />
+
+            {/* Solo leyendo un capítulo y con algún grupo (antes era un icono de
+                la cabecera; igual que en la web). */}
+            {onReadInGroup && (
+              <TouchableOpacity onPress={() => openAfterClose(onReadInGroup)} style={row}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="people" size={20} color={colors.accent} />
+                </View>
+                <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Leer este capítulo en grupo</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity onPress={() => { onClose(); onOpenFavorites(); }} style={row}>
               <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#FBBF2422', alignItems: 'center', justifyContent: 'center' }}>
