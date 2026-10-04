@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, TextInput, FlatList } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, Modal, Pressable, ScrollView, TextInput, FlatList, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { fold } from '../../utils/textFold';
 
@@ -24,6 +24,16 @@ interface Props {
   bottomInset: number;
   onPickBook: (book: string) => void;
   onPickChapter: (chapter: string) => void;
+  /**
+   * Modo CABECERA del lector (tocar "Juan 3 ▾", como en la web): sin la barra,
+   * la hoja se abre cada vez que cambia `openRequest` y elegir libro NO toca el
+   * capítulo que se está leyendo — los capítulos del libro nuevo se cargan aquí
+   * dentro y solo al elegir uno se salta al pasaje (`onPickPassage`).
+   */
+  hideBar?: boolean;
+  openRequest?: number;
+  loadChapters?: (book: string) => Promise<string[]>;
+  onPickPassage?: (book: string, chapter: string) => void;
 }
 
 export function BookChapterPicker({
@@ -35,9 +45,48 @@ export function BookChapterPicker({
   bottomInset,
   onPickBook,
   onPickChapter,
+  hideBar,
+  openRequest,
+  loadChapters,
+  onPickPassage,
 }: Props) {
   const [open, setOpen] = useState<'book' | 'chapter' | null>(null);
   const [query, setQuery] = useState('');
+
+  // Modo cabecera: libro elegido en la hoja y sus capítulos (null = cargando).
+  const headerMode = !!onPickPassage && !!loadChapters;
+  const [pendingBook, setPendingBook] = useState<string | null>(null);
+  const [pendingChapters, setPendingChapters] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (!openRequest) return;
+    setQuery('');
+    setPendingBook(null);
+    setOpen('book');
+  }, [openRequest]);
+
+  const shownBook = headerMode && pendingBook ? pendingBook : selectedBook;
+  const shownChapters = headerMode && pendingBook ? pendingChapters ?? [] : chapters;
+
+  const pickBook = (book: string) => {
+    if (!headerMode) {
+      setOpen(null);
+      onPickBook(book);
+      return;
+    }
+    setPendingBook(book);
+    setPendingChapters(null);
+    setOpen('chapter');
+    loadChapters!(book)
+      .then((chs) => setPendingChapters(chs))
+      .catch(() => setPendingChapters([]));
+  };
+
+  const pickChapter = (ch: string) => {
+    setOpen(null);
+    if (headerMode && pendingBook) onPickPassage!(pendingBook, ch);
+    else onPickChapter(ch);
+  };
 
   // Buscar sin tildes: escribir "genesis" tiene que encontrar "Génesis".
   const q = fold(query.trim());
@@ -57,6 +106,7 @@ export function BookChapterPicker({
 
   return (
     <>
+      {!hideBar && (
       <View
         style={{
           flexDirection: 'row',
@@ -96,6 +146,7 @@ export function BookChapterPicker({
           <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
+      )}
 
       <Modal visible={!!open} transparent animationType="slide" onRequestClose={() => setOpen(null)}>
         <Pressable
@@ -146,10 +197,7 @@ export function BookChapterPicker({
                   keyboardShouldPersistTaps="handled"
                   renderItem={({ item }) => (
                     <TouchableOpacity
-                      onPress={() => {
-                        setOpen(null);
-                        onPickBook(item);
-                      }}
+                      onPress={() => pickBook(item)}
                       style={{
                         flexDirection: 'row', alignItems: 'center',
                         paddingHorizontal: 20, paddingVertical: 14,
@@ -179,27 +227,37 @@ export function BookChapterPicker({
               </>
             )}
 
+            {open === 'chapter' && headerMode && pendingBook && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, gap: 4 }}>
+                <TouchableOpacity onPress={() => setOpen('book')} style={{ padding: 6 }}>
+                  <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+                </TouchableOpacity>
+                <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700' }}>{pendingBook}</Text>
+              </View>
+            )}
+
+            {open === 'chapter' && headerMode && pendingBook && pendingChapters === null && (
+              <ActivityIndicator color={colors.accent} style={{ padding: 32 }} />
+            )}
+
             {open === 'chapter' && (
               <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap', padding: 16, gap: 8 }}>
-                {chapters.map((ch) => (
+                {shownChapters.map((ch) => (
                   <TouchableOpacity
                     key={ch}
-                    onPress={() => {
-                      setOpen(null);
-                      onPickChapter(ch);
-                    }}
+                    onPress={() => pickChapter(ch)}
                     style={{
                       width: 56, height: 56, borderRadius: 12,
                       alignItems: 'center', justifyContent: 'center',
-                      backgroundColor: selectedChapter === ch ? colors.accent : colors.bgTertiary,
+                      backgroundColor: shownBook === selectedBook && selectedChapter === ch ? colors.accent : colors.bgTertiary,
                       borderWidth: 1,
-                      borderColor: selectedChapter === ch ? colors.accent : colors.border,
+                      borderColor: shownBook === selectedBook && selectedChapter === ch ? colors.accent : colors.border,
                     }}
                   >
                     <Text
                       style={{
                         fontSize: 16, fontWeight: '600',
-                        color: selectedChapter === ch ? '#fff' : colors.textPrimary,
+                        color: shownBook === selectedBook && selectedChapter === ch ? '#fff' : colors.textPrimary,
                       }}
                     >
                       {ch}

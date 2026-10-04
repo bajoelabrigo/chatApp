@@ -49,6 +49,7 @@ archivo indicado.
 | Topes de tamaño de `/upload` (`MAX_MB`) | `uploadController.ts` ↔ `utils/chatFiles.js` | `chat-app-backend/CLAUDE.md` |
 | Extracción de enlaces de un post (`&nbsp;` de Quill) | `linkMeta.ts` ↔ `extraLinks.js` | `chat-app-backend/CLAUDE.md` |
 | Colores de resaltado (`HIGHLIGHT_PALETTE`, `inkOf`) — el azul y el rojo llevan letra BLANCA y en la app se pintan opacos (`highlightBg`) | `chat-app-frontend/src/utils/highlightPalette.ts` ↔ `holy_app/frontend/src/lib/highlightPalette.js` | los dos archivos |
+| Menú ⋯ de la Biblia (mismos botones y orden: letra, lectura, favoritos, notas, planes, temas, memorizar, colores de la pantalla, versión + sin conexión) y cabecera del lector ("Libro N ▾" + píldora "RVA ▾"; cambiar de versión ahí NO saca del capítulo, el libro se traduce por posición canónica) — **hay test que compara las etiquetas** (`scripts/bibleMenu.test.mjs`). En la app "Colores" es solo claro/oscuro (no hay temas daisyUI) | `ReadingSettingsMenu.tsx` + `AppThemeSheet.tsx` + `bible.tsx` ↔ `ReadingMenuSheet.jsx` + `FullScreenReader.jsx` + `BibleDetail.jsx` | los archivos |
 | Colores del nombre del remitente (`nameColor`) | `MessageBubble.tsx` ↔ `messages/Message.jsx` | `chat-app-frontend/CLAUDE.md` |
 
 ---

@@ -1,10 +1,15 @@
-import { View, Text, TouchableOpacity, Modal, Pressable, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, Pressable, Platform, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { MIN_FONT, MAX_FONT } from '../../constants/bible';
 import type { ReadingTheme, ReadingFont } from '../../constants/bible';
 
 // Menú de los tres puntos: ajustes de lectura (tamaño de letra, tema sepia y
-// serifa) y accesos a favoritos, notas y planes.
+// serifa), accesos a favoritos, notas, planes, temas, memorizar y colores de la
+// pantalla, la racha, y al final la versión y la Biblia sin conexión.
+//
+// ESPEJO de `holy_app/frontend/src/components/bible/ReadingMenuSheet.jsx`: las
+// dos copias llevan los MISMOS botones en el mismo orden. Al añadir uno aquí,
+// añadirlo también allí.
 interface Props {
   visible: boolean;
   fontSize: number;
@@ -25,6 +30,19 @@ interface Props {
   dueCount: number;
   /** Racha de lectura; null mientras carga o sin sesión. */
   streak: { current: number; longest: number; isTodayDone: boolean } | null;
+  /** Claro / oscuro de toda la app (AppThemeSheet). */
+  onOpenAppTheme: () => void;
+  /** Versión activa: abre el mismo selector que la píldora de la cabecera. */
+  versionName: string;
+  versionShort: string;
+  onOpenVersions: () => void;
+  /** Biblia sin conexión de la versión activa. */
+  isRemote: boolean;
+  isDownloaded: boolean;
+  isDownloading: boolean;
+  downloadProgress: number;
+  onToggleDownload: () => void;
+  onCancelDownload: () => void;
 }
 
 export function ReadingSettingsMenu({
@@ -45,7 +63,26 @@ export function ReadingSettingsMenu({
   onOpenTopics,
   dueCount,
   streak,
+  onOpenAppTheme,
+  versionName,
+  versionShort,
+  onOpenVersions,
+  isRemote,
+  isDownloaded,
+  isDownloading,
+  downloadProgress,
+  onToggleDownload,
+  onCancelDownload,
 }: Props) {
+  // Abrir OTRA hoja (versiones, colores) mientras esta se cierra: en iOS dos
+  // Modal a la vez se pisan y el segundo no llega a mostrarse. Se espera a que
+  // termine la animación de cierre.
+  const { height: winHeight } = useWindowDimensions();
+  const openAfterClose = (fn: () => void) => {
+    onClose();
+    setTimeout(fn, Platform.OS === 'ios' ? 350 : 0);
+  };
+
   const row = {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -75,7 +112,9 @@ export function ReadingSettingsMenu({
             backgroundColor: colors.bgSecondary,
             borderTopLeftRadius: 22, borderTopRightRadius: 22,
             paddingBottom: bottomInset + 16,
+            maxHeight: winHeight * 0.9,
           }}>
+            <ScrollView bounces={false}>
             <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginTop: 12, marginBottom: 16 }} />
 
             {/* Tamaño de letra */}
@@ -220,6 +259,16 @@ export function ReadingSettingsMenu({
               <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </TouchableOpacity>
 
+            {/* Claro / oscuro de toda la app, sin ir a Ajustes. No se llama
+                "Temas" porque ese nombre ya es el de los pasajes por ocasión. */}
+            <TouchableOpacity onPress={() => openAfterClose(onOpenAppTheme)} style={row}>
+              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.accent + '22', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="color-palette" size={20} color={colors.accent} />
+              </View>
+              <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 }}>Colores de la pantalla</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+
             {/* Racha de lectura: días seguidos leyendo. Solo se muestra si hay
                 algo que celebrar — un "0 días" no motiva a nadie. */}
             {streak && streak.current > 0 && (
@@ -250,12 +299,68 @@ export function ReadingSettingsMenu({
               </View>
             )}
 
+            {/* Versión y Biblia sin conexión: la versión abre la MISMA hoja que
+                la píldora de la cabecera. */}
+            <View style={{ paddingHorizontal: 20, marginTop: 12 }}>
+              <Text style={{ color: colors.textMuted, fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 12 }}>
+                Versión
+              </Text>
+              <TouchableOpacity
+                onPress={() => openAfterClose(onOpenVersions)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12,
+                  paddingHorizontal: 16, paddingVertical: 12, borderRadius: 14,
+                  backgroundColor: colors.bgTertiary, borderWidth: 1, borderColor: colors.border,
+                }}
+              >
+                <Ionicons name="book-outline" size={18} color={colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text numberOfLines={1} style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{versionName}</Text>
+                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>{versionShort}</Text>
+                </View>
+                <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              {isRemote ? (
+                <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 10 }}>
+                  ☁️ Esta versión solo se puede leer en línea
+                </Text>
+              ) : (
+                <TouchableOpacity
+                  onPress={isDownloading ? onCancelDownload : onToggleDownload}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    marginTop: 8, paddingVertical: 12, borderRadius: 14, borderWidth: 1,
+                    borderColor: isDownloaded ? '#22c55e' : colors.border,
+                  }}
+                >
+                  {isDownloading ? (
+                    <ActivityIndicator size="small" color={colors.accent} />
+                  ) : (
+                    <Ionicons
+                      name={isDownloaded ? 'checkmark-circle' : 'cloud-download-outline'}
+                      size={17}
+                      color={isDownloaded ? '#22c55e' : colors.textPrimary}
+                    />
+                  )}
+                  <Text style={{ color: isDownloaded ? '#22c55e' : colors.textPrimary, fontSize: 14, fontWeight: '600' }}>
+                    {isDownloading
+                      ? `Guardando… ${Math.round(downloadProgress * 100)}% · Cancelar`
+                      : isDownloaded
+                      ? 'Disponible sin conexión'
+                      : 'Descargar para leer sin conexión'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <TouchableOpacity
               onPress={onClose}
-              style={{ marginHorizontal: 20, marginTop: 4, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
+              style={{ marginHorizontal: 20, marginTop: 16, paddingVertical: 14, borderRadius: 14, backgroundColor: colors.inputBg, alignItems: 'center' }}
             >
               <Text style={{ color: colors.textPrimary, fontWeight: '600', fontSize: 15 }}>Cerrar</Text>
             </TouchableOpacity>
+            </ScrollView>
           </View>
         </Pressable>
       </Pressable>

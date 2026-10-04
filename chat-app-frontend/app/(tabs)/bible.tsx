@@ -116,6 +116,7 @@ import { SendToChatModal } from '../../src/components/bible/SendToChatModal';
 import { getSocket } from '../../src/services/socketService';
 import type { SharedBible, Conversation } from '../../src/services/conversationService';
 import { BookChapterPicker } from '../../src/components/bible/BookChapterPicker';
+import { AppThemeSheet } from '../../src/components/bible/AppThemeSheet';
 import { CreatePlanModal } from '../../src/components/bible/CreatePlanModal';
 import type { CustomPlanDraft } from '../../src/components/bible/CreatePlanModal';
 
@@ -202,6 +203,10 @@ export default function BibleScreen() {
 
   // Dots menu
   const [dotsMenuOpen, setDotsMenuOpen] = useState(false);
+  const [appThemeOpen, setAppThemeOpen] = useState(false);
+  // Tocar "Libro N ▾" en la cabecera del lector abre la hoja de libros (cada
+  // toque sube el contador; BookChapterPicker en modo cabecera lo escucha).
+  const [bookSheetRequest, setBookSheetRequest] = useState(0);
 
   // Planes de lectura (#2)
   const [myPlans, setMyPlans] = useState<any[]>([]);
@@ -1530,10 +1535,38 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
 
   const handleSelectVersion = async (version: string) => {
     if (version === selectedVersion) { setVersionPickerOpen(false); return; }
+    // Leyendo un capítulo (píldora junto al título) se sigue en el MISMO pasaje
+    // con la versión nueva, como en la web. El libro se traduce por posición
+    // canónica ("Génesis" → "Genesis" en KJV). Se calcula ANTES de cambiar.
+    const keep =
+      view === 'reading' && selectedBook && selectedChapter
+        ? { book: mapBookToVersion(selectedBook, selectedVersion, version), chapter: selectedChapter }
+        : null;
     await setSelectedVersion(version);
     setVersionPickerOpen(false);
     // No tiene sentido comparar una versión consigo misma.
     if (version === compareVersion) setCompareVersion(null);
+    if (keep?.book && token) {
+      setLoading(true);
+      try {
+        const chs = await fetchChapters(token, keep.book, version);
+        const chapter = chs.includes(keep.chapter) ? keep.chapter : chs[chs.length - 1];
+        const vs = await fetchVerses(token, keep.book, chapter, version);
+        setBooks([]);
+        doLoadBooks(version);
+        setSelectedBook(keep.book);
+        setChapters(chs);
+        setSelectedChapter(chapter);
+        setSelectedVerses(new Map());
+        setVerses(vs);
+        setLastRead({ version, book: keep.book, chapter });
+        return;
+      } catch {
+        // Sin conexión y sin descargar, o el libro no existe: a la portada.
+      } finally {
+        setLoading(false);
+      }
+    }
     // Reset navigation to books list with new version
     setView('books');
     setSelectedBook(null);
@@ -1637,6 +1670,32 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
               <Text style={{ color: colors.accent, fontSize: 15, fontWeight: '700' }}>{VERSION_META[selectedVersion]?.short ?? selectedVersion}</Text>
               <Ionicons name="chevron-down" size={13} color={colors.accent} />
             </TouchableOpacity>
+          ) : view === 'reading' ? (
+            // Lector: "Libro N ▾" abre los libros y "RVA ▾" las versiones, como
+            // en la web (FullScreenReader.jsx).
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '100%' }}>
+              <TouchableOpacity
+                onPress={() => setBookSheetRequest((n) => n + 1)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 3, flexShrink: 1, paddingHorizontal: 4, paddingVertical: 4 }}
+              >
+                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.textPrimary, flexShrink: 1 }} numberOfLines={1}>
+                  {title}
+                </Text>
+                <Ionicons name="chevron-down" size={15} color={colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setVersionPickerOpen(true)}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 2,
+                  paddingHorizontal: 9, paddingVertical: 4,
+                  borderRadius: 14, backgroundColor: colors.bgTertiary,
+                  borderWidth: 1, borderColor: colors.border,
+                }}
+              >
+                <Text style={{ color: colors.accent, fontSize: 13, fontWeight: '700' }}>{vShort}</Text>
+                <Ionicons name="chevron-down" size={12} color={colors.accent} />
+              </TouchableOpacity>
+            </View>
           ) : (
             <Text style={{ fontSize: 17, fontWeight: '700', color: colors.textPrimary }} numberOfLines={1}>
               {title}
@@ -3100,7 +3159,47 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
         onOpenTopics={openTopics}
         dueCount={memorizeList.filter((m) => m.isDue).length}
         streak={streak}
+        onOpenAppTheme={() => setAppThemeOpen(true)}
+        versionName={VERSION_META[selectedVersion]?.name ?? selectedVersion}
+        versionShort={VERSION_META[selectedVersion]?.short ?? selectedVersion}
+        onOpenVersions={() => setVersionPickerOpen(true)}
+        isRemote={!!VERSION_META[selectedVersion]?.remote}
+        isDownloaded={downloadedVersions.has(selectedVersion)}
+        isDownloading={downloadingVersion === selectedVersion}
+        downloadProgress={downloadProgress}
+        onToggleDownload={() => {
+          if (!downloadedVersions.has(selectedVersion)) { handleDownload(selectedVersion); return; }
+          Alert.alert('Quitar la Biblia descargada', '¿Quitar esta versión del teléfono? Podrás volver a descargarla.', [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Quitar', style: 'destructive', onPress: () => handleDeleteDownload(selectedVersion) },
+          ]);
+        }}
+        onCancelDownload={handleCancelDownload}
       />
+
+      <AppThemeSheet
+        visible={appThemeOpen}
+        bottomInset={insets.bottom}
+        onClose={() => setAppThemeOpen(false)}
+      />
+
+      {/* Hoja de libros de la cabecera del lector ("Libro N ▾"). */}
+      {view === 'reading' && (
+        <BookChapterPicker
+          hideBar
+          openRequest={bookSheetRequest}
+          books={sortedBooks}
+          chapters={chapters}
+          selectedBook={selectedBook}
+          selectedChapter={selectedChapter}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onPickBook={() => {}}
+          onPickChapter={() => {}}
+          loadChapters={(book) => (token ? fetchChapters(token, book, selectedVersion) : Promise.resolve([]))}
+          onPickPassage={(book, chapter) => { setSelectedVerses(new Map()); goToReference({ book, chapter }); }}
+        />
+      )}
 
       <VersionPickerModal
         visible={versionPickerOpen}
