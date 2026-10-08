@@ -28,6 +28,10 @@ export interface IOffering extends Document {
   voidReason?: string;
   voidedAt?: Date;
   voidedBy?: Types.ObjectId;
+  // Ofrendas que el admin confirmó que NO son el mismo pago que esta, aunque
+  // coincidan persona, importe y fecha (alguien que ofrenda $20 dos días
+  // seguidos). Se guarda en los DOS lados y solo calla el aviso de ese par.
+  notDuplicateOf?: Types.ObjectId[];
   // Origen del registro: PayPal (flujo automático) o manual (lo anotó un admin
   // por un pago recibido fuera de la app: transferencia, efectivo, Zelle…).
   source?: 'paypal' | 'manual';
@@ -60,6 +64,7 @@ const OfferingSchema = new Schema<IOffering>(
     voidReason:            { type: String },
     voidedAt:              { type: Date },
     voidedBy:              { type: Schema.Types.ObjectId, ref: 'User' },
+    notDuplicateOf:        [{ type: Schema.Types.ObjectId }],
     source:                { type: String, enum: ['paypal', 'manual'], default: 'paypal' },
     method:                { type: String },
     note:                  { type: String },

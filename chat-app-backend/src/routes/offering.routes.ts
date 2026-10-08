@@ -17,6 +17,7 @@ import {
   listAdminOfferings,
   deleteManualOffering,
   voidOffering,
+  markNotDuplicate,
   purgeOffering,
   searchPaypalOfferingCandidates,
 } from '../controllers/offeringController';
@@ -46,6 +47,7 @@ router.post('/admin/manual', createManualOffering);
 router.put('/admin/:id', updateManualOffering);
 router.get('/admin', listAdminOfferings);
 router.post('/admin/:id/void', voidOffering);
+router.post('/admin/:id/not-duplicate', markNotDuplicate);
 // Legado: ya no borra, anula (ver el controlador).
 // Antes que la genérica: '/admin/:id/hard' con :id = 'x' no debe caer en la de
 // abajo. Borra de verdad; la de abajo anula.

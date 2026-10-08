@@ -548,6 +548,41 @@ export async function voidOffering(req: Request, res: Response) {
   }
 }
 
+// POST /offerings/admin/:id/not-duplicate — Body: { otherId, undo? }.
+//
+// El panel avisa cuando dos ofrendas son de la misma persona, mismo importe y
+// fechas cercanas (`findOfferingDuplicate` en la web). A veces SON dos ofrendas
+// de verdad (alguien da $20 dos días seguidos) y el aviso no tenía forma de
+// callarse. Se guarda el par en los DOS documentos: así basta mirar cualquiera
+// de los dos, y un tercer pago igual que llegue después SÍ vuelve a avisar.
+export async function markNotDuplicate(req: Request, res: Response) {
+  try {
+    const requesterId = (req as any).userId;
+    if (!(await isGlobalAdmin(requesterId))) {
+      return res.status(403).json({ error: 'Solo el admin general' });
+    }
+    const { id } = req.params;
+    const otherId = String(req.body?.otherId || '');
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(otherId) || id === otherId) {
+      return res.status(400).json({ error: 'Ofrendas no válidas' });
+    }
+    const a = new Types.ObjectId(id);
+    const b = new Types.ObjectId(otherId);
+    const op = req.body?.undo ? '$pull' : '$addToSet';
+    const [ra, rb] = await Promise.all([
+      Offering.updateOne({ _id: a }, { [op]: { notDuplicateOf: b } }),
+      Offering.updateOne({ _id: b }, { [op]: { notDuplicateOf: a } }),
+    ]);
+    if (!ra.matchedCount || !rb.matchedCount) {
+      return res.status(404).json({ error: 'No encontrada' });
+    }
+    res.json({ message: req.body?.undo ? 'Aviso restaurado' : 'Marcadas como ofrendas distintas' });
+  } catch (err) {
+    console.error('markNotDuplicate:', err);
+    res.status(500).json({ error: 'Error guardando la marca' });
+  }
+}
+
 // DELETE /offerings/admin/:id/hard — BORRA de verdad, sin dejar rastro.
 //
 // Lo normal es anular (queda tachado con su motivo y deja de sumar): un ingreso
