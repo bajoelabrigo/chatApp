@@ -643,10 +643,11 @@ export default function BibleScreen() {
   }, [token, compareVersion, selectedBook, selectedChapter, selectedVersion]);
 
   // ─── Lectura en voz alta (#6) ─────────────────────────────
-  // Lo que se lee: el capítulo entero, versículo a versículo, anteponiendo el
-  // número ("1. En el principio…") para no perderse al escuchar.
+  // Lo que se lee: el capítulo entero, versículo a versículo, SIN decir el
+  // número (sonaba a lista, no a lectura). Dónde se va lo marca el resaltado
+  // del versículo que suena y la barra ("Versículo N").
   const speechItems = useMemo(
-    () => verses.map((v) => ({ id: v.verse, text: `${v.verse}. ${v.text}` })),
+    () => verses.map((v) => ({ id: v.verse, text: v.text })),
     [verses]
   );
 
