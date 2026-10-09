@@ -201,6 +201,27 @@ ve como un error sino como contenido que no existe.
 
 La versión web usa la Web Speech API del navegador, sin dependencias.
 
+**Elegir la voz (2026-10-09)** — los usuarios decían que sonaba "demasiado robótica":
+sin `voice`, expo-speech usa la voz por defecto del idioma, que es la más básica
+(y la web cogía la PRIMERA del idioma: en Windows, Helena/Sabina de escritorio).
+- `src/lib/voiceRank.ts` (app) y `holy_app/frontend/src/lib/voiceRank.js` (web)
+  puntúan las voces **por el identificador/nombre** (`quality` no sirve: en
+  Android casi todas salen `Enhanced`): iOS premium > enhanced > compact >
+  eloquence; Android `-local` antes que `-network` (la de red pide datos en cada
+  versículo); web "Natural" (Edge) > "Google" > el resto. Más la región del
+  teléfono. **No son espejo línea a línea**: las voces se llaman distinto.
+- "Automática" es la de serie; la elección manual se guarda por idioma
+  (`bible_speech_voice`, AsyncStorage/localStorage). Botón **Voz** en la barra de
+  reproducción → `VoicePickerSheet.tsx` / `VoiceSheet.jsx`. Elegir una mientras
+  suena repite el versículo actual con ella.
+- Si la voz elegida falla (red sin conexión, desinstalada) se repite ese
+  versículo con la de por defecto, no se salta.
+- Antes, los idiomas que no eran `en` se leían con locale `es-ES` (una Biblia en
+  francés con voz española); ahora se usa el idioma de la versión.
+- Solo JS: llega por `eas update`. Lo que más mejora el sonido sigue siendo que el
+  usuario **descargue** una voz buena en el sistema; la hoja lo explica y abre los
+  ajustes de texto a voz.
+
 ---
 
 ## Screenshot-to-Code Protocol (UI/UX Cloning)

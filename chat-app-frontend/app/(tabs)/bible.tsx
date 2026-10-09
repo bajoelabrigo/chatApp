@@ -107,6 +107,7 @@ import { PrayerRequestModal } from '../../src/components/bible/PrayerRequestModa
 import type { PrayerSubmission } from '../../src/components/bible/PrayerRequestModal';
 import { ReadingSettingsMenu } from '../../src/components/bible/ReadingSettingsMenu';
 import { VersionPickerModal, ComparePickerModal } from '../../src/components/bible/VersionPickerModal';
+import { VoicePickerSheet } from '../../src/components/bible/VoicePickerSheet';
 import { ReadingPlansView } from '../../src/components/bible/ReadingPlansView';
 import { GroupPlanPickerModal } from '../../src/components/bible/GroupPlanPickerModal';
 import { MemorizeView } from '../../src/components/bible/MemorizeView';
@@ -187,6 +188,7 @@ export default function BibleScreen() {
   // Lectura en voz alta (#6). `available` es false en los APKs que aún no traen
   // el módulo nativo expo-speech → allí no se muestra el botón (ver useSpeech).
   const speech = useSpeech();
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
 
   // Vista paralela (#5): segunda versión en la columna derecha (null = apagada)
   const [compareVersion, setCompareVersion] = useState<string | null>(null);
@@ -3086,6 +3088,20 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
           )}
         </View>
 
+        {/* Voz: la de serie del teléfono suele ser la más robótica. */}
+        <TouchableOpacity
+          onPress={() => setVoicePickerOpen(true)}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16,
+            backgroundColor: colors.bgTertiary,
+            borderWidth: 1, borderColor: colors.border,
+          }}
+        >
+          <Ionicons name="mic-outline" size={14} color={colors.textPrimary} />
+          <Text style={{ color: colors.textPrimary, fontWeight: '700', fontSize: 12 }}>Voz</Text>
+        </TouchableOpacity>
+
         {/* Velocidad: se cicla entre los 4 valores para no meter otro modal. */}
         <TouchableOpacity
           onPress={() => {
@@ -3128,6 +3144,17 @@ ${WEB_URL}/bible?topic=${encodeURIComponent(topic.key)}`,
       </View>
       {renderBookOrderBar()}
       {renderSpeechBar()}
+      {voicePickerOpen && (
+        <VoicePickerSheet
+          visible
+          voices={speech.voices}
+          voicePref={speech.voicePref}
+          colors={colors}
+          bottomInset={insets.bottom}
+          onSelect={(id) => speech.changeVoice(speech.lang, id)}
+          onClose={() => setVoicePickerOpen(false)}
+        />
+      )}
       {renderChapterNav()}
       {renderActionSheet()}
       {renderHighlightPicker()}
